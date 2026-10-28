@@ -3,6 +3,12 @@
 Base : ScalpX v4.5 (dossier `ScalpX\files`). Les originaux ne sont **pas modifiés** : la v5 est dans `ScalpX\v5_archi`.
 Les numéros de ligne sont ceux des fichiers v5.
 
+## Versions
+| Version | Date | Changement |
+|---|---|---|
+| 5.3.1 | 2026-10-28 | Liste PRESETS : noms des presets ajoutés au texte (« • nom »), pour les boutons du bot. Affichage seulement, aucun changement de trading. |
+| 5.3.0 | 2026-10-28 | Volume et pause news activés par défaut (`NewsPauseEnabledAtStart`), versions à 3 niveaux. |
+
 ## 0. Ce qui n'a PAS changé (vérifié)
 - `SX_Trade.mqh`, `SX_Filters.mqh`, `SX_Chart.mqh`, `SX_FilterBoard.mqh` : **identiques octet pour octet** à la v4.5.
 - Aucune modification de : signal, filtres, lots, grille, TP, `CloseAllFast`, `ManageTP`, `GoalTick`, `FinishGoal` (logique), money management.

@@ -26,6 +26,7 @@ class Dashboard:
         self.ctx, self.sender, self.chat_id, self.conf = ctx, sender, chat_id, confirmations
         self.vps = vps
         self.params = ParamsUI(ctx)
+        self.presets: dict[str, list[str]] = {}             # noms des presets de l'EA, par compte
         self.screen: tuple = ("dash",)
         self.confirm_back: tuple = ("dash",)
         self.flt, self.sort, self.page = "all", "nom", 0
@@ -93,6 +94,8 @@ class Dashboard:
             self.screen = ("dash",)
         if kind == "cmds":
             return self._render_cmds(self.screen[1])
+        if kind == "pst":
+            return self._render_presets(self.screen[1])
         if kind == "sys":
             from core import update as upd
             from .system import BOT_ROOT, system_kb, system_text
@@ -143,6 +146,7 @@ class Dashboard:
             nav = [("◀", f"d:p:{self.page - 1}"), (f"{self.page + 1}/{pages}", "d:r"), ("▶", f"d:p:{self.page + 1}")]
         kb.append(nav + [("🔃", "d:r")] if nav else [("🔃 Actualiser", "d:r")])
         kb.append([("➕ Nouveau compte", "n")])
+        kb.append([("⏸ Tout en pause", "d:pall"), ("▶ Tout reprendre", "d:rall")])
         kb.extend(tools)
         kb.append([("🚀 Déployer l'EA", "d:dep"), ("📝 Rapport", "d:rep")])
         kb.append([("📤 Export", "d:exp"), ("🔕 Silencieux", "d:sil"), ("🏓 Ping", "d:png")])
@@ -173,9 +177,25 @@ class Dashboard:
         kb: Keyboard = []
         for i in range(0, len(CARD_CMDS), 3):
             kb.append([(lbl, f"c:{c}:{i + j}") for j, (lbl, _) in enumerate(CARD_CMDS[i:i + 3])])
+        kb.append([("🏖 Vacances : activer", f"e:{c}:von"), ("🏠 Vacances : quitter", f"e:{c}:voff")])
+        kb.append([("💾 Presets", f"e:{c}:ps"), ("✅ Valider les réglages", f"e:{c}:val")])
+        kb.append([("🎯 Annuler l'objectif", f"e:{c}:gx"), ("🛑 Tout fermer", f"e:{c}:fx")])
         kb.append([("⬅ Fiche", f"a:{c}")])
         fl = self._flash_text()
         return (f"🧰 <b>Commandes EA — {render.esc(inst.label if inst else iid)}</b>" + (f"\n\n{fl}" if fl else "")), kb
+
+    def _render_presets(self, iid: str) -> tuple[str, Keyboard]:
+        inst = self.ctx.db.get(iid)
+        c = short(iid)
+        names = self.presets.get(iid)
+        kb: Keyboard = [[(f"📥 {n}", f"e:{c}:pl:{i}"), ("🗑", f"e:{c}:pd:{i}")] for i, n in enumerate(names or [])]
+        kb.append([("💾 Enregistrer sous…", f"e:{c}:pn"), ("♻️ Valeurs par défaut", f"e:{c}:rs")])
+        kb.append([("🔃 Relire", f"e:{c}:ps"), ("⬅ Commandes", f"a:{c}:cmds")])
+        body = ("<i>lecture…</i>" if names is None else
+                "Aucun preset enregistré." if not names else
+                "📥 charge les réglages enregistrés (à valider ensuite) · 🗑 supprime.")
+        fl = self._flash_text()
+        return (f"💾 <b>Presets — {render.esc(inst.label if inst else iid)}</b>\n{body}" + (f"\n\n{fl}" if fl else "")), kb
 
     # ---- envoi / édition
     @staticmethod

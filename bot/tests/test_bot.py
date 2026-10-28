@@ -720,3 +720,54 @@ async def test_bouton_retour_version_precedente(svc, tmp_path, monkeypatch):
             break
     assert (root / "version.txt").read_text() == "1.1.0" and u.STOP.is_set()
     u.STOP.clear()
+
+
+async def _confirm(router, dash):
+    text, kb = dash.render()
+    tok = [d for row in kb for _, d in row if d.startswith("ok:")][0]
+    await router.on_callback(tok)
+    return text
+
+
+async def _until(cond, n=60):
+    for _ in range(n):
+        await asyncio.sleep(0.05)
+        if cond():
+            return True
+    return False
+
+
+@pytest.mark.asyncio
+async def test_actions_groupees_et_actions_ea(svc):
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    st = ctx_stack(svc)
+    a = seed(st, 81, "Demo-Server 1")
+    b = seed(st, 82, "Demo-Server 1")
+    c = short(a.id)
+    ea.start()
+    await asyncio.sleep(0.3)
+    try:
+        # tout en pause : confirmation puis un seul message de résultat
+        await router.on_callback("d:pall")
+        assert "2 compte(s)" in await _confirm(router, dash)
+        assert await _until(lambda: ea.accounts[a.id]["etat"] == "PAUSE" and ea.accounts[b.id]["etat"] == "PAUSE")
+        # vacances (confirmation), tout fermer (confirmation)
+        await router.on_callback(f"e:{c}:von")
+        await _confirm(router, dash)
+        assert await _until(lambda: ea.accounts[a.id].get("vacances") is True)
+        await router.on_callback(f"e:{c}:fx")
+        assert "TOUT FERMER" in await _confirm(router, dash)
+        # presets : liste lue depuis l'EA, enregistrement par message texte, suppression confirmée
+        await router.on_callback(f"e:{c}:ps")
+        assert await _until(lambda: dash.presets.get(a.id) == ["prudent"])
+        await router.on_callback(f"e:{c}:pn")
+        await router.on_text("agressif")
+        assert await _until(lambda: dash.presets.get(a.id) == ["prudent", "agressif"])
+        await router.on_callback(f"e:{c}:pd:0")
+        assert "prudent" in await _confirm(router, dash)
+        assert await _until(lambda: dash.presets.get(a.id) == ["agressif"])
+        await router.on_callback(f"e:{c}:pn")
+        await router.on_text("nom invalide !")
+        assert "Nom invalide" in dash.render()[0]
+    finally:
+        await ea.stop()

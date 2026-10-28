@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 
 from core.service import Notice
@@ -31,6 +32,7 @@ class Router:
         self._tasks: set[asyncio.Task] = set()
         self._dep_msg: int | None = None
         self.building = False
+        self.awaiting_preset: str | None = None             # compte dont on attend le nom de preset (message texte)
         self._dep_sel: set[str] = set()
 
     def _bg(self, coro) -> None:
@@ -68,6 +70,8 @@ class Router:
                 return await self._dep_cb(parts)
             if head == "upd":
                 return await self._upd_cb(parts)
+            if head == "e":
+                return await self._ea_cb(parts)
         except Exception:
             log.exception("callback en erreur : %s", head)
             return "Erreur"
@@ -101,6 +105,16 @@ class Router:
         elif sub == "rst":
             return await self._ask("🔄 <b>Redémarrer le bot ?</b>\nEnviron 30 s sans bot. Les terminaux MT5 et l'EA continuent de trader.",
                                    self.restart_bot, ("sys",), "🔄 Redémarrer")
+        elif sub in ("pall", "rall"):
+            cmd = "PAUSE" if sub == "pall" else "REPRISE"
+            insts = [v.inst for v in self.ctx.views() if self.ctx.mgr.is_running(v.inst)]
+            if not insts:
+                self.dash.flash("Aucun terminal lancé.")
+            else:
+                what = "mettre en PAUSE" if cmd == "PAUSE" else "faire REPRENDRE"
+                return await self._ask(f"{'⏸' if cmd == 'PAUSE' else '▶'} <b>{what} {len(insts)} compte(s) ?</b>\n"
+                                       + esc(", ".join(i.label for i in insts[:15])),
+                                       lambda: self._group(insts, cmd), ("dash",), "✅ Confirmer")
         elif sub == "rbk":
             from core import update as upd
             from .system import BOT_ROOT
@@ -198,6 +212,16 @@ class Router:
 
     async def on_text(self, text: str) -> None:
         """Message texte libre : valeur attendue d'un paramètre, sinon le tableau de bord revient en bas."""
+        if self.awaiting_preset:
+            iid, self.awaiting_preset = self.awaiting_preset, None
+            inst = self.ctx.db.get(iid)
+            name = text.strip()
+            if inst is None or not re.fullmatch(r"[A-Za-z0-9_-]{1,30}", name):
+                self.dash.flash("❌ Nom invalide : lettres, chiffres, - et _ (30 max).")
+                await self.dash.refresh(force=True)
+                return
+            self._bg(self._ea_run(inst, "PRESET_SAVE", [name], then_presets=True))
+            return
         if self.awaiting:
             iid, idx = self.awaiting
             self.awaiting = None
@@ -294,6 +318,81 @@ class Router:
         _, cmd = act.CARD_CMDS[int(p[2])]
         self._bg(self._cmd_with_output(inst, cmd))
         return ""
+
+    async def _group(self, insts, cmd: str) -> None:
+        """Même commande sur plusieurs comptes, en parallèle ; un seul message de résultat."""
+        mid = await self.sender.send(self.chat_id, f"⏳ <b>{cmd}</b> sur {len(insts)} compte(s)…", None, True)
+        res = await asyncio.gather(*[act.send_cmd(self.ctx, i, cmd) for i in insts])
+        lines = [f"{'✅' if r.ok else '❌'} <b>{esc(i.label)}</b> : {esc((r.message or '').splitlines()[0][:120] if r.message else '')}"
+                 for i, r in zip(insts, res)]
+        await self.sender.edit(self.chat_id, mid, f"<b>{cmd}</b>\n" + "\n".join(lines), [[("✖ Fermer", "d:close")]])
+        await self.dash.refresh(force=True)
+
+    async def _ea_cb(self, p: list[str]) -> str:
+        """Actions EA de la fiche (🧰) : vacances, presets, valider, annuler l'objectif, tout fermer."""
+        inst = resolve(self.ctx.db, p[1]) if len(p) > 1 else None
+        if inst is None or len(p) < 3:
+            return "Compte introuvable"
+        sub, lab = p[2], esc(inst.label)
+        back_c, back_p = ("cmds", inst.id), ("pst", inst.id)
+        names = self.dash.presets.get(inst.id) or []
+        idx = int(p[3]) if len(p) > 3 and p[3].isdigit() else -1
+        name = names[idx] if 0 <= idx < len(names) else ""
+        if sub == "von":
+            return await self._ask(f"🏖 <b>Mode vacances sur {lab} ?</b>\nAucune nouvelle série ; les positions ouvertes restent gérées jusqu'au TP.",
+                                   lambda: self._ea_run(inst, "VACANCES", ["on"]), back_c, "🏖 Activer")
+        if sub == "voff":
+            self._bg(self._ea_run(inst, "VACANCES", ["off"]))
+        elif sub == "val":
+            self._bg(self._ea_run(inst, "VALIDER", []))
+        elif sub == "gx":
+            return await self._ask(f"🎯 <b>Annuler l'objectif en cours sur {lab} ?</b>",
+                                   lambda: self._ea_run(inst, "ANNULER_OBJECTIF", []), back_c, "🎯 Annuler l'objectif")
+        elif sub == "fx":
+            return await self._ask(f"🛑 <b>TOUT FERMER sur {lab} ?</b>\nToutes les positions et ordres sont fermés maintenant, "
+                                   "puis le robot passe en PAUSE.", lambda: self._ea_run(inst, "FERMER_TOUT", []), back_c, "🛑 Tout fermer")
+        elif sub == "ps":
+            self.dash.goto("pst", inst.id)
+            self._bg(self._presets_fetch(inst))
+        elif sub == "pl" and name:
+            return await self._ask(f"📥 <b>Charger le preset « {esc(name)} » sur {lab} ?</b>\nLes réglages actuels sont remplacés ; "
+                                   "valide-les ensuite (✅ Valider les réglages).",
+                                   lambda: self._ea_run(inst, "PRESET_LOAD", [name], then_presets=True), back_p, "📥 Charger")
+        elif sub == "pd" and name:
+            return await self._ask(f"🗑 <b>Supprimer le preset « {esc(name)} » ?</b>",
+                                   lambda: self._ea_run(inst, "PRESET_DELETE", [name], then_presets=True), back_p, "🗑 Supprimer")
+        elif sub == "pn":
+            self.awaiting_preset = inst.id
+            self.dash.flash("✏️ Envoie maintenant le nom du preset (lettres, chiffres, - et _).")
+        elif sub == "rs":
+            return await self._ask(f"♻️ <b>Remettre les valeurs par défaut sur {lab} ?</b>\nTous les réglages reviennent aux valeurs de l'EA ; "
+                                   "valide-les ensuite.", lambda: self._ea_run(inst, "RESET_PARAMS", []), back_p, "♻️ Rétablir")
+        else:
+            return "Action inconnue"
+        await self.dash.refresh(force=True)
+        return ""
+
+    async def _presets_fetch(self, inst) -> None:
+        self.dash.presets.pop(inst.id, None)
+        await self.dash.refresh(force=True)
+        r = await act.send_cmd(self.ctx, inst, "PRESETS")
+        if r.timeout:
+            self.dash.flash("❌ EA injoignable (terminal arrêté ?).")
+            self.dash.presets[inst.id] = []
+        else:
+            self.dash.presets[inst.id] = [m.group(1) for m in re.finditer(r"(?m)^\s*•\s*([A-Za-z0-9_-]{1,30})\s*$", r.message or "")]
+        await self.dash.refresh(force=True)
+
+    async def _ea_run(self, inst, cmd: str, args: list[str], then_presets: bool = False) -> None:
+        self.dash.flash(f"⏳ {cmd} envoyé…")
+        await self.dash.refresh(force=True)
+        r = await act.send_cmd(self.ctx, inst, cmd, args)
+        first = (r.message or "").strip().splitlines()[0][:200] if r.message else ""
+        self.dash.flash(("✅ " if r.ok else "❌ ") + esc(first or cmd))
+        if then_presets:
+            await self._presets_fetch(inst)
+        else:
+            await self.dash.refresh(force=True)
 
     async def _cmd_with_output(self, inst, cmd: str) -> None:
         """Commande EA depuis la fiche : le texte renvoyé par l'EA (ex-réponse Telegram) est envoyé tel quel."""

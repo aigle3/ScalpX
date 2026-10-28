@@ -274,6 +274,9 @@ void TgShowPresets(long edit = 0, string note = "")
    PresetList();
    string s = "💾 PRESETS\nSauvegarde tous les réglages sous un nom, puis recharge-les en un clic.";
    if(g_psCount == 0) s += "\n\nAucun preset enregistré.";
+   // [ARCHI] début : noms des presets dans le texte (le bot central les lit pour ses boutons)
+   for(int k = 0; k < g_psCount; k++) s += "\n• " + g_psNames[k];
+   // [ARCHI] fin
    if(note != "") s += "\n\n" + note;
    string rows = "";
    for(int i = 0; i < g_psCount; i++)

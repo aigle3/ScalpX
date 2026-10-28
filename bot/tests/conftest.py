@@ -136,6 +136,17 @@ class FakeEA:
             acc["maintenance"] = False; return True, "maintenance off"
         if cmd == "FERMER_TERMINAL":
             self.procs.running.discard(norm_path(exe)); return True, "fermeture"
+        ps = acc.setdefault("presets", ["prudent"])
+        if cmd == "PRESETS":
+            return True, "💾 PRESETS\nSauvegarde…" + "".join(f"\n• {n}" for n in ps)
+        if cmd == "PRESET_SAVE":
+            ps.append(self._args[0]); return True, f"✅ Preset « {self._args[0]} » enregistré."
+        if cmd == "PRESET_DELETE":
+            ps.remove(self._args[0]); return True, f"🗑 Preset « {self._args[0]} » supprimé."
+        if cmd == "VACANCES":
+            acc["vacances"] = self._args == ["on"]; return True, "🏖 MODE VACANCES " + ("ACTIVÉ" if acc["vacances"] else "DÉSACTIVÉ")
+        if cmd == "FERMER_TOUT":
+            acc["etat"] = "PAUSE"; return True, "🛑 Tout fermé, robot en PAUSE."
         return True, "ok " + cmd
 
     def start(self) -> None:
