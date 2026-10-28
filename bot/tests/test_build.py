@@ -86,3 +86,19 @@ async def test_compilation_en_erreur_une_seule_tentative(cfg, db):
 
 def test_prop_version():
     assert b.prop_version("5.3.1") == "5.03" and b.prop_version("5.12.0") == "5.12" and b.prop_version("6") == "6.00"
+
+
+@pytest.mark.asyncio
+async def test_mise_a_jour_github_meme_version_compile_quand_meme(cfg, db):
+    """Sources livrées par GitHub avec SX_VERSION déjà à jour : le .ex5 plus ancien que les sources est recompilé."""
+    prepare(cfg, "5.0")
+    ex = cfg.paths.base / "MQL5" / "Experts"
+    os.utime(ex / "SX_Core.mqh", None)                           # sources copiées par la mise à jour
+    v = cfg.paths.base / "version.txt"
+    t = time.time() - 30
+    os.utime(v, (t, t))
+    req = b.pending_build(cfg, db)
+    assert req and req.version == "5.0"
+    res = await b.auto_build(cfg, db, req, runner=fake_metaeditor(cfg))
+    assert res.ok and (ex / "ScalpX_v5.ex5").read_text() == "compiled 5.0"
+    assert b.pending_build(cfg, db) is None                      # .ex5 à jour : rien à refaire

@@ -71,18 +71,32 @@ def pending_build(cfg: Config, db: Database, settle_s: float = 5.0, now: float |
     if not ver or not _RE_VER.match(ver) or (now or time.time()) - mtime < settle_s:
         return None
     if ver == source_version(cfg):
-        return None
-    try:                                         # version.txt doit être PLUS RÉCENT que les sources : si tu as changé
-        if mtime <= (experts(cfg) / "SX_Core.mqh").stat().st_mtime:   # SX_VERSION à la main après, le bot ne l'écrase pas
+        # même version dans les sources (mise à jour GitHub : SX_VERSION déjà écrit) : compiler si le .ex5 est plus
+        # ancien que les sources, sinon les comptes resteraient sur l'ancien EA
+        if not sources_newer_than_ex5(cfg):
             return None
-    except OSError:
-        return None
+    else:
+        try:                                     # version.txt doit être PLUS RÉCENT que les sources : si tu as changé
+            if mtime <= (experts(cfg) / "SX_Core.mqh").stat().st_mtime:   # SX_VERSION à la main après, le bot ne l'écrase pas
+                return None
+        except OSError:
+            return None
     stamp = f"{ver}@{int(mtime)}"
     if db.meta_get("autobuild_stamp") == stamp:
         return None
     if not (experts(cfg) / f"{cfg.mt5.ea_name}.mq5").is_file() or not (cfg.paths.base / METAEDITOR).is_file():
         return None
     return BuildRequest(ver, stamp)
+
+
+def sources_newer_than_ex5(cfg: Config) -> bool:
+    """Le .ex5 de BASE est absent ou plus ancien qu'un fichier source (.mq5/.mqh) : il ne correspond pas aux sources."""
+    ex = experts(cfg)
+    try:
+        built = (ex / f"{cfg.mt5.ea_name}.ex5").stat().st_mtime
+    except OSError:
+        return True
+    return any(f.stat().st_mtime > built for f in ex.iterdir() if f.suffix.lower() in (".mq5", ".mqh"))
 
 
 # ---- édition des sources (encodage et fins de ligne conservés)
