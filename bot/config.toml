@@ -52,7 +52,7 @@ lock_port = 47653
 log_level = "INFO"
 
 [update]
-github  = "aigle3/scalpx"        # dépôt des mises à jour (jeton GITHUB_TOKEN en lecture seule dans .env)
+github  = "aigle3/ScalpX"        # dépôt des mises à jour (jeton GITHUB_TOKEN en lecture seule dans .env)
 branch  = "main"
 source  = "C:\\ScalpX\\release"  # copie locale du paquet téléchargé
 check_s = 60

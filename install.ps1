@@ -192,7 +192,7 @@ if ($srv) {
 }
 
 # ---- mises à jour depuis GitHub (dépôt privé, jeton en lecture seule)
-$repo = 'aigle3/scalpx'
+$repo = 'aigle3/ScalpX'
 $envTxt = [System.IO.File]::ReadAllText($envFile)
 if ($envTxt -notmatch '(?m)^GITHUB_TOKEN=\S+') {
     Write-Host '  Jeton GitHub en lecture seule (github_pat_...) pour recevoir les mises à jour.'
