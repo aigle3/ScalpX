@@ -128,6 +128,8 @@ class Dashboard:
             return self._render_reports()
         if kind == "logs":
             return self._render_logs()
+        if kind == "gterm":
+            return self._render_gterm()
         return self._render_home(now)
 
     # ---- accueil : l'état de l'ensemble d'un coup d'œil, 4 menus
@@ -175,7 +177,7 @@ class Dashboard:
         kb: Keyboard = [
             [("⏸ Tout en pause", "d:pall"), ("▶ Tout reprendre", "d:rall")],
             [("🎯 Objectif (tous)", "g:all"), ("⚙️ Paramètres (tous)", "p:all")],
-            [("🧰 Commandes (tous)", "d:gcmd")],
+            [("🧰 Commandes (tous)", "d:gcmd"), ("🖥 Terminaux (tous)", "d:gterm")],
             [("🚀 Déployer l'EA", "d:dep"), ("➕ Nouveau compte", "n")],
             [(("🔔 Rétablir le son" if silent else "🔕 Mode silencieux"), "d:sil")],
             [("⬅ Accueil", "d:home")],
@@ -188,6 +190,20 @@ class Dashboard:
             [("📝 Rapport des 24 h", "d:rep"), ("📈 Courbe des soldes", "d:chart")],
             [("📤 Export CSV", "d:exp")],
             [("⬅ Accueil", "d:home")],
+        ]
+        return self._with_flash(text), kb
+
+    def _render_gterm(self) -> tuple[str, Keyboard]:
+        insts = self.ctx.db.list()
+        on = sum(1 for i in insts if self.ctx.mgr.is_running(i))
+        text = (f"🖥 <b>Terminaux — tous les comptes</b>\n\n{on} lancé(s) sur {len(insts)}.\n"
+                "Les positions restent chez le broker ; un arrêt attend la fin d'une clôture à 500 en cours.\n"
+                "Pour un seul compte : 👥 Comptes → le compte → 🖥 Terminal.")
+        kb: Keyboard = [
+            [("🔄 Redémarrer tous", "d:tall:rst")],
+            [("🚀 Lancer tous", "d:tall:start"), ("🛑 Arrêter tous", "d:tall:stop")],
+            [("🪟 Réduire les fenêtres", "d:win")],
+            [("⬅ Actions", "d:act")],
         ]
         return self._with_flash(text), kb
 

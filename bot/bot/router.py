@@ -96,7 +96,19 @@ class Router:
                 self.dash.flash("Aucun terminal lancé.")
             else:
                 self.dash.goto("gcmd")
-        elif sub in ("lst", "act", "rpt", "logs"):
+        elif sub == "tall" and len(p) > 2 and p[2] in ("rst", "start", "stop"):
+            verb = p[2]
+            insts = self.ctx.db.list()
+            on = [i for i in insts if self.ctx.mgr.is_running(i)]
+            targets = [i for i in insts if i not in on] if verb == "start" else on
+            if not targets:
+                self.dash.flash("Tous les terminaux sont déjà lancés." if verb == "start" else "Aucun terminal lancé.")
+            else:
+                what = {"rst": "🔄 Redémarrer", "start": "🚀 Lancer", "stop": "🛑 Arrêter"}[verb]
+                extra = "\nFermeture propre ; les positions restent ouvertes chez le broker." if verb != "start" else ""
+                return await self._ask(f"<b>{what} {len(targets)} terminal(aux) ?</b>\n{esc(', '.join(i.label for i in targets[:15]))}{extra}",
+                                       lambda: self._terminals(targets, verb), ("gterm",), what)
+        elif sub in ("lst", "act", "rpt", "logs", "gterm"):
             self.dash.goto(sub)
             self.dash.silent = self.notifier.silent_mode
         elif sub == "fc":                                   # filtre suivant
@@ -363,6 +375,23 @@ class Router:
         _, cmd = act.CARD_CMDS[int(p[2])]
         self._bg(self._cmd_with_output(inst, cmd))
         return ""
+
+    async def _terminals(self, insts, verb: str) -> None:
+        """Redémarrer / lancer / arrêter plusieurs terminaux en parallèle ; un seul message de résultat."""
+        label = {"rst": "Redémarrage", "start": "Lancement", "stop": "Arrêt"}[verb]
+        mid = await self.sender.send(self.chat_id, f"⏳ <b>{label}</b> de {len(insts)} terminal(aux)…", None, True)
+        fn = {"rst": act.action_restart, "start": act.action_start, "stop": act.action_stop}[verb]
+
+        async def one(i):
+            try:
+                return i, await fn(self.ctx, i)
+            except Exception as exc:
+                return i, f"❌ {exc}"
+
+        res = await asyncio.gather(*[one(i) for i in insts])
+        lines = [f"<b>{esc(i.label)}</b> : {esc(str(r))[:150]}" for i, r in res]
+        await self.sender.edit(self.chat_id, mid, f"🖥 <b>{label}</b>\n" + "\n".join(lines), [[("✖ Fermer", "d:close")]])
+        await self.dash.refresh(force=True)
 
     async def _group(self, insts, cmd: str) -> None:
         """Même commande sur plusieurs comptes, en parallèle ; un seul message de résultat."""

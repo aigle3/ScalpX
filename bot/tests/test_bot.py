@@ -827,3 +827,19 @@ async def test_tous_les_comptes_parametre_commande_et_objectif(svc):
         assert "non reconnu" in dash.render()[0]
     finally:
         await ea.stop()
+
+
+@pytest.mark.asyncio
+async def test_terminaux_de_tous_les_comptes(svc):
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    st = ctx_stack(svc)
+    a = seed(st, 95, "Demo-Server 1")
+    b = seed(st, 96, "Demo-Server 1", running=False)
+    await router.on_callback("d:act")
+    assert "d:gterm" in [d for row in dash.render()[1] for _, d in row]
+    await router.on_callback("d:gterm")
+    assert "1 lancé(s) sur 2" in dash.render()[0]
+    await router.on_callback("d:tall:start")                               # seulement ceux qui sont arrêtés
+    assert "1 terminal" in await _confirm(router, dash)
+    assert await _until(lambda: ctx.mgr.is_running(b))
+    assert await _until(lambda: any("Lancement" in m[1] for m in sender.sent))
