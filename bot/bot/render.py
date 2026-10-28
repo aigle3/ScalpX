@@ -76,6 +76,19 @@ def trading_ref(views: list[AccountView], now: float):
     return max(fresh, key=lambda s: s.ts) if fresh else None
 
 
+def goal_line(sts: list, st) -> str:
+    """🎯 Objectif en cours (montant, cible, progression ; nombre de comptes concernés) ou prochain créneau."""
+    on = [s for s in sts if s.objectif_actif]
+    if not on:
+        return "🎯 Aucun objectif en cours" + (f" · prochain créneau {_hhmm(st.prochain_creneau)}" if st.prochain_creneau else "")
+    ref = st if st.objectif_actif else on[0]
+    gain = ref.objectif_cible - ref.objectif_depart
+    pct = max(0.0, min(ref.objectif_progression, 100.0))
+    who = f" · {len(on)}/{len(sts)} comptes" if len(sts) > 1 else ""
+    return (f"🎯 <b>Objectif en cours</b> : {money(gain, ref.devise, True)} (cible {money(ref.objectif_cible, ref.devise)}) "
+            f"{bar(pct / 100)} {pct:.0f} %{who}")
+
+
 def trading_block(views: list[AccountView], now: float) -> list[str]:
     """Bloc « en tout premier » de l'accueil : le robot trade-t-il, peut-il trader, chaque filtre (dont News), prochaines news."""
     st = trading_ref(views, now)
@@ -95,11 +108,11 @@ def trading_block(views: list[AccountView], now: float) -> list[str]:
     elif st.etat == "PAUSE" or (st.objectif_actif and not st.ea_demarre):
         head = "⏸ <b>EN PAUSE</b>" + (f" jusqu'à {_hhmm(st.pause_jusqua)} (reprise automatique)" if st.pause_jusqua else "")
     elif not st.objectif_actif:
-        head = "⚪ <b>À L'ARRÊT</b> : aucun objectif" + (f" · prochain créneau {_hhmm(st.prochain_creneau)}" if st.prochain_creneau else "")
+        head = "⚪ <b>À L'ARRÊT</b> : attend un objectif"
     else:
         stopped = False
         head = "🟢 <b>EN TRAIN DE TRADER</b> : série en cours" if npos else "🟡 <b>EN ATTENTE</b> : aucune position"
-    lines = [head, pos_line]
+    lines = [head, goal_line(sts, st), pos_line]
     if not stopped:
         blocked = st.trading_autorise is False or (st.trading_autorise is None and bool(st.raison_blocage))
         if blocked:

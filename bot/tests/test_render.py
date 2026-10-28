@@ -67,3 +67,10 @@ def test_accueil_commence_par_le_trading():
     lines = txt.splitlines()
     assert lines[2].startswith("🟡 <b>EN ATTENTE</b>")
     assert txt.index("EN ATTENTE") < txt.index("💰 Solde")
+
+
+def test_objectif_en_cours():
+    txt = block(view(1, objectif_depart=200.0, objectif_cible=210.0, objectif_progression=66.4), view(2, objectif_actif=False))
+    assert "🎯 <b>Objectif en cours</b> : +10.00 EUR (cible 210.00 EUR) ▰▰▰▱▱ 66 % · 1/2 comptes" in txt
+    txt = block(view(1, objectif_actif=False, ea_demarre=False, prochain_creneau=time.strftime("%Y.%m.%d") + " 09:00"))
+    assert "🎯 Aucun objectif en cours · prochain créneau 09:00" in txt

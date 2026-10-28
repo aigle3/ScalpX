@@ -35,7 +35,8 @@ Voir `LISEZMOI.txt` à la racine du dépôt : `INSTALL.bat` installe tout (BASE 
 
 - **Accueil** (un message édité en place ; **📊 Tableau de bord** ou tout message le ramène en bas). **En tout premier,
   l'état du trading** (lu sur le robot le plus récent : tous ont les mêmes réglages) : 🟢 trading autorisé / ⛔ entrées
-  bloquées (raison) / ⏸ pause (jusqu'à…) / ⚪ sans objectif / 🏖 vacances, les positions en cours, le **filtre News**
+  bloquées (raison) / ⏸ pause (jusqu'à…) / ⚪ sans objectif / 🏖 vacances, l'objectif en cours (gain visé, cible,
+  progression) ou le prochain créneau, les positions en cours, le **filtre News**
   (actif, désactivé ou news en cours), chaque filtre 🟢/🔴 avec la raison d'un blocage, et les 3 prochaines news.
   Puis l'état de l'ensemble (comptes 🟢/🟠/🔴, solde, jour, à retirer, alertes, VPS, versions, 🔔 mise à jour), une ligne
   par compte, et 4 menus : **👥 Comptes**, **⚡ Actions**, **📈 Rapports**, **🛠 Système**.
