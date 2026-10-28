@@ -28,8 +28,3 @@ def valid_login(text: str) -> bool:
 def valid_server(text: str) -> bool:
     """Nom de serveur MT5 : lettres, chiffres, espace, tiret, point, souligné (2 à 64 car.)."""
     return bool(re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z .\-_]{1,63}", text.strip()))
-
-
-def folder_name(login: int | str, server: str) -> str:
-    """Nom du dossier de l'instance : <login>_<serveur> (même forme que l'identifiant)."""
-    return make_id(login, server)

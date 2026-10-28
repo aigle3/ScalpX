@@ -14,7 +14,7 @@ from typing import Awaitable, Callable
 from storage.db import Database
 from .config import Config
 from .events import EventReader
-from .models import Evenement, Statut
+from .models import Evenement
 from .status import StatusReader
 
 log = logging.getLogger(__name__)

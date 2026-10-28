@@ -17,7 +17,7 @@ from .notify import Notifier
 from .render import esc
 from .reports import build_report
 from . import params_ui as pu
-from .ui import Confirmations, Keyboard, Pending, Sender, confirm_kb, resolve, resolve_target, short
+from .ui import Confirmations, Keyboard, Pending, Sender, resolve, short
 
 log = logging.getLogger(__name__)
 
@@ -51,8 +51,6 @@ class Router:
         parts = data.split(":")
         head = parts[0]
         try:
-            if head == "sk" and len(parts) > 2:
-                return await self.on_standalone_confirm(parts[1], parts[2], message_id)
             if head == "d":
                 return await self._dash_cb(parts, message_id)
             if head == "p":
@@ -115,7 +113,7 @@ class Router:
             await self.cmd_rapport()
             return ""
         elif sub == "png":
-            await self.cmd_ping(0)
+            await self.cmd_ping()
             return ""
         elif sub == "sil":
             await self.cmd_silencieux("off" if self.notifier.silent_mode else "on")
@@ -309,15 +307,12 @@ class Router:
             self.dash.flash("📈 Graphique envoyé.")
         await self.dash.refresh(force=True)
 
-    # ------------------------------------------------------------------ commandes texte
+    # ------------------------------------------------------------------ actions du tableau de bord
     async def cmd_start(self) -> None:
         """Tout message reçu (bouton « 📊 Tableau de bord », texte libre) : le tableau de bord revient en bas de la conversation."""
         await self.dash.bring_down()
 
-    async def cmd_etat(self) -> None:
-        await self.dash.bring_down()
-
-    async def cmd_ping(self, uptime_s: float) -> None:
+    async def cmd_ping(self) -> None:
         views = self.ctx.views()
         alive = sum(1 for v in views if v.health.icon == "🟢")
         await self.sender.send(self.chat_id, f"🏓 pong · bot actif depuis {render.ago(time.time() - self.ctx.started_at)} · "
@@ -346,48 +341,6 @@ class Router:
             self.notifier.silent_mode = False
         await self.sender.send(self.chat_id, "🔕 Mode silencieux : " + ("activé (alertes critiques seulement avec son)" if self.notifier.silent_mode else "désactivé"), None, True)
 
-    async def cmd_cmd(self, args: list[str]) -> None:
-        """/cmd <id|all> <commande> [args…]"""
-        if len(args) < 2:
-            await self.sender.send(self.chat_id, "Usage : <code>/cmd &lt;id|all&gt; &lt;COMMANDE&gt; [args]</code>", None, True)
-            return
-        target, cmd, cargs = args[0], args[1].upper(), args[2:]
-        err = act.valid_cmd(cmd, cargs)
-        if err:
-            await self.sender.send(self.chat_id, "❌ " + esc(err), None, True)
-            return
-        insts = resolve_target(self.ctx.db, target)
-        if not insts:
-            await self.sender.send(self.chat_id, "❌ Aucun compte ne correspond à « " + esc(target[:30]) + " ».", None, True)
-            return
-        if len(insts) > 1 and (target.lower() == "all"):
-            names = ", ".join(i.label for i in insts[:12])
-            tok = self.conf.ask(Pending(f"⚠️ <b>{cmd}</b> sur <b>{len(insts)} comptes</b> ({esc(names)}) ?", lambda: self._cmd_many(insts, cmd, cargs)))
-            await self.sender.send(self.chat_id, f"⚠️ <b>{cmd}</b> sur <b>{len(insts)} comptes</b> ({esc(names)}) ?",
-                                   [[("✅ Confirmer", f"sk:ok:{tok}"), ("✖ Annuler", f"sk:no:{tok}")]], True)
-            return
-        await self._cmd_many(insts, cmd, cargs)
-
-    async def _cmd_many(self, insts, cmd: str, cargs: list[str]) -> None:
-        mid = await self.sender.send(self.chat_id, f"⏳ <b>{cmd}</b> envoyé à {len(insts)} compte(s)…", None, True)
-        res = await act.send_cmd_many(self.ctx, insts, cmd, cargs)
-        lines = [f"{'✅' if r.ok else '❌'} <b>{esc(i.label)}</b> : {esc(r.message[:300])}" for i, r in res]
-        text = f"<b>{cmd}</b>\n" + "\n".join(lines)
-        await self.sender.edit(self.chat_id, mid, text[:3900], None)
-
-    async def on_standalone_confirm(self, kind: str, tok: str, message_id: int) -> str:
-        """Confirmation d'une commande texte (message à part, pas le tableau de bord)."""
-        p = self.conf.take(tok)
-        if p is None:
-            await self.sender.edit(self.chat_id, message_id, "⌛ Confirmation expirée.", None)
-            return "Expiré"
-        if kind == "no":
-            await self.sender.edit(self.chat_id, message_id, "✖ Annulé.", None)
-            return "Annulé"
-        await self.sender.edit(self.chat_id, message_id, "✅ Confirmé.", None)
-        self._bg(p.run())
-        return "OK"
-
     # ------------------------------------------------------------------ déploiement
     async def cmd_deployer(self) -> None:
         plan = plan_deploy(self.ctx.cfg, self.ctx.db)
@@ -409,7 +362,7 @@ class Router:
                         [(f"📦 Tous ({len(plan.targets)})", "dep:all")], [("✖ Fermer", "dep:close")]]
         self._dep_msg = await self.sender.send(self.chat_id, "\n".join(lines), kb, True)
 
-    # ------------------------------------------------------------------ mise à jour depuis OneDrive
+    # ------------------------------------------------------------------ mises à jour (GitHub)
     async def on_update_available(self, plan) -> None:
         self._upd_plan = plan
         from core.version import bot_version, read as vread
@@ -417,13 +370,14 @@ class Router:
         lines = ["⬆ <b>Mise à jour ScalpX disponible</b>"]
         if plan.note:
             lines.append("📝 " + esc(plan.note.splitlines()[0][:200]))
-        if plan.bot_files:
+        if plan.bot_files or plan.bot_remove:
             new_b = vread(plan.source / "bot" / "version.txt") or "?"
             lines.append(f"🤖 Bot {esc(bot_version())} → <b>{esc(new_b)}</b>")
         if any(f.lower().endswith((".mq5", ".mqh")) for f in plan.ea_files):
             lines.append(f"📈 EA {esc(basemod.read_version(self.ctx.cfg.paths.base) or '?')} → <b>{esc(plan.version or '?')}</b>")
-        if plan.bot_files:
-            lines.append(f"🤖 Bot : {len(plan.bot_files)} fichier(s) — redémarrage du bot (≈ 30 s, les terminaux continuent)")
+        if plan.bot_files or plan.bot_remove:
+            extra = f", {len(plan.bot_remove)} supprimé(s)" if plan.bot_remove else ""
+            lines.append(f"🤖 Bot : {len(plan.bot_files)} fichier(s){extra} — redémarrage du bot (≈ 30 s, les terminaux continuent)")
         if plan.ea_files:
             lines.append(f"📈 EA : {len(plan.ea_files)} fichier(s) — copie dans BASE, compilation, puis proposition de déploiement")
         names = plan.bot_files[:6] + plan.ea_files[:6]
@@ -447,7 +401,7 @@ class Router:
         if self.ctx.deploy.running or self.building:
             return "Déploiement ou compilation en cours : réessaie après."
         bot_root = _P(__file__).resolve().parent.parent
-        plan = upd.plan_update(self.ctx.cfg, bot_root, settle_s=0)
+        plan = upd.plan_update(self.ctx.cfg, bot_root)
         if plan is None or plan.empty:
             if mid:
                 await self.sender.edit(self.chat_id, mid, "✅ Déjà à jour.", None)
@@ -457,7 +411,7 @@ class Router:
             if plan.ea_files:
                 ver = upd.install_ea(self.ctx.cfg, plan)
                 out.append(f"📈 EA copié dans BASE" + (f" — compilation v{esc(ver)} dans quelques secondes" if ver else " (.set seulement)"))
-            if plan.bot_files:
+            if plan.bot_files or plan.bot_remove:
                 upd.install_bot(plan, bot_root)
                 if plan.requirements_changed:
                     ok, err = await asyncio.get_running_loop().run_in_executor(None, upd.pip_install, bot_root)
@@ -477,7 +431,7 @@ class Router:
             self.ctx.db.meta_set("installed_commit", f"{info['sha'][:7]} {msg}".strip())
         if mid:
             await self.sender.edit(self.chat_id, mid, "✅ <b>Mise à jour installée</b>\n" + "\n".join(out), None)
-        if plan.bot_files:
+        if plan.bot_files or plan.bot_remove:
             how = upd.restart_bot(bot_root)
             log.warning("mise à jour du bot installée : redémarrage (%s)", how)
             upd.STOP.set()
@@ -494,7 +448,7 @@ class Router:
             if not res.ok:
                 await self.sender.send(self.chat_id, f"⚠️ Mises à jour : {esc(res.error)}", [[("✖ Fermer", "d:close")]], True)
                 return
-        plan = await loop.run_in_executor(None, upd.plan_update, cfg, _P(__file__).resolve().parent.parent, 0.0)
+        plan = await loop.run_in_executor(None, upd.plan_update, cfg, _P(__file__).resolve().parent.parent)
         if plan is None:
             await self.sender.send(self.chat_id, "⚠️ Aucun paquet de mise à jour trouvé (GitHub non configuré ?).", [[("✖ Fermer", "d:close")]], True)
             return

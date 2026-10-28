@@ -95,7 +95,7 @@ class Database:
         with self._lock:
             return list(self._cx.execute(sql, tuple(args)).fetchall())
 
-    # ---- méta (identifiant du message épinglé, etc.)
+    # ---- méta (message du tableau de bord, serveurs mémorisés, mises à jour…)
     def meta_get(self, key: str, default: str = "") -> str:
         r = self._all("SELECT value FROM meta WHERE key=?", (key,))
         return r[0]["value"] if r else default
@@ -147,9 +147,6 @@ class Database:
         assert state in DESIRED_STATES, state
         self._exec("UPDATE instances SET desired_state=? WHERE id=?", (state, iid))
 
-    def set_alias(self, iid: str, alias: str) -> None:
-        self._exec("UPDATE instances SET alias=? WHERE id=?", (alias, iid))
-
     def set_version(self, iid: str, version: str, note: str = "") -> None:
         cur = self.get(iid)
         self._exec("UPDATE instances SET ea_version=? WHERE id=?", (version, iid))
@@ -171,10 +168,6 @@ class Database:
                     ts: int | None = None) -> None:
         self._exec("INSERT INTO balances VALUES(?,?,?,?,?,?,?)",
                    (iid, ts or int(time.time()), balance, equity, floating, cycle, etat))
-
-    def last_balance(self, iid: str) -> sqlite3.Row | None:
-        r = self._all("SELECT * FROM balances WHERE iid=? ORDER BY ts DESC LIMIT 1", (iid,))
-        return r[0] if r else None
 
     def balances(self, iid: str, since: int) -> list[sqlite3.Row]:
         return self._all("SELECT * FROM balances WHERE iid=? AND ts>=? ORDER BY ts", (iid, since))

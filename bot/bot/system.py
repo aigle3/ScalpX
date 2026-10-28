@@ -6,7 +6,6 @@ from pathlib import Path
 
 from core import update as upd
 from mt5 import base as basemod
-from mt5 import build as buildmod
 from . import render
 from .actions import Ctx
 from .render import esc

@@ -14,7 +14,7 @@ from mt5 import base as basemod
 from . import render
 from .actions import Ctx
 from .render import esc
-from .ui import Sender, resolve, short
+from .ui import Sender, resolve
 
 log = logging.getLogger(__name__)
 

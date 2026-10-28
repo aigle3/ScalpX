@@ -28,6 +28,29 @@ class ProcessAPI(Protocol):
 class PsutilProcesses:
     """Implémentation réelle (psutil + subprocess)."""
 
+    CACHE_S = 2.0                     # le tableau de bord interroge chaque compte : un seul parcours des processus
+
+    def __init__(self) -> None:
+        self._running: set[str] = set()
+        self._running_at = 0.0
+
+    def _running_exes(self) -> set[str]:
+        now = time.monotonic()
+        if now - self._running_at > self.CACHE_S:
+            exes: set[str] = set()
+            for p in psutil.process_iter(["exe"]):
+                try:
+                    pe = p.info.get("exe")
+                    if pe:
+                        exes.add(norm_path(pe))
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            self._running, self._running_at = exes, now
+        return self._running
+
+    def _invalidate(self) -> None:
+        self._running_at = 0.0
+
     def find(self, exe: Path) -> list[psutil.Process]:
         target = norm_path(exe)
         found: list[psutil.Process] = []
@@ -41,7 +64,7 @@ class PsutilProcesses:
         return found
 
     def is_running(self, exe: Path) -> bool:
-        return bool(self.find(exe))
+        return norm_path(exe) in self._running_exes()
 
     def launch(self, exe: Path, ini: Path | None = None) -> int:
         """Lance `terminal64.exe /portable [/config:ini]` détaché, dans le dossier de l'instance."""
@@ -55,6 +78,7 @@ class PsutilProcesses:
                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                 close_fds=True)
         log.info("terminal lancé : %s (pid %s)%s", Path(exe).parent.name, proc.pid, " avec /config" if ini else "")
+        self._invalidate()
         return proc.pid
 
     def kill(self, exe: Path) -> int:
@@ -68,6 +92,7 @@ class PsutilProcesses:
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
         psutil.wait_procs(procs, timeout=10)
+        self._invalidate()
         return n
 
 
@@ -78,7 +103,3 @@ def vps_load(path: Path) -> dict[str, float]:
     except OSError:
         disk = 0.0
     return {"cpu": psutil.cpu_percent(interval=None), "ram": psutil.virtual_memory().percent, "disk": disk}
-
-
-def uptime_s() -> float:
-    return time.time() - psutil.boot_time()

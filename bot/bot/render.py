@@ -6,7 +6,6 @@ import time
 from typing import Iterable
 
 from core.summary import FILTER_LABELS, SORT_LABELS, AccountView, Totals
-from storage.db import Instance
 
 STATE_TAG = {"ACTIF": "", "ARRET_500": " 🏁500", "PAUSE": " ⏸"}
 

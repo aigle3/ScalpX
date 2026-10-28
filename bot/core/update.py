@@ -1,6 +1,6 @@
 """Mise à jour automatique depuis un dossier « paquet » local, téléchargé depuis GitHub (core.github).
 
-Paquet (même structure que ScalpX_VPS) :
+Paquet (structure du dépôt) :
   <source>\\bot\\…                      code du bot
   <source>\\ea\\MQL5\\Experts\\*.mq5 *.mqh   sources de l'EA
   <source>\\ea\\MQL5\\Presets\\*.set        préréglages
@@ -45,10 +45,11 @@ class UpdatePlan:
     requirements_changed: bool = False
     stamp: str = ""
     note: str = ""                                          # message du commit GitHub
+    bot_remove: list[str] = field(default_factory=list)     # fichiers du bot qui n'existent plus dans le dépôt
 
     @property
     def empty(self) -> bool:
-        return not self.bot_files and not self.ea_files
+        return not self.bot_files and not self.ea_files and not self.bot_remove
 
 
 def find_source(cfg: Config) -> Path | None:
@@ -86,7 +87,11 @@ def _same(a: Path, b: Path, ea: bool = False) -> bool:
 
 
 def _bot_sources(src: Path) -> list[Path]:
-    root = src / "bot"
+    return _bot_files(src / "bot")
+
+
+def _bot_files(root: Path) -> list[Path]:
+    """Fichiers de code/doc d'un dossier de bot (hors .env, config.toml, data\\, .venv\\, caches)."""
     out = []
     for p in root.rglob("*"):
         if not p.is_file() or p.suffix.lower() not in BOT_EXT or p.name in BOT_SKIP_FILES:
@@ -119,30 +124,26 @@ def bump(v: str) -> str:
     return ".".join(parts)
 
 
-def plan_update(cfg: Config, bot_root: Path, settle_s: float = 60.0, now: float | None = None) -> UpdatePlan | None:
-    """Différences paquet → installation. None si pas de paquet, ou paquet en cours de synchronisation."""
+def plan_update(cfg: Config, bot_root: Path) -> UpdatePlan | None:
+    """Différences paquet → installation (None si aucun paquet). Le paquet est extrait d'un coup par core.github."""
     src = find_source(cfg)
     if src is None:
         return None
-    if cfg.update.github:
-        settle_s = 0                                                  # paquet extrait d'un seul coup : pas de synchro en cours
-    files = _bot_sources(src) + _ea_sources(src)
     vfile = src / "ea" / "version.txt"
-    try:
-        newest = max([p.stat().st_mtime for p in files] + ([vfile.stat().st_mtime] if vfile.exists() else []))
-    except (OSError, ValueError):
-        return None
-    if (now or time.time()) - newest < settle_s:                     # OneDrive est peut-être encore en train d'écrire
-        return None
     plan = UpdatePlan(src)
     try:
         plan.version = vfile.read_text(encoding="utf-8-sig").strip()
     except OSError:
         pass
+    pkg = set()
     for p in _bot_sources(src):
         rel = p.relative_to(src / "bot")
+        pkg.add(rel)
         if not _same(p, bot_root / rel):
             plan.bot_files.append(str(rel).replace("\\", "/"))
+    if (bot_root / "main.py").is_file():                              # fichiers retirés du dépôt : supprimés à l'installation
+        plan.bot_remove = [str(p.relative_to(bot_root)).replace("\\", "/")
+                           for p in _bot_files(bot_root) if p.relative_to(bot_root) not in pkg]
     for p in _ea_sources(src):
         rel = p.relative_to(src / "ea")
         if not _same(p, cfg.paths.base / rel, ea=p.suffix.lower() in (".mq5", ".mqh")):
@@ -153,6 +154,8 @@ def plan_update(cfg: Config, bot_root: Path, settle_s: float = 60.0, now: float 
         f = src / ("bot" if rel in plan.bot_files else "ea") / rel
         h.update(rel.encode())
         h.update(f.read_bytes())
+    for rel in plan.bot_remove:
+        h.update(("-" + rel).encode())
     plan.stamp = h.hexdigest()[:16]
     plan.note = commit_info(src).get("message", "")
     return plan
@@ -189,6 +192,11 @@ def install_ea(cfg: Config, plan: UpdatePlan) -> str:
 def install_bot(plan: UpdatePlan, bot_root: Path) -> None:
     for rel in plan.bot_files:
         _copy(plan.source / "bot" / rel, bot_root / rel)
+    for rel in plan.bot_remove:
+        try:
+            (bot_root / rel).unlink()
+        except OSError:
+            pass
     if not (bot_root / "config.toml").exists() and (plan.source / "bot" / "config.toml").exists():
         _copy(plan.source / "bot" / "config.toml", bot_root / "config.toml")
 

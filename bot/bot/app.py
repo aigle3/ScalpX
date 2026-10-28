@@ -21,7 +21,6 @@ from core.events import EventReader
 from core.service import Monitor, Notice
 from mt5.build import pending_build
 from mt5.deploy import detect_new_build
-from mt5.procs import uptime_s
 from . import render
 from .actions import Ctx
 from .dashboard import Dashboard
@@ -92,8 +91,6 @@ class TelegramSender:
             log.warning("suppression de message impossible : %s", type(e).__name__)
             return False
 
-    async def pin(self, chat_id: int, message_id: int) -> None:      # plus utilisé : le tableau de bord n'est pas épinglé
-        await self.bot.pin_chat_message(chat_id=chat_id, message_id=message_id, disable_notification=True)
 
     async def reply_menu(self, chat_id: int, text: str) -> int:
         """Message portant le bouton permanent « 📊 Tableau de bord » (clavier de réponse, toujours visible)."""

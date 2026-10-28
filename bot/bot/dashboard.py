@@ -234,6 +234,3 @@ class Dashboard:
             return "wait"
         self._last_sig, self._last_edit = sig, time.time()
         return "same" if res == EditResult.SAME else "edit"
-
-    def set_retry_after(self, seconds: float) -> None:
-        self._retry_until = time.time() + seconds + 1

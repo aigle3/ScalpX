@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
-from storage.db import ARCHIVE, ARRETE, DEMARRE, EN_CREATION, MAINTENANCE, Instance
+from storage.db import ARCHIVE, ARRETE, EN_CREATION, MAINTENANCE, Instance
 from .config import Config
 from .models import Statut
 

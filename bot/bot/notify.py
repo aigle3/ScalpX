@@ -5,7 +5,6 @@ prio 0 : info (toujours sans son) · prio 1 : important (sans son en mode silenc
 from __future__ import annotations
 
 import logging
-import time
 
 from core.service import Notice
 from .render import esc, join_notices

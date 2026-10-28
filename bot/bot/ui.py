@@ -29,21 +29,6 @@ def resolve(db: Database, code: str) -> Instance | None:
     return None
 
 
-def resolve_target(db: Database, token: str) -> list[Instance]:
-    """Cible d'une commande texte : « all », identifiant complet, code court, login (unique) ou alias."""
-    insts = db.list()
-    t = token.strip()
-    if t.lower() == "all":
-        return insts
-    exact = [i for i in insts if i.id == t or short(i.id) == t]
-    if exact:
-        return exact
-    by_login = [i for i in insts if str(i.login) == t]
-    if by_login:
-        return by_login
-    return [i for i in insts if i.alias and i.alias.lower() == t.lower()]
-
-
 class EditResult:
     OK, SAME, GONE, RETRY = "ok", "same", "gone", "retry"
 
@@ -53,7 +38,6 @@ class Sender(Protocol):
     async def send(self, chat_id: int, text: str, kb: Keyboard | None = None, silent: bool = False) -> int: ...
     async def edit(self, chat_id: int, message_id: int, text: str, kb: Keyboard | None = None) -> str: ...
     async def delete(self, chat_id: int, message_id: int) -> bool: ...
-    async def pin(self, chat_id: int, message_id: int) -> None: ...
     async def reply_menu(self, chat_id: int, text: str) -> int: ...
     async def photo(self, chat_id: int, data: bytes | str, caption: str = "", silent: bool = False) -> None: ...
     async def document(self, chat_id: int, data: bytes, filename: str, caption: str = "") -> None: ...

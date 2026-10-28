@@ -47,9 +47,6 @@ def test_plan_ignore_secrets_donnees_et_lignes_de_version(tmp_path, cfg):
     # seule la ligne de version diffère → pas une mise à jour
     (cfg.paths.base / "MQL5" / "Experts" / "SX_Core.mqh").write_bytes(b'#define SX_VERSION   "5.4"\nint a;\n')
     assert u.plan_update(cfg, bot_root).ea_files == []
-    # paquet en cours de synchronisation
-    os.utime(src / "bot" / "main.py", None)
-    assert u.plan_update(cfg, bot_root) is None
 
 
 def test_installation_ea_puis_version_txt_en_dernier(tmp_path, cfg):
@@ -130,3 +127,24 @@ def test_github_jeton_refuse(tmp_path, cfg):
     cfg.update.github, cfg.update.source = "aigle3/scalpx", str(tmp_path / "release")
     r = gh.fetch(cfg, lambda url, h: (401, b""))
     assert not r.ok and "jeton" in r.error
+
+
+def test_fichiers_retires_du_depot_supprimes(tmp_path, cfg):
+    bot_root = tmp_path / "botinst"
+    make_pkg(tmp_path, cfg, bot_root)
+    (bot_root / "scalpx_bot_task.xml").write_text("<old/>")
+    (bot_root / "bot" / "ancien.py").write_text("x = 1")
+    (bot_root / "data").mkdir()
+    (bot_root / "data" / "notes.txt").write_text("à garder")
+    plan = u.plan_update(cfg, bot_root)
+    assert sorted(plan.bot_remove) == ["bot/ancien.py", "scalpx_bot_task.xml"]
+    u.install_bot(plan, bot_root)
+    assert not (bot_root / "bot" / "ancien.py").exists() and (bot_root / "data" / "notes.txt").exists()
+    assert (bot_root / "config.toml").exists() and u.plan_update(cfg, bot_root).empty
+
+
+def test_detection_processus_reels():
+    import psutil
+    from mt5.procs import PsutilProcesses
+    p = PsutilProcesses()
+    assert p.is_running(psutil.Process().exe()) and not p.is_running("/nulle/part/terminal64.exe")

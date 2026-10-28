@@ -1,8 +1,6 @@
 """Actions métier (sans Telegram) : commandes EA, lancer/arrêter/redémarrer, suppression, rapports."""
 from __future__ import annotations
 
-import asyncio
-import re
 import time
 from dataclasses import dataclass, field
 
@@ -17,32 +15,10 @@ from mt5.manager import InstanceManager
 from mt5.watchdog import Watchdog
 from storage.db import ARRETE, DEMARRE, Database, Instance
 
-# Commandes EA autorisées depuis Telegram (liste blanche : jamais de commande libre ni de chemin).
-EA_CMDS = {
-    "PAUSE", "REPRISE", "DEMARRER", "STATUT", "PING", "MAINTENANCE_ON", "MAINTENANCE_OFF", "VALIDER",
-    "FERMER_TOUT", "ANNULER_OBJECTIF", "PRESET_SAVE", "PRESET_LOAD", "PRESET_DELETE", "RESET_PARAMS", "BOUTON",
-    "POSITIONS", "PARAMS", "FILTRES", "RISQUE", "PRESETS", "RAPPORT", "AIDE", "STATS", "JOURNAL", "MULTI", "NEWS",
-    "OUTILS", "RAPIDE", "LOT", "TP", "GRILLE", "SPREAD", "VACANCES", "CAPTURE", "COURBE", "SET", "OBJECTIF",
-}
-# Commandes qui modifient le trading / les positions : confirmation obligatoire si cible = all
-DANGEROUS = {"FERMER_TOUT", "RESET_PARAMS", "PRESET_LOAD", "PRESET_DELETE", "ANNULER_OBJECTIF", "PAUSE", "MAINTENANCE_ON"}
 # Menu « commandes EA » de la fiche compte
 CARD_CMDS = [("📌 Positions", "POSITIONS"), ("⚙️ Params", "PARAMS"), ("🧪 Filtres", "FILTRES"), ("🛡 Risque", "RISQUE"),
              ("📊 Stats", "STATS"), ("📒 Journal", "JOURNAL"), ("📝 Rapport", "RAPPORT"), ("🎯 Objectif", "OBJECTIF"),
              ("📸 Capture", "CAPTURE"), ("📈 Courbe", "COURBE"), ("📡 Statut", "STATUT"), ("🏓 Ping", "PING")]
-
-_ARG_OK = re.compile(r"^[\w .,:+%=/\-éèêàùçÉÈÊÀÙÇ]{1,64}$")
-
-
-def valid_cmd(cmd: str, args: list[str]) -> str | None:
-    """Message d'erreur si la commande/arguments sont refusés, sinon None."""
-    if cmd.upper() not in EA_CMDS:
-        return f"Commande inconnue : {cmd[:20]}"
-    for a in args:
-        if not _ARG_OK.match(a):
-            return "Argument invalide."
-    return None
-
 
 @dataclass
 class Ctx:
@@ -67,11 +43,6 @@ class Ctx:
 async def send_cmd(ctx: Ctx, inst: Instance, cmd: str, args: list[str] | None = None) -> CmdResult:
     """Envoie une commande à l'EA et attend l'ack (⏳ → ✅/❌)."""
     return await ctx.cmdq.send_and_wait(inst.id, cmd, args or [], timeout=ctx.cfg.timing.ack_timeout_s)
-
-
-async def send_cmd_many(ctx: Ctx, insts: list[Instance], cmd: str, args: list[str] | None = None) -> list[tuple[Instance, CmdResult]]:
-    res = await asyncio.gather(*[send_cmd(ctx, i, cmd, args) for i in insts])
-    return list(zip(insts, res))
 
 
 async def action_start(ctx: Ctx, inst: Instance) -> str:

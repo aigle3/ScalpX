@@ -96,7 +96,7 @@ Légende : ☐ à faire · OK / KO à noter à la main.
 | H1 | Chat non autorisé | Écrire au bot depuis un autre compte Telegram | Aucune réponse ; ligne « chat non autorisé » dans le log | `data\logs\bot.log` | ☐ |
 | H2 | Second lancement | Lancer `python main.py` une 2e fois | Refusé : « Un autre bot tourne déjà » (code 3) | Console | ☐ |
 | H3 | Tableau de bord 24 h | Laisser tourner 24 h avec plusieurs comptes | Toujours le **même** message édité ; aucune erreur de flood | `findstr /i "flood retry" data\logs\bot.log` | ☐ |
-| H4 | Message épinglé supprimé | Supprimer le message du tableau de bord | Recréé automatiquement (≤ 15 s, ou en touchant 📊) | Telegram | ☐ |
+| H4 | Message du tableau de bord supprimé | Supprimer le message du tableau de bord | Recréé automatiquement (≤ 15 s, ou en touchant 📊) | Telegram | ☐ |
 | H5 | Notifications 🔒 🏁 ↩️ | Lors de B2 et B3 | Reçues correctement (regroupées, avec nom du compte) | Telegram | ☐ |
 | H6 | Rapport et ping | Attendre 22 h (ou bouton 📝 Rapport) ; bouton 🏓 Ping | Rapport complet (perf, cycles, clôtures, incidents, versions) ; Ping donne uptime et comptes 🟢 | Telegram | ☐ |
 | H7 | Endurance 48 h | 48 h sur démo avec plusieurs instances ; relever à 0 h / 24 h / 48 h : `Get-Process pythonw \| Select WS,CPU` | Pas de plantage, RAM du bot stable (sans dérive continue), CPU faible | PowerShell | ☐ |

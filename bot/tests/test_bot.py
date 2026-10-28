@@ -6,11 +6,11 @@ from pathlib import Path
 import pytest
 
 from bot import render
-from bot.actions import Ctx, valid_cmd
+from bot.actions import Ctx
 from bot.dashboard import Dashboard
 from bot.notify import Notifier
 from bot.router import Router
-from bot.ui import Confirmations, EditResult, resolve, resolve_target, short
+from bot.ui import Confirmations, EditResult, resolve, short
 from bot.wizard import ALIAS, CONFIRM, END, LOGIN, PASSWORD, SERVER, WizardCore
 from core.fsio import atomic_write
 from core.service import Notice
@@ -30,7 +30,6 @@ class FakeSender:
         self.sent: list[tuple[int, str, object, bool]] = []
         self.edits: list[tuple[int, str]] = []
         self.deleted: list[int] = []
-        self.pinned: list[int] = []
         self.photos: list[tuple] = []
         self.docs: list[tuple] = []
         self.gone: set[int] = set()
@@ -61,8 +60,6 @@ class FakeSender:
         self.order.append(f"delete:{message_id}")
         return True
 
-    async def pin(self, chat_id, message_id):
-        self.pinned.append(message_id)
 
     async def reply_menu(self, chat_id, text):
         return await self.send(chat_id, text, None, True)
@@ -117,7 +114,7 @@ def test_barre_et_formats():
 async def test_dashboard_vide_accueil_et_bouton_nouveau_compte(svc):
     ctx, sender, dash, *_ = svc
     mid = await dash.ensure()
-    assert sender.pinned == [] and ctx.db.meta_get("dash_msg_id") == str(mid)
+    assert ctx.db.meta_get("dash_msg_id") == str(mid)
     text, kb = sender.msgs[mid]
     assert "Aucun compte" in text and ("➕ Nouveau compte", "n") in kb[0]
 
@@ -150,7 +147,7 @@ async def test_dashboard_message_supprime_recree_et_id_conserve(svc):
     ctx.db.add_instance(Instance("1_a", 1, "a", "A", "x", 1, "5.0", DEMARRE))   # le contenu change → édition → GONE → recréé
     assert await dash.refresh(force=True) == "recreated"
     new = int(ctx.db.meta_get("dash_msg_id"))
-    assert new != mid and sender.pinned == []
+    assert new != mid
     # après un « redémarrage » du bot : même message, pas de nouvel envoi
     dash2 = Dashboard(ctx, sender, 1, Confirmations(), vps=lambda p: {})
     n = len(sender.sent)
@@ -251,52 +248,10 @@ async def test_suppression_confirmee_archive_le_dossier(svc):
     assert ctx.db.list() == []
 
 
-@pytest.mark.asyncio
-async def test_cmd_texte_validations_et_all_avec_confirmation(svc):
-    ctx, sender, dash, router, notifier, ea, conf = svc
-    st = ctx_stack(svc)
-    a = seed(st, 1, "Demo-Server 1")
-    b = seed(st, 2, "Demo-Server 1")
-    ea.start()
-    await asyncio.sleep(0.3)
-    try:
-        await router.cmd_cmd(["1", "RM_RF"])
-        assert "inconnue" in sender.sent[-1][1]
-        await router.cmd_cmd(["1", "FERMER_TERMINAL"])                          # pas dans la liste blanche : passe par « Arrêter »
-        assert "inconnue" in sender.sent[-1][1]
-        await router.cmd_cmd(["1", "LOT", "x;rm -rf"])
-        assert "Argument invalide" in sender.sent[-1][1]
-        await router.cmd_cmd(["999", "PING"])
-        assert "Aucun compte" in sender.sent[-1][1]
-        await router.cmd_cmd([str(a.login), "PING"])                            # un compte : exécution directe
-        await asyncio.sleep(0.5)
-        assert any("✅" in t for _, t in sender.edits)
-        n = len(sender.sent)
-        await router.cmd_cmd(["all", "PAUSE"])                                  # all + dangereux : confirmation
-        assert len(sender.sent) == n + 1 and "2 comptes" in sender.sent[-1][1]
-        assert ea.accounts[a.id]["etat"] == "ACTIF"
-        mid, _, kb, _ = sender.sent[-1]
-        ok_cb = kb[0][0][1]
-        assert ok_cb.startswith("sk:ok:")
-        await router.on_callback(ok_cb, mid)
-        for _ in range(40):
-            await asyncio.sleep(0.1)
-            if ea.accounts[a.id]["etat"] == "PAUSE" and ea.accounts[b.id]["etat"] == "PAUSE":
-                break
-        assert ea.accounts[a.id]["etat"] == "PAUSE" and ea.accounts[b.id]["etat"] == "PAUSE"
-    finally:
-        await ea.stop()
-
-
-def test_validation_commandes_et_resolution_cible(svc):
+def test_resolution_code_court(svc):
     ctx, *_ = svc
-    assert valid_cmd("ping", []) is None and valid_cmd("OBJECTIF", ["+5%"]) is None
-    assert valid_cmd("RM", []) and valid_cmd("LOT", ["a\nb"]) and valid_cmd("LOT", ["x" * 100])
     a = seed(ctx_stack(svc), 4242, "Demo-Server 1", running=False)
-    ctx.db.set_alias(a.id, "Alpha")
-    for tok in (a.id, short(a.id), "4242", "alpha", "ALL"):
-        assert [i.id for i in resolve_target(ctx.db, tok)] == [a.id]
-    assert resolve_target(ctx.db, "../../etc") == [] and resolve(ctx.db, "deadbeef") is None
+    assert resolve(ctx.db, short(a.id)).id == a.id and resolve(ctx.db, "deadbeef") is None and resolve(ctx.db, "../x") is None
 
 
 @pytest.mark.asyncio
@@ -306,7 +261,7 @@ async def test_ping_etat_rapport_export(svc):
     write_statut(ctx, a.id)
     ctx.db.add_withdrawal(a.id, 378.2, 503.2, 125.0)
     ctx.db.add_closure500(a.id, "OK", 503.2, 3.2)
-    await router.cmd_ping(100)
+    await router.cmd_ping()
     assert "pong" in sender.sent[-1][1]
     await router.cmd_rapport()
     rep = sender.sent[-1][1]
@@ -496,7 +451,7 @@ async def test_panneau_sans_commande_menu_boutons_et_retour_en_bas(svc):
     assert "/" not in "".join(labels)
     await router.cmd_start()                                                       # n'importe quel message : panneau EN BAS
     new = int(ctx.db.meta_get("dash_msg_id"))
-    assert new != mid and mid in sender.deleted and sender.pinned == []            # ancien supprimé, jamais épinglé
+    assert new != mid and mid in sender.deleted            # ancien supprimé
     n = len(sender.sent)
     assert await router.on_callback("d:png") == ""                                 # bouton Ping
     assert "pong" in sender.sent[-1][1]

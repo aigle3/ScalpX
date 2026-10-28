@@ -39,7 +39,7 @@ silent_mode       = false
 batch_window_s    = 4
 
 [dashboard]
-interval_s = 12              # édition du message épinglé : 10 à 15 s minimum
+interval_s = 12              # tableau de bord : 10 à 15 s minimum entre deux éditions
 page_size  = 8
 
 [reports]

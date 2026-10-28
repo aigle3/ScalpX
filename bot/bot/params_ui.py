@@ -1,4 +1,4 @@
-"""Écrans « ⚙️ Paramètres » : modification de TOUS les paramètres de l'EA par boutons (plus de commande /set).
+"""Écrans « ⚙️ Paramètres » : modification de TOUS les paramètres de l'EA par boutons.
 
 Valeurs courantes : commande EA PARAMS (texte « • clé = valeur »), mises en cache ; changements : commande EA SET clé valeur.
 Sans dépendance Telegram : renvoie (texte HTML, clavier).
