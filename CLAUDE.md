@@ -1,7 +1,8 @@
 # ScalpX — robot de trading multicompte (MT5 + bot Telegram central)
 
-Dépôt de publication : chaque commit sur `main` est téléchargé par le bot du VPS (toutes les minutes),
-qui propose « ⬆ Installer » dans Telegram. Ne publier que du code testé.
+Dépôt de publication. Chaque push sur `main` lance les tests GitHub (`.github/workflows/tests.yml`) ; s'ils passent,
+la branche `stable` avance et le bot du VPS (qui ne lit QUE `stable`) propose « ⬆ Installer » dans Telegram.
+Lancer les tests en local avant chaque push ; vérifier ensuite le résultat (`gh run list -R aigle3/ScalpX`).
 
 ## Structure
 - `bot/` : bot central Python 3.11+ (python-telegram-bot v21, SQLite). Tests : `cd bot && python -m pytest -q` (stub telegram dans tests/stubs).

@@ -39,15 +39,21 @@ Voir `LISEZMOI.txt` à la racine du dépôt : `INSTALL.bat` installe tout (BASE 
   (boutons des serveurs connus, ou saisie, mémorisée) → alias → confirmation. Échec : dossier archivé, aucun fantôme.
 - **Fiche compte** : pause, reprise, redémarrer, arrêter, lancer, reconnecter, mettre à jour l'EA, supprimer,
   **⚙️ Paramètres** (les 83 paramètres de l'EA par boutons), **🧰 Commandes EA**, graphique 7 jours.
-- **🛠 Système** : versions bot/EA, VPS, état de BASE et de GitHub, journaux (bot, compilation, plantages),
-  **🔨 Compiler l'EA**, **🔄 Redémarrer le bot**.
+- **🛠 Système** : versions bot/EA, VPS, état de BASE, de GitHub (et expiration du jeton), surveillance externe,
+  dernière sauvegarde, journaux (bot, compilation, plantages), **🔨 Compiler l'EA**, **🔄 Redémarrer le bot**,
+  **⏪ Revenir au bot x.y.z** (version précédente, gardée à chaque mise à jour).
+- **⏸ Tout en pause / ▶ Tout reprendre** (avec confirmation) ; fiche **🧰** : vacances, presets (charger, enregistrer,
+  supprimer, valeurs par défaut), valider les réglages, annuler l'objectif, **🛑 Tout fermer**.
+- **Surveillance externe** : `HEALTHCHECK_URL` (.env, ex. healthchecks.io) reçoit un ping par minute ; s'il cesse, le service prévient.
+- **Sauvegarde** de l'historique (`scalpx.db`) chaque nuit dans `%OneDrive%\ScalpX\sauvegardes` (14 conservées).
 - **⬆ Mises à jour** (🔔 si une mise à jour attend) : vérifie GitHub et propose **Installer** ; « Plus tard » la garde en attente.
 - **🚀 Déployer l'EA**, **📝 Rapport** (aussi chaque jour à 22 h), **📤 Export** CSV, **🔕 Silencieux**, **🏓 Ping**.
 - **Watchdog** : relance les terminaux DEMARRE disparus (3 fois par heure max, puis alerte) ; un arrêt volontaire n'est jamais relancé.
 
 ## Mises à jour
 
-1. Chaque commit sur `main` est téléchargé (toutes les minutes) dans `C:\ScalpX\release`.
+1. Chaque commit sur `main` est testé par GitHub ; s'il passe, la branche `stable` avance. Le bot télécharge `stable`
+   (toutes les minutes) dans `C:\ScalpX\release`.
 2. Telegram : « ⬆ Mise à jour disponible » avec la description et les versions (ex. Bot 1.2.0 → 1.3.0, EA 5.3.0 → 5.3.1).
 3. **Installer** : fichiers du bot copiés puis redémarrage du bot (les terminaux continuent) ; sources de l'EA et `.set` copiés
    dans BASE, `version.txt` écrit en dernier → compilation automatique (MetaEditor de BASE) → proposition de déploiement.
