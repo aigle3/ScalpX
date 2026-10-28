@@ -178,7 +178,7 @@ if (-not (Test-Path $envFile)) {
     Ok '.env existant conservé.'
 }
 $cfgFile = Join-Path $BotDir 'config.toml'
-$srv = Ask 'Serveur(s) MT5 de tes comptes, séparés par des virgules (ex: RoboForex-Pro). Entrée = ne pas changer'
+$srv = Ask 'FACULTATIF - serveur(s) MT5 à pré-enregistrer, séparés par des virgules. Entrée = passer (saisi au premier compte, puis mémorisé)'
 if ($srv) {
     $list = @($srv -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     if ($list.Count -gt 0) {

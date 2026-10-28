@@ -15,8 +15,8 @@ set_name       = "scalpx_v5.set"        # MQL5\Presets
 symbol         = "XAUUSD"
 period         = "M5"
 profile        = "Default"              # profil MT5 dont le bot supprime les graphiques (dans chaque terminal, jamais dans BASE) : seul le graphique de l'EA s'ouvre
-default_server = "MonBroker-Demo"       # <-- à adapter
-servers        = ["MonBroker-Demo", "MonBroker-Live"]   # <-- noms EXACTS des serveurs MT5
+default_server = ""                     # facultatif : serveur coché par défaut
+servers        = []                     # facultatif : saisis au premier compte depuis Telegram, puis mémorisés
 
 [timing]
 heartbeat_stale_s   = 30     # heartbeat plus vieux : 🟠

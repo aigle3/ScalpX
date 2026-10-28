@@ -90,6 +90,8 @@ class WizardCore:
         if s["mode"] == "recon":
             return await self._ask_confirm(chat)
         servers = self.known_servers()
+        if not servers:                                   # aucun serveur connu (installation neuve) : saisie directe
+            return await self.on_server_other(chat)
         default = self.ctx.cfg.mt5.default_server
         kb = [[(("✔ " if sv == default else "") + sv, f"srv:{i}")] for i, sv in enumerate(servers)]
         kb.append([("✏️ Autre serveur…", "srv:new")])

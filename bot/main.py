@@ -157,7 +157,7 @@ def check_install(cfg: Config) -> int:
     line(cfg.paths.common().exists(), f"dossier Common\\Files : {cfg.paths.common()}")
     line(bool(cfg.token), "TELEGRAM_TOKEN présent dans .env")
     line(bool(cfg.allowed_chats), f"ALLOWED_CHAT_IDS : {cfg.allowed_chats}")
-    line(bool(cfg.mt5.servers), f"serveurs autorisés : {cfg.mt5.servers}")
+    print(f"[INFO] serveurs pré-enregistrés : {cfg.mt5.servers or 'aucun (saisis au premier compte, puis mémorisés)'}")
     try:
         cfg.paths.instances.mkdir(parents=True, exist_ok=True)
         cfg.paths.archives.mkdir(parents=True, exist_ok=True)

@@ -6,7 +6,7 @@ AVANT : installe le MetaTrader 5 de ton broker (emplacement par defaut), ne te c
 
 1. Sur le VPS, ouvre github.com/aigle3/scalpx (connecte-toi) > bouton vert "Code" > "Download ZIP".
 2. Decompresse le ZIP (par ex. sur le Bureau) et double-clique sur INSTALL.bat.
-3. Reponds aux questions : token Telegram, chat_id, serveur MT5, jeton GitHub (github_pat_..., lecture seule).
+3. Reponds aux questions : token Telegram, chat_id, jeton GitHub (le serveur MT5 est facultatif) (github_pat_..., lecture seule).
 4. A la fin, le bot demarre et se relance tout seul a chaque ouverture de session.
    Tu peux ensuite supprimer le dossier decompresse.
 

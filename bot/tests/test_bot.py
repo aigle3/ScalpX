@@ -660,3 +660,15 @@ async def test_mise_a_jour_onedrive_proposee_puis_installee(svc, tmp_path, monke
     assert "installée" in sender.msgs[mid][0] and restarted == [bot_root] and u.STOP.is_set()
     assert (bot_root / "bot" / "x.py").read_text() == "X = 2"
     u.STOP.clear()
+
+
+@pytest.mark.asyncio
+async def test_aucun_serveur_connu_saisie_directe(svc):
+    from bot.wizard import SERVER_TEXT
+    ctx, sender, *_ = svc
+    ctx.cfg.mt5.servers, ctx.cfg.mt5.default_server = [], ""
+    w = WizardCore(ctx, sender, 1, None)
+    await w.begin_new(1)
+    await w.on_login(1, "123456")
+    assert await w.on_password(1, "secret", None) == SERVER_TEXT
+    assert "nom exact du serveur" in sender.sent[-1][1]
