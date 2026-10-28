@@ -97,6 +97,7 @@ class InstanceManager:
             return "deja_arrete"
         if not force and not await self.wait_close500(inst):
             return "attente_cloture"
+        self.db.meta_set(f"closing_{inst.id}", str(int(time.time())))   # fermeture voulue : « 🔌 arrêté » expliqué ainsi
         if not force:
             self.cmdq.send(inst.id, "FERMER_TERMINAL")
             if await self.wait_exit(inst, self.cfg.timing.stop_wait_s):

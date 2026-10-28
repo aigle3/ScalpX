@@ -261,3 +261,29 @@ def test_nettoyage_des_orphelins(tmp_path: Path):
     fresh.write_text("{}")
     (tmp_path / "statut_1_a.json").write_text("{}")
     assert q.cleanup_orphans(600) == 1 and not old.exists() and fresh.exists() and (tmp_path / "statut_1_a.json").exists()
+
+
+def test_explication_arret_ea():
+    from core.service import explain_stop
+    assert "à la demande du bot" in explain_stop(9, True)
+    assert "sans demande du bot" in explain_stop(9, False) and "watchdog" in explain_stop(9, False)
+    assert "recompilé" in explain_stop(2, False) and "code 42" in explain_stop(42, False)
+
+
+@pytest.mark.asyncio
+async def test_monitor_arret_ea_explique(stack):
+    cfg, db, procs, status, cmdq, mgr, ea = stack
+    db.add_instance(Instance("2_b", 2, "b", "Beta", str(cfg.paths.instances / "2_b"), 1, "5.0", DEMARRE))
+    from core.events import EventReader
+    got = []
+
+    async def emit(n):
+        got.append(n)
+
+    mon = Monitor(cfg, db, status, EventReader(cfg.paths.common()), emit)
+    ea.event("2_b", "ARRET_EA", "🔌 ScalpX arrêté (raison 9)", 1, {"raison": 9}, 1)
+    await mon.poll_events()
+    db.meta_set("closing_2_b", str(int(time.time())))                      # fermeture demandée par le bot
+    ea.event("2_b", "ARRET_EA", "🔌 ScalpX arrêté (raison 9)", 1, {"raison": 9}, 2)
+    await mon.poll_events()
+    assert "sans demande du bot" in got[0].text and "à la demande du bot" in got[1].text

@@ -41,6 +41,31 @@ class Notice:
 Emit = Callable[[Notice], Awaitable[None]]
 
 
+# OnDeinit de l'EA (constantes REASON_* de MQL5)
+DEINIT_REASONS = {
+    0: "l'EA s'est arrêté de lui-même",
+    1: "EA retiré du graphique (à la main)",
+    2: "EA recompilé : il redémarre avec la nouvelle version",
+    3: "symbole ou période du graphique changé : l'EA redémarre",
+    4: "graphique fermé",
+    5: "paramètres modifiés dans MT5 : l'EA redémarre",
+    6: "changement de compte ou reconnexion au serveur : l'EA redémarre",
+    7: "modèle appliqué au graphique : l'EA redémarre",
+    8: "échec de démarrage de l'EA (voir le journal Experts de MT5)",
+    9: "terminal MT5 fermé",
+}
+
+
+def explain_stop(reason: int, expected: bool) -> str:
+    """Texte lisible pour l'événement ARRET_EA."""
+    if reason == 9 and expected:
+        return "🔌 Terminal fermé à la demande du bot (arrêt, redémarrage ou mise à jour de l'EA). Normal."
+    why = DEINIT_REASONS.get(reason, f"code {reason}")
+    if reason == 9:
+        why += " sans demande du bot (fermé à la main, redémarrage de Windows ou plantage) ; le watchdog le relance s'il doit tourner"
+    return f"🔌 EA arrêté : {why}."
+
+
 def event_to_notice(ev: Evenement, label: str, common: Path) -> Notice | None:
     """Transforme un événement de l'EA en notification (None = stocké mais non notifié)."""
     if ev.type == "CASHFLOW" and not ev.texte:
@@ -93,6 +118,14 @@ class Monitor:
                 self.db.add_event(inst.id, ev.ts or int(time.time()), ev.type, ev.prio, ev.texte)
                 self._track(inst.id, ev)
                 notice = event_to_notice(ev, inst.label, self.cfg.paths.common())
+                if notice is not None and ev.type == "ARRET_EA":
+                    reason = ev.data.get("raison", -1) if isinstance(ev.data, dict) else -1
+                    try:
+                        closing = int(self.db.meta_get(f"closing_{inst.id}") or 0)
+                    except ValueError:
+                        closing = 0
+                    when = ev.ts or int(time.time())
+                    notice.text = explain_stop(int(reason), abs(when - closing) < 180)
                 if notice is not None:
                     await self.emit(notice)
         return n
