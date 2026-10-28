@@ -9,6 +9,7 @@ import time
 
 from core.service import Notice
 from mt5 import base as basemod
+from core.summary import FILTERS, SORTS
 from mt5.deploy import plan_deploy
 from . import actions as act
 from . import render
@@ -87,6 +88,18 @@ class Router:
             self.dash.set_page(int(p[2]))
         elif sub == "home":
             self.dash.goto("dash")
+        elif sub in ("lst", "act", "rpt", "logs"):
+            self.dash.goto(sub)
+            self.dash.silent = self.notifier.silent_mode
+        elif sub == "fc":                                   # filtre suivant
+            i = FILTERS.index(self.dash.flt) if self.dash.flt in FILTERS else 0
+            self.dash.set_filter(FILTERS[(i + 1) % len(FILTERS)])
+        elif sub == "sc":                                   # tri suivant
+            i = SORTS.index(self.dash.sort) if self.dash.sort in SORTS else 0
+            self.dash.set_sort(SORTS[(i + 1) % len(SORTS)])
+        elif sub == "chart":
+            await self.cmd_courbe()
+            return ""
         elif sub == "sys":
             self.dash.goto("sys")
         elif sub in ("log", "clog", "crash"):
@@ -142,7 +155,7 @@ class Router:
             return ""
         elif sub == "sil":
             await self.cmd_silencieux("off" if self.notifier.silent_mode else "on")
-            return ""
+            self.dash.silent = self.notifier.silent_mode
         elif sub == "exp":
             tables = ("balances", "events", "closures500", "withdrawals", "cycles")
             await self.sender.send(self.chat_id, "📤 <b>Export CSV</b> — quelle table ?",
@@ -248,6 +261,8 @@ class Router:
             dash.goto("acc", inst.id)
         elif verb == "cmds":
             dash.goto("cmds", inst.id)
+        elif verb == "term":
+            dash.goto("term", inst.id)
         elif verb == "pause":
             self._bg(self._run_cmd_flash(inst, "PAUSE"))
         elif verb == "resume":
@@ -430,11 +445,16 @@ class Router:
 
     async def cmd_rapport(self) -> None:
         text = build_report(self.ctx, time.time() - 86400)
-        await self.sender.send(self.chat_id, text, None, True)
+        await self.sender.send(self.chat_id, text, [[("✖ Fermer", "d:close")]], True)
+
+    async def cmd_courbe(self) -> None:
         series = {v.inst.label: self.ctx.db.balances(v.inst.id, int(time.time()) - 7 * 86400) for v in self.ctx.views()}
         png = total_chart(series, "Soldes — 7 derniers jours")
         if png:
             await self.sender.photo(self.chat_id, png, "Historique des soldes", True)
+        else:
+            self.dash.flash("📈 Pas encore assez d'historique pour la courbe.")
+            await self.dash.refresh(force=True)
 
     async def cmd_export(self, table: str) -> None:
         try:

@@ -177,14 +177,18 @@ async def test_dashboard_liste_filtres_tri_pagination(svc):
     write_statut(ctx, a.id, solde=503.2, etat="ARRET_500", solde_plus_flottant_ea=503.2)
     write_statut(ctx, b.id, solde=300.0, solde_plus_flottant_ea=350.0)
     write_statut(ctx, c.id, solde=130.0, etat="PAUSE")
+    text, kb = dash.render()                                                       # accueil : état de l'ensemble
+    assert "🔴 3" in text and "À retirer" in text and "378.20" in text            # total à retirer (503.2 − 125)
+    assert "▰" in text and "<pre>" in text and "Aucune alerte" not in text
+    assert [d for row in kb for _, d in row] == ["d:lst", "d:act", "d:rpt", "d:sys"]
+    dash.goto("lst")                                                                 # 👥 Comptes : liste détaillée
     text, kb = dash.render()
-    assert "3 comptes" in text and "À retirer" in text and "378.20" in text        # total à retirer (503.2 − 125)
-    assert "▰" in text and "page 1/2" in text and "<pre>" in text
+    assert "page 1/2" in text
     flat = [d for row in kb for _, d in row]
-    assert "d:f:retirer" in flat and "a:" + short(a.id) in flat and "n" in flat
+    assert "d:fc" in flat and "d:sc" in flat and "a:" + short(a.id) in flat and "n" in flat
     dash.set_filter("retirer")
     t2, _ = dash.render()
-    assert "page 1/1" in t2 and t2.count("🏁500") == 1
+    assert "page" not in t2 and t2.count("🏁500") == 1
     dash.set_filter("pause")
     assert "⏸" in dash.render()[0]
     dash.set_filter("obsolete")
@@ -444,11 +448,15 @@ async def test_panneau_sans_commande_menu_boutons_et_retour_en_bas(svc):
     ctx, sender, dash, router, notifier, ea, conf = svc
     seed(ctx_stack(svc), 501, "Demo-Server 1", running=False)
     mid = await dash.ensure()
-    text, kb = dash.render()
-    labels = [t for row in kb for t, _ in row]
-    for want in ("➕ Nouveau compte", "🚀 Déployer l'EA", "📝 Rapport", "📤 Export", "🔕 Silencieux", "🏓 Ping"):
-        assert want in labels                                                      # tout passe par des boutons
+    labels = []
+    for scr in ("dash", "act", "rpt", "sys", "logs"):                               # tout passe par des boutons
+        dash.goto(scr)
+        labels += [t for row in dash.render()[1] for t, _ in row]
+    for want in ("➕ Nouveau compte", "🚀 Déployer l'EA", "📝 Rapport des 24 h", "📤 Export CSV", "🔕 Mode silencieux",
+                 "🏓 Ping", "📜 Bot", "⏸ Tout en pause"):
+        assert want in labels
     assert "/" not in "".join(labels)
+    dash.goto("dash")
     await router.cmd_start()                                                       # n'importe quel message : panneau EN BAS
     new = int(ctx.db.meta_get("dash_msg_id"))
     assert new != mid and mid in sender.deleted            # ancien supprimé
@@ -634,11 +642,13 @@ async def test_sans_compte_boutons_systeme_et_journaux(svc):
     ctx, sender, dash, router, notifier, ea, conf = svc
     text, kb = dash.render()
     datas = [d for row in kb for _, d in row]
-    assert "n" in datas and "d:sys" in datas and "d:upd" in datas and "d:png" in datas
+    assert datas == ["n", "d:sys"]                                                  # sans compte : créer, ou Système
     await router.on_callback("d:sys")
     text, kb = dash.render()
     assert "Système" in text and "BASE" in text and "Comptes : 0" in text
-    assert "d:log" in [d for row in kb for _, d in row]
+    assert "d:logs" in [d for row in kb for _, d in row]
+    await router.on_callback("d:logs")
+    assert "d:log" in [d for row in dash.render()[1] for _, d in row]
     logs = ctx.cfg.paths.data / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     (logs / "bot.log").write_text("ligne 1\nligne <2>\n", encoding="utf-8")

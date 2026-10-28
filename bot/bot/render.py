@@ -42,20 +42,62 @@ def welcome_empty() -> str:
             "(numéro de compte, mot de passe, serveur).")
 
 
-def summary_header(t: Totals, vps: dict[str, float], cur: str) -> str:
-    states = " ".join(f"{icon} {n}" for icon, n in sorted(t.by_icon.items()))
+SEP = "━━━━━━━━━━━━━━━━━━"
+ICON_ORDER = (("🟢", "actif"), ("🟠", "alerte"), ("🔴", "arrêté"), ("⚙️", "maint."), ("🔒", "clôture"), ("⚪", "à l'arrêt"))
+
+
+def home_line(v: AccountView, label_w: int = 10) -> str:
+    """Ligne compacte de l'accueil : icône, nom, solde, barre vers 500."""
+    name = v.inst.label[:label_w].ljust(label_w)
+    if v.st is None:
+        return f"{v.health.icon} {name} {'—':>9}"
+    pct = int(round(min(v.st.progress500(), 9.99) * 100))
+    return f"{v.health.icon} {name} {v.st.solde:>9.2f} {bar(v.st.progress500())} {pct:>3}%{STATE_TAG.get(v.st.etat, '')}"
+
+
+def home_text(views: list[AccountView], t: Totals, vps: dict[str, float], cur: str, bot_v: str, ea_v: str,
+              update_pending: bool, data_age_s: float | None, now: float, max_lines: int = 8) -> str:
+    """Accueil : état de l'ensemble (comptes, argent, alertes, VPS), puis une ligne par compte."""
     c = "" if t.currency_mixed else cur
-    lines = [
-        f"<b>ScalpX</b> · {t.count} compte{'s' if t.count > 1 else ''}   {states}",
-        f"💰 Solde {money(t.balance, c)}   Equity {money(t.equity, c)}",
-        f"📊 Latent {money(t.pl_latent, c, True)}   Jour {money(t.pl_jour, c, True)}",
-    ]
-    if t.to_withdraw > 0:
-        lines.append(f"💸 <b>À retirer : {money(t.to_withdraw, c)}</b>")
-    if t.currency_mixed:
-        lines.append("⚠️ devises mélangées : totaux indicatifs")
-    lines.append(f"🖥 CPU {vps.get('cpu', 0):.0f}%  RAM {vps.get('ram', 0):.0f}%  Disque {vps.get('disk', 0):.0f}%")
+    counts = "   ".join(f"{icon} {t.by_icon.get(icon, 0)}" for icon, _ in ICON_ORDER
+                        if t.by_icon.get(icon, 0) or icon in ("🟢", "🟠", "🔴"))
+    lines = [f"📊 <b>ScalpX</b> — {time.strftime('%H:%M', time.localtime(now))}", SEP, counts,
+             f"💰 Solde <b>{money(t.balance, c)}</b> · jour {money(t.pl_jour, c, True)}"]
+    if t.pl_latent:
+        lines.append(f"📉 Latent {money(t.pl_latent, c, True)}")
+    lines.append(f"💸 À retirer : <b>{money(t.to_withdraw, c)}</b>" if t.to_withdraw > 0 else f"💸 À retirer : {money(0, c)}")
+    alerts = [v for v in views if v.health.icon in ("🟠", "🔴")]
+    if alerts:
+        for v in alerts[:3]:
+            why = "; ".join(v.health.reasons[:2]) if v.health.reasons else "à vérifier"
+            lines.append(f"{v.health.icon} <b>{esc(v.inst.label)}</b> : {esc(why)}")
+        if len(alerts) > 3:
+            lines.append(f"… et {len(alerts) - 3} autre(s) alerte(s)")
+    else:
+        lines.append("✅ Aucune alerte")
+    hot = [f"{k.upper()} {vps.get(k, 0):.0f}%" for k, lim in (("cpu", 85), ("ram", 85), ("disk", 90)) if vps.get(k, 0) >= lim]
+    lines.append(("⚠️ VPS chargé : " + " · ".join(hot) if hot else "🖥 VPS OK") + f" · Bot {esc(bot_v)} · EA {esc(ea_v or '?')}")
+    if update_pending:
+        lines.append("🔔 Mise à jour disponible : 🛠 Système")
+    if data_age_s is not None and data_age_s > 45:
+        lines.append(f"⚠️ données vieilles de {ago(data_age_s)}")
+    lines.append(SEP)
+    shown = sorted(views, key=lambda v: (v.health.icon != "🔴", v.health.icon != "🟠", v.inst.label.lower()))[:max_lines]
+    lines.append("<pre>" + "\n".join(esc(home_line(v)) for v in shown) + "</pre>")
+    if len(views) > max_lines:
+        lines.append(f"… et {len(views) - max_lines} autre(s) : 👥 Comptes")
     return "\n".join(lines)
+
+
+def list_text(page_views: list[AccountView], total: int, page: int, pages: int, flt: str, sort: str) -> str:
+    out = [f"👥 <b>Comptes</b> · {total}", ""]
+    if page_views:
+        out.append("<pre>" + "\n".join(esc(account_line(v)) for v in page_views) + "</pre>")
+    else:
+        out.append("<i>Aucun compte pour ce filtre.</i>")
+    out.append(f"🔎 {FILTER_LABELS.get(flt, flt)} · ↕ {SORT_LABELS.get(sort, sort)}" + (f" · page {page + 1}/{pages}" if pages > 1 else ""))
+    out.append("<i>Touche un compte pour sa fiche.</i>")
+    return "\n".join(out)
 
 
 def account_line(v: AccountView, label_w: int = 10) -> str:
@@ -68,21 +110,6 @@ def account_line(v: AccountView, label_w: int = 10) -> str:
     flag = "⬆" if v.outdated else " "
     return (f"{v.health.icon} {name} {st.solde:>9.2f} {st.positions:>2}p "
             f"{bar(st.progress500())} {pct:>3}% c{st.cycle}{flag}{STATE_TAG.get(st.etat, '')}")
-
-
-def dashboard_text(views: list[AccountView], page_views: list[AccountView], t: Totals, vps: dict[str, float],
-                   page: int, pages: int, flt: str, sort: str, cur: str, data_age_s: float | None) -> str:
-    if t.count == 0:
-        return welcome_empty()
-    out = [summary_header(t, vps, cur), ""]
-    if page_views:
-        out.append("<pre>" + "\n".join(esc(account_line(v)) for v in page_views) + "</pre>")
-    else:
-        out.append("<i>Aucun compte pour ce filtre.</i>")
-    out.append(f"Filtre : <b>{FILTER_LABELS.get(flt, flt)}</b> · tri : <b>{SORT_LABELS.get(sort, sort)}</b> · page {page + 1}/{pages}")
-    if data_age_s is not None:
-        out.append(f"🕒 données vieilles de {ago(data_age_s)}")
-    return "\n".join(out)
 
 
 def account_card(v: AccountView, withdrawn: float, closures: int, now: float | None = None) -> str:

@@ -27,6 +27,7 @@ class Dashboard:
         self.vps = vps
         self.params = ParamsUI(ctx)
         self.presets: dict[str, list[str]] = {}             # noms des presets de l'EA, par compte
+        self.silent = False                                  # mode silencieux (libellé du bouton de l'écran Actions)
         self.screen: tuple = ("dash",)
         self.confirm_back: tuple = ("dash",)
         self.flt, self.sort, self.page = "all", "nom", 0
@@ -107,50 +108,100 @@ class Dashboard:
             if inst is not None:
                 return self.params.render(self.screen, inst.label, self._flash_text())
             self.screen = ("dash",)
-        return self._render_dash(now)
+        if kind == "term":
+            r = self._render_term(self.screen[1])
+            if r:
+                return r
+            self.screen = ("dash",)
+        if kind == "lst":
+            return self._render_list(now)
+        if kind == "act":
+            return self._render_actions()
+        if kind == "rpt":
+            return self._render_reports()
+        if kind == "logs":
+            return self._render_logs()
+        return self._render_home(now)
 
-    def _render_dash(self, now: float) -> tuple[str, Keyboard]:
+    # ---- accueil : l'état de l'ensemble d'un coup d'œil, 4 menus
+    def _with_flash(self, text: str) -> str:
+        fl = self._flash_text()
+        return f"{fl}\n\n{text}" if fl else text
+
+    def _render_home(self, now: float) -> tuple[str, Keyboard]:
+        from core.version import bot_version
+        from mt5 import base as basemod
         views = self.ctx.views()
         pending = bool(self.ctx.db.meta_get("update_pending"))
-        tools: Keyboard = [[("🛠 Système", "d:sys"), (("🔔 " if pending else "") + "⬆ Mises à jour", "d:upd")]]
+        sys_btn = ("🛠 Système" + (" 🔔" if pending else ""), "d:sys")
         if not views:
-            fl = self._flash_text()
-            kb_new: Keyboard = [[("➕ Nouveau compte", "n")]] + tools + [[("📝 Rapport", "d:rep"), ("🏓 Ping", "d:png")]]
-            return (f"{fl}\n\n" if fl else "") + render.welcome_empty(), kb_new
+            kb: Keyboard = [[("➕ Nouveau compte", "n")], [sys_btn]]
+            return self._with_flash(render.welcome_empty()), kb
         t = totals(views)
+        cur = next((v.st.devise for v in views if v.st and v.st.devise), "")
+        vps = self.vps(self.ctx.cfg.paths.data)
+        ages = [v.st.age_s(now) for v in views if v.st]
+        text = render.home_text(views, t, vps, cur, bot_version(), basemod.read_version(self.ctx.cfg.paths.base),
+                                pending, min(ages) if ages else None, now)
+        kb = [[("👥 Comptes", "d:lst"), ("⚡ Actions", "d:act")],
+              [("📈 Rapports", "d:rpt"), sys_btn]]
+        return self._with_flash(text), kb
+
+    # ---- 👥 comptes : liste détaillée, filtre et tri (un bouton chacun, qui fait défiler les choix)
+    def _render_list(self, now: float) -> tuple[str, Keyboard]:
+        views = self.ctx.views()
         filtered = apply_sort(apply_filter(views, self.flt), self.sort)
         page_views, self.page, pages = render.paginate(filtered, self.page, self.ctx.cfg.dashboard.page_size)
-        cur = next((v.st.devise for v in views if v.st and v.st.devise), "")
-        ages = [v.st.age_s(now) for v in views if v.st]
-        age = min(ages) if ages else None
-        text = render.dashboard_text(views, page_views, t, self.vps(self.ctx.cfg.paths.data), self.page, pages, self.flt, self.sort, cur, None)
-        stale = age is not None and age > 45
-        text += "\n" + (f"⚠️ données vieilles de {render.ago(age)}" if stale and age is not None else "🟢 données fraîches")
-        fl = self._flash_text()
-        if fl:
-            text = f"{fl}\n\n{text}"
-        kb: Keyboard = []
-        row: list[tuple[str, str]] = []
-        for v in page_views:
-            row.append((f"{v.health.icon} {v.inst.label[:14]}", f"a:{short(v.inst.id)}"))
-            if len(row) == 2:
-                kb.append(row)
-                row = []
-        if row:
-            kb.append(row)
-        kb.append([((("• " if f == self.flt else "") + FILTER_LABELS[f]), f"d:f:{f}") for f in ("all", "actifs", "retirer")])
-        kb.append([((("• " if f == self.flt else "") + FILTER_LABELS[f]), f"d:f:{f}") for f in ("pause", "alertes", "obsolete")])
-        kb.append([((("• " if s == self.sort else "") + SORT_LABELS[s]), f"d:s:{s}") for s in SORTS])
-        nav: list[tuple[str, str]] = []
+        text = render.list_text(page_views, len(views), self.page, pages, self.flt, self.sort)
+        kb: Keyboard = [[(f"{v.health.icon} {v.inst.label[:24]}", f"a:{short(v.inst.id)}")] for v in page_views]
+        kb.append([(f"🔎 {FILTER_LABELS[self.flt]}", "d:fc"), (f"↕ {SORT_LABELS[self.sort]}", "d:sc")])
         if pages > 1:
-            nav = [("◀", f"d:p:{self.page - 1}"), (f"{self.page + 1}/{pages}", "d:r"), ("▶", f"d:p:{self.page + 1}")]
-        kb.append(nav + [("🔃", "d:r")] if nav else [("🔃 Actualiser", "d:r")])
-        kb.append([("➕ Nouveau compte", "n")])
-        kb.append([("⏸ Tout en pause", "d:pall"), ("▶ Tout reprendre", "d:rall")])
-        kb.extend(tools)
-        kb.append([("🚀 Déployer l'EA", "d:dep"), ("📝 Rapport", "d:rep")])
-        kb.append([("📤 Export", "d:exp"), ("🔕 Silencieux", "d:sil"), ("🏓 Ping", "d:png")])
-        return text, kb
+            kb.append([("◀", f"d:p:{self.page - 1}"), (f"{self.page + 1}/{pages}", "d:r"), ("▶", f"d:p:{self.page + 1}")])
+        kb.append([("⬅ Accueil", "d:home"), ("➕ Nouveau compte", "n")])
+        return self._with_flash(text), kb
+
+    def _render_actions(self) -> tuple[str, Keyboard]:
+        silent = self.silent
+        text = ("⚡ <b>Actions</b>\n\n"
+                "Sur tous les comptes, avec confirmation.\nPour un seul compte : 👥 Comptes → le compte.")
+        kb: Keyboard = [
+            [("⏸ Tout en pause", "d:pall"), ("▶ Tout reprendre", "d:rall")],
+            [("🚀 Déployer l'EA", "d:dep"), ("➕ Nouveau compte", "n")],
+            [(("🔔 Rétablir le son" if silent else "🔕 Mode silencieux"), "d:sil")],
+            [("⬅ Accueil", "d:home")],
+        ]
+        return self._with_flash(text), kb
+
+    def _render_reports(self) -> tuple[str, Keyboard]:
+        text = "📈 <b>Rapports</b>\n\nLe rapport quotidien arrive aussi tout seul chaque soir."
+        kb: Keyboard = [
+            [("📝 Rapport des 24 h", "d:rep"), ("📈 Courbe des soldes", "d:chart")],
+            [("📤 Export CSV", "d:exp")],
+            [("⬅ Accueil", "d:home")],
+        ]
+        return self._with_flash(text), kb
+
+    def _render_logs(self) -> tuple[str, Keyboard]:
+        kb: Keyboard = [
+            [("📜 Bot", "d:log"), ("🧾 Compilation", "d:clog"), ("💥 Plantages", "d:crash")],
+            [("⬅ Système", "d:sys")],
+        ]
+        return self._with_flash("📜 <b>Journaux</b>\n\nLes dernières lignes arrivent dans un message à part (✖ pour le fermer)."), kb
+
+    def _render_term(self, iid: str) -> tuple[str, Keyboard] | None:
+        inst = self.ctx.db.get(iid)
+        if inst is None:
+            return None
+        c = short(iid)
+        kb: Keyboard = [
+            [("🔄 Redémarrer", f"a:{c}:restart"), ("🚀 Lancer", f"a:{c}:start"), ("🛑 Arrêter", f"a:{c}:stop")],
+            [("🔑 Reconnecter", f"a:{c}:recon"), ("⬆ Mettre à jour l'EA", f"a:{c}:update")],
+            [("🗑 Supprimer le compte", f"a:{c}:delete")],
+            [("⬅ Fiche", f"a:{c}")],
+        ]
+        text = (f"🖥 <b>Terminal — {render.esc(inst.label)}</b>\n\n"
+                "Gestion du terminal MT5 de ce compte (les positions restent chez le broker).")
+        return self._with_flash(text), kb
 
     def _render_card(self, iid: str, now: float) -> tuple[str, Keyboard] | None:
         v = self.ctx.view_of(iid)
@@ -163,11 +214,10 @@ class Dashboard:
             text = f"{fl}\n\n{text}"
         c = short(iid)
         kb: Keyboard = [
-            [("⏸ Pause", f"a:{c}:pause"), ("▶️ Reprise", f"a:{c}:resume"), ("🔄 Redémarrer", f"a:{c}:restart")],
-            [("🛑 Arrêter", f"a:{c}:stop"), ("🚀 Lancer", f"a:{c}:start"), ("🔑 Reconnecter", f"a:{c}:recon")],
-            [("⬆ Mettre à jour l'EA", f"a:{c}:update"), ("🗑 Supprimer", f"a:{c}:delete")],
-            [("⚙️ Paramètres", f"p:{c}"), ("🧰 Commandes EA", f"a:{c}:cmds"), ("📈 Graphique", f"a:{c}:chart")],
-            [("🔃 Actualiser", f"a:{c}:refresh"), ("⬅ Retour", "d:home")],
+            [("⏸ Pause", f"a:{c}:pause"), ("▶️ Reprise", f"a:{c}:resume")],
+            [("⚙️ Paramètres", f"p:{c}"), ("🧰 Commandes EA", f"a:{c}:cmds")],
+            [("🖥 Terminal", f"a:{c}:term"), ("📈 Graphique", f"a:{c}:chart")],
+            [("⬅ Comptes", "d:lst"), ("🔃", f"a:{c}:refresh")],
         ]
         return text, kb
 
