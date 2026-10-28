@@ -121,7 +121,12 @@ class Dashboard:
             return ((f"{fl}\n\n" if fl else "") + system_text(self.ctx, self.vps(self.ctx.cfg.paths.data)),
                     system_kb(bool(self.ctx.db.meta_get("update_pending")), upd.backup_version(BOT_ROOT)))
         if kind in ("prm", "prg", "prp"):
-            inst = act_target(self.ctx, self.screen[1])
+            sid = self.screen[1]
+            if sid.startswith(pui.PREFIX):                  # réglages d'un preset (gardé par le bot)
+                name = sid[len(pui.PREFIX):]
+                inst = pui.PresetTarget(name) if name in self.store.presets else None
+            else:
+                inst = act_target(self.ctx, sid)
             if inst is not None:
                 return self.params.render(self.screen, inst.label, self._flash_text())
             self.screen = ("dash",)

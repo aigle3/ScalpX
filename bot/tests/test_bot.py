@@ -948,6 +948,14 @@ async def test_presets_centraux_creer_appliquer_modifier_controler(svc):
         idx = next(i for i, p in enumerate(pui.ps.cat.PARAMS) if p[0] == "fast")
         await router.on_callback(f"p:{c}")
         assert await _until(lambda: dash.params.cached("preset:base").get("fast") == "12")
+        text, kb = dash.render()                                       # l'écran des catégories s'affiche bien
+        assert "Preset « base »" in text and dash.screen[0] == "prm"
+        assert any(d == f"p:{c}:g0" for row in kb for _, d in row) and any(d == f"s:o:{c}" for row in kb for _, d in row)
+        await router.on_callback(f"p:{c}:g0")
+        text, kb = dash.render()
+        assert dash.screen[0] == "prg" and any("EMA rapide · 12" in t for row in kb for t, _ in row)
+        await router.on_callback(f"p:{c}:k{next(i for i, p in enumerate(pui.ps.cat.PARAMS) if p[0] == 'fast')}")
+        assert dash.screen[0] == "prp" and "Valeur actuelle : <b>12</b>" in dash.render()[0]
         await router.on_callback(f"p:{c}:s{idx}:1")
         assert await _until(lambda: ea.accounts[a.id]["params"]["fast"] == "13" and ea.accounts[b.id]["params"]["fast"] == "13")
         assert dash.store.presets["base"]["fast"] == "13"
