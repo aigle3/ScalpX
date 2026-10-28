@@ -27,6 +27,7 @@ class Dashboard:
         self.vps = vps
         self.params = ParamsUI(ctx)
         self.presets: dict[str, list[str]] = {}             # noms des presets de l'EA, par compte
+        self.filters: tuple[float, str, str] | None = None  # (heure, compte de référence, texte FILTRES de l'EA)
         self.silent = False                                  # mode silencieux (libellé du bouton de l'écran Actions)
         self.screen: tuple = ("dash",)
         self.confirm_back: tuple = ("dash",)
@@ -128,6 +129,8 @@ class Dashboard:
             return self._render_reports()
         if kind == "logs":
             return self._render_logs()
+        if kind == "flt":
+            return self._render_filters(now)
         if kind == "gterm":
             return self._render_gterm()
         return self._render_home(now)
@@ -152,7 +155,8 @@ class Dashboard:
         ages = [v.st.age_s(now) for v in views if v.st]
         text = render.home_text(views, t, vps, cur, bot_version(), basemod.read_version(self.ctx.cfg.paths.base),
                                 pending, min(ages) if ages else None, now)
-        kb = [[("👥 Comptes", "d:lst"), ("⚡ Actions", "d:act")],
+        kb = [[("🧭 Filtres et positions", "d:flt")],
+              [("👥 Comptes", "d:lst"), ("⚡ Actions", "d:act")],
               [("📈 Rapports", "d:rpt"), sys_btn]]
         return self._with_flash(text), kb
 
@@ -206,6 +210,33 @@ class Dashboard:
             [("⬅ Actions", "d:act")],
         ]
         return self._with_flash(text), kb
+
+    def _render_filters(self, now: float) -> tuple[str, Keyboard]:
+        views = self.ctx.views()
+        lines = ["🧭 <b>Filtres et positions</b>", ""]
+        if self.filters is None:
+            lines.append("<i>Lecture des filtres…</i>")
+        else:
+            ts, ref, txt = self.filters
+            body = "\n".join(l for l in txt.splitlines() if "FILTRES" not in l and not l.startswith("━")).strip()
+            lines.append(f"🛡️ <b>Filtres</b> (identiques sur tous les robots ; lus sur {render.esc(ref)}, "
+                         f"il y a {render.ago(now - ts)})")
+            lines.append(render.esc(body) if body else "<i>réponse vide</i>")
+        lines += ["", "📌 <b>Positions ouvertes</b>"]
+        rows, npos, nord, flot, cur = [], 0, 0, 0.0, ""
+        for v in sorted(views, key=lambda v: v.inst.label.lower()):
+            st = v.st
+            if st is None:
+                rows.append(f"{v.health.icon} {v.inst.label[:10]:<10}  —")
+                continue
+            cur = cur or st.devise
+            npos, nord, flot = npos + st.positions, nord + st.ordres, flot + st.flottant_ea
+            rows.append(f"{v.health.icon} {v.inst.label[:10]:<10} {st.positions:>2} pos {st.ordres:>2} ord {st.flottant_ea:>+9.2f}"
+                        + (" ⏸" if st.etat == "PAUSE" else ""))
+        lines.append("<pre>" + render.esc("\n".join(rows) or "aucun compte") + "</pre>")
+        lines.append(f"Total : <b>{npos}</b> position(s) · {nord} ordre(s) · flottant <b>{render.money(flot, cur, True)}</b>")
+        kb: Keyboard = [[("🔃 Actualiser", "d:flt"), ("📋 Détail des positions", "d:pos")], [("⬅ Accueil", "d:home")]]
+        return self._with_flash("\n".join(lines)), kb
 
     def _render_logs(self) -> tuple[str, Keyboard]:
         kb: Keyboard = [

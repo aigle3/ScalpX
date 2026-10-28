@@ -32,4 +32,6 @@ class ApplicationBuilder:
     def connect_timeout(self, t): return self
     def read_timeout(self, t): return self
     def write_timeout(self, t): return self
+    def connection_pool_size(self, n): return self
+    def pool_timeout(self, t): return self
     def build(self): return Application()

@@ -108,6 +108,12 @@ class Router:
                 extra = "\nFermeture propre ; les positions restent ouvertes chez le broker." if verb != "start" else ""
                 return await self._ask(f"<b>{what} {len(targets)} terminal(aux) ?</b>\n{esc(', '.join(i.label for i in targets[:15]))}{extra}",
                                        lambda: self._terminals(targets, verb), ("gterm",), what)
+        elif sub == "flt":
+            self.dash.goto("flt")
+            self._bg(self._filters_fetch())
+        elif sub == "pos":
+            self._bg(self._positions_detail())
+            return ""
         elif sub in ("lst", "act", "rpt", "logs", "gterm"):
             self.dash.goto(sub)
             self.dash.silent = self.notifier.silent_mode
@@ -148,6 +154,8 @@ class Router:
             await self.sender.delete(self.chat_id, message_id)
             return ""
         elif sub == "upd":
+            self.dash.flash("⏳ Vérification sur GitHub…")
+            await self.dash.refresh(force=True)
             self._bg(self.check_updates_now())
             return "Vérification…"
         elif sub == "win":
@@ -390,6 +398,30 @@ class Router:
         _, cmd = act.CARD_CMDS[int(p[2])]
         self._bg(self._cmd_with_output(inst, cmd))
         return ""
+
+    async def _filters_fetch(self) -> None:
+        """FILTRES lu sur un seul robot (tous ont les mêmes filtres et le même symbole)."""
+        g = act.target(self.ctx, ALL_ID)
+        if g is None:
+            self.dash.flash("Aucun terminal lancé : filtres indisponibles.")
+            await self.dash.refresh(force=True)
+            return
+        r = await act.send_cmd(self.ctx, g.ref, "FILTRES")
+        if r.timeout or not r.message:
+            self.dash.flash("❌ Filtres : EA injoignable.")
+        else:
+            self.dash.filters = (time.time(), g.ref.label, r.message)
+        await self.dash.refresh(force=True)
+
+    async def _positions_detail(self) -> None:
+        """Détail des positions (commande POSITIONS) des comptes qui en ont, en un seul message."""
+        views = [v for v in self.ctx.views() if self.ctx.mgr.is_running(v.inst) and v.st and (v.st.positions or v.st.ordres)]
+        if not views:
+            await self.sender.send(self.chat_id, "📋 Aucune position ni ordre en cours.", [[("✖ Fermer", "d:close")]], True)
+            return
+        res = await asyncio.gather(*[act.send_cmd(self.ctx, v.inst, "POSITIONS") for v in views])
+        parts = [f"<b>{esc(v.inst.label)}</b>\n{esc((r.message or '—').strip())[:1500]}" for v, r in zip(views, res)]
+        await self.sender.send(self.chat_id, "📋 <b>Positions</b>\n\n" + "\n\n".join(parts)[:3900], [[("✖ Fermer", "d:close")]], True)
 
     async def _terminals(self, insts, verb: str) -> None:
         """Redémarrer / lancer / arrêter plusieurs terminaux en parallèle ; un seul message de résultat."""
@@ -711,6 +743,7 @@ class Router:
         if plan is None:
             await self.sender.send(self.chat_id, "⚠️ Aucun paquet de mise à jour trouvé (GitHub non configuré ?).", [[("✖ Fermer", "d:close")]], True)
             return
+        self.dash.flash("", 0.1)
         if plan.empty:
             self.ctx.db.meta_set("update_pending", "")
             info = upd.commit_info(plan.source)

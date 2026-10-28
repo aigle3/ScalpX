@@ -36,6 +36,8 @@ Voir `LISEZMOI.txt` à la racine du dépôt : `INSTALL.bat` installe tout (BASE 
 - **Accueil** (un message édité en place ; **📊 Tableau de bord** ou tout message le ramène en bas) : l'état de l'ensemble
   (comptes 🟢/🟠/🔴, solde, jour, à retirer, alertes, VPS, versions, 🔔 mise à jour) puis une ligne par compte,
   et 4 menus : **👥 Comptes**, **⚡ Actions**, **📈 Rapports**, **🛠 Système**.
+- **🧭 Filtres et positions** (accueil) : état des filtres (lu sur un robot : tous ont les mêmes réglages), signal
+  bloqué ou non, et positions / ordres / flottant de chaque compte avec le total ; 📋 détail des positions en un message.
 - **👥 Comptes** : liste détaillée, un bouton par compte, 🔎 filtre et ↕ tri (un bouton chacun, qui fait défiler les choix).
 - **Fiche compte** : ⏸ Pause, ▶️ Reprise, **🎯 Objectif**, **⚙️ Paramètres** (83 réglages par boutons), **🧰 Commandes EA**
   (consultations, vacances, presets, valider, annuler l'objectif, 🛑 tout fermer), **🖥 Terminal** (redémarrer, lancer,

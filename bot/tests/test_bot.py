@@ -180,7 +180,7 @@ async def test_dashboard_liste_filtres_tri_pagination(svc):
     text, kb = dash.render()                                                       # accueil : état de l'ensemble
     assert "🔴 3" in text and "À retirer" in text and "378.20" in text            # total à retirer (503.2 − 125)
     assert "▰" in text and "<pre>" in text and "Aucune alerte" not in text
-    assert [d for row in kb for _, d in row] == ["d:lst", "d:act", "d:rpt", "d:sys"]
+    assert [d for row in kb for _, d in row] == ["d:flt", "d:lst", "d:act", "d:rpt", "d:sys"]
     dash.goto("lst")                                                                 # 👥 Comptes : liste détaillée
     text, kb = dash.render()
     assert "page 1/2" in text
@@ -861,3 +861,30 @@ async def test_plantages_dates_et_effacement(svc):
     assert not (logs / "crash.log").exists() and "effacé" in sender.msgs[mid][0]
     await router.on_callback("d:crash")
     assert "Aucun plantage enregistré" in sender.sent[-1][1]
+
+
+@pytest.mark.asyncio
+async def test_filtres_et_positions_de_tous_les_robots(svc):
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    st = ctx_stack(svc)
+    a = seed(st, 97, "Demo-Server 1")
+    b = seed(st, 98, "Demo-Server 1")
+    ea.accounts[a.id]["positions"] = 2
+    ea.start()
+    await asyncio.sleep(0.4)
+    orig = ea._exec
+    ea._exec = lambda iid, acc, cmd, exe: ((True, "🛡️ FILTRES\n━━━\n🟢 Volatilité · ATR 266\n🔴 Volume\n━━━\n⛔ NOUVELLES SÉRIES BLOQUÉES (1)")
+                                           if cmd == "FILTRES" else (True, "📌 2 positions BUY") if cmd == "POSITIONS"
+                                           else orig(iid, acc, cmd, exe))
+    try:
+        assert "d:flt" in [d for row in dash.render()[1] for _, d in row]
+        await router.on_callback("d:flt")
+        assert await _until(lambda: dash.filters is not None)
+        text = dash.render()[0]
+        assert "🔴 Volume" in text and "BLOQUÉES" in text and "identiques sur tous les robots" in text
+        assert "Positions ouvertes" in text and "Total : <b>2</b> position(s)" in text
+        await router.on_callback("d:pos")
+        assert await _until(lambda: any("2 positions BUY" in m[1] for m in sender.sent))
+        assert sum(1 for m in sender.sent if "📋 <b>Positions</b>" in m[1]) == 1
+    finally:
+        await ea.stop()
