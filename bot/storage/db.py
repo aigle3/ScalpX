@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import os
 import sqlite3
 import threading
 import time
@@ -80,6 +81,18 @@ class Database:
         with self._lock:
             self._cx.executescript(SCHEMA)
             self._cx.commit()
+
+    def backup_to(self, dest: Path | str) -> None:
+        """Copie cohérente de la base (API de sauvegarde SQLite, sans arrêter le bot)."""
+        dest = Path(dest)
+        tmp = dest.with_name(dest.name + ".tmp")
+        with self._lock:
+            out = sqlite3.connect(str(tmp))
+            try:
+                self._cx.backup(out)
+            finally:
+                out.close()
+        os.replace(tmp, dest)
 
     def close(self) -> None:
         with self._lock:

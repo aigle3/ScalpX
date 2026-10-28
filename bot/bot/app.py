@@ -338,6 +338,17 @@ async def j_health(context: ContextTypes.DEFAULT_TYPE) -> None:
         s.ctx.db.meta_set("health_ok", "1" if ok else "0")
 
 
+async def j_backup(context: ContextTypes.DEFAULT_TYPE) -> None:
+    from core import backup
+    s = svc(context)
+    try:
+        dest = await asyncio.get_running_loop().run_in_executor(None, backup.run_backup, s.ctx.cfg, s.ctx.db)
+        log.info("historique sauvegardé : %s", dest)
+    except Exception as exc:
+        log.warning("sauvegarde de l'historique impossible : %s", exc)
+        await s.sender.send(s.chat_id, f"⚠️ Sauvegarde de l'historique impossible : {render.esc(str(exc))}", None, True)
+
+
 async def j_prune(context: ContextTypes.DEFAULT_TYPE) -> None:
     svc(context).ctx.db.prune()
 
@@ -406,4 +417,5 @@ def build_application(cfg: Config, ctx_factory) -> Application:
     jq.run_repeating(j_health, interval=60, first=15)
     jq.run_daily(j_report, time=dtime(cfg.reports.daily_hour, 0))
     jq.run_daily(j_prune, time=dtime(4, 0))
+    jq.run_daily(j_backup, time=dtime(cfg.backup.hour % 24, 0))
     return app

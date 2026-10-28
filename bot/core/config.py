@@ -85,6 +85,12 @@ class Update(BaseModel):
     enabled: bool = True
 
 
+class Backup(BaseModel):
+    dir: str = ""                          # vide → %OneDrive%\\ScalpX\\sauvegardes si OneDrive est présent, sinon data\\backups
+    hour: int = 3                          # sauvegarde quotidienne de l'historique (scalpx.db)
+    keep: int = 14                         # nombre de sauvegardes conservées
+
+
 class Config(BaseModel):
     paths: Paths = Paths()
     mt5: MT5 = MT5()
@@ -94,6 +100,7 @@ class Config(BaseModel):
     reports: Reports = Reports()
     runtime: Runtime = Runtime()
     update: Update = Update()
+    backup: Backup = Backup()
 
     # secrets (depuis .env, jamais depuis config.toml)
     token: str = ""

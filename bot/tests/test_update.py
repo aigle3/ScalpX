@@ -178,3 +178,20 @@ def test_copie_de_secours_et_retour_arriere(tmp_path, cfg):
     assert (bot_root / "version.txt").read_text() == "1.2.0" and (bot_root / "bot" / "x.py").read_text() == "X = 1"
     assert not (bot_root / "bot" / "nouveau.py").exists()            # fichier de la version récente retiré
     assert (bot_root / "data" / "scalpx.db").read_text() == "db" and "C:/perso" in (bot_root / "config.toml").read_text()
+
+
+def test_sauvegarde_quotidienne_de_l_historique(tmp_path, cfg):
+    import sqlite3
+    from core import backup
+    from storage.db import Database
+    cfg.backup.dir, cfg.backup.keep = str(tmp_path / "sauv"), 3
+    db = Database(tmp_path / "scalpx.db")
+    db.meta_set("cle", "valeur")
+    for i in range(5):
+        dest = backup.run_backup(cfg, db, now=1_790_000_000 + i * 86400)
+    files = sorted((tmp_path / "sauv").glob("scalpx_*.db"))
+    assert len(files) == 3 and backup.last_backup(cfg) == dest == files[-1]
+    cx = sqlite3.connect(str(dest))
+    assert cx.execute("SELECT value FROM meta WHERE key='cle'").fetchone()[0] == "valeur"
+    cx.close()
+    db.close()

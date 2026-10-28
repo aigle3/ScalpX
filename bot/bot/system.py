@@ -46,6 +46,9 @@ def system_text(ctx: Ctx, vps: dict[str, float]) -> str:
         lines.append("📡 Surveillance externe : " + ("✅ active" if hc == "1" else "⏳ en attente" if hc == "" else "❌ ping refusé (URL ?)"))
     else:
         lines.append("📡 Surveillance externe : non configurée (HEALTHCHECK_URL dans .env)")
+    from core import backup
+    lb = backup.last_backup(cfg)
+    lines.append(f"💾 Sauvegarde de l'historique : " + (f"{_fmt_ts(lb.stat().st_mtime)} ({esc(str(lb.parent))})" if lb else "aucune encore (chaque nuit)"))
     # comptes
     views = ctx.views()
     running = sum(1 for v in views if ctx.mgr.is_running(v.inst))
