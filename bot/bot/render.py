@@ -149,7 +149,8 @@ def trading_block(views: list[AccountView], now: float) -> list[str]:
 
 
 def home_text(views: list[AccountView], t: Totals, vps: dict[str, float], cur: str, bot_v: str, ea_v: str,
-              update_pending: bool, data_age_s: float | None, now: float, max_lines: int = 8) -> str:
+              update_pending: bool, data_age_s: float | None, now: float, max_lines: int = 8,
+              extra_alerts: list[str] | None = None) -> str:
     """Accueil : état de l'ensemble (comptes, argent, alertes, VPS), puis une ligne par compte."""
     c = "" if t.currency_mixed else cur
     counts = "   ".join(f"{icon} {t.by_icon.get(icon, 0)}" for icon, _ in ICON_ORDER
@@ -162,13 +163,14 @@ def home_text(views: list[AccountView], t: Totals, vps: dict[str, float], cur: s
         lines.append(f"📉 Latent {money(t.pl_latent, c, True)}")
     lines.append(f"💸 À retirer : <b>{money(t.to_withdraw, c)}</b>" if t.to_withdraw > 0 else f"💸 À retirer : {money(0, c)}")
     alerts = [v for v in views if v.health.icon in ("🟠", "🔴")]
+    lines += extra_alerts or []
     if alerts:
         for v in alerts[:3]:
             why = "; ".join(v.health.reasons[:2]) if v.health.reasons else "à vérifier"
             lines.append(f"{v.health.icon} <b>{esc(v.inst.label)}</b> : {esc(why)}")
         if len(alerts) > 3:
             lines.append(f"… et {len(alerts) - 3} autre(s) alerte(s)")
-    else:
+    elif not extra_alerts:
         lines.append("✅ Aucune alerte")
     hot = [f"{k.upper()} {vps.get(k, 0):.0f}%" for k, lim in (("cpu", 85), ("ram", 85), ("disk", 90)) if vps.get(k, 0) >= lim]
     lines.append(("⚠️ VPS chargé : " + " · ".join(hot) if hot else "🖥 VPS OK") + f" · Bot {esc(bot_v)} · EA {esc(ea_v or '?')}")

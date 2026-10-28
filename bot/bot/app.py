@@ -37,6 +37,11 @@ MENU_BUTTON = "📊 Tableau de bord"
 
 
 # --------------------------------------------------------------------------- Sender Telegram
+# Préfixes des boutons traités par le routeur (Router.on_callback) : tout nouveau préfixe DOIT être ajouté ici.
+CB_HEADS = ("d", "a", "c", "ok", "no", "dep", "x", "p", "upd", "e", "g", "z", "s")
+CB_PATTERN = r"^(" + "|".join(CB_HEADS) + r")(:|$)"
+
+
 class TelegramSender:
     """Implémente l'interface `Sender` avec python-telegram-bot (HTML, RetryAfter géré)."""
 
@@ -270,6 +275,10 @@ async def h_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 # ---- tâches périodiques
+async def j_presets(context: ContextTypes.DEFAULT_TYPE) -> None:
+    await svc(context).router.check_presets()
+
+
 async def j_dash(context: ContextTypes.DEFAULT_TYPE) -> None:
     await svc(context).dash.refresh()
 
@@ -427,7 +436,7 @@ def build_application(cfg: Config, ctx_factory) -> Application:
         conversation_timeout=300, allow_reentry=True,
     )
     app.add_handler(conv)
-    app.add_handler(CallbackQueryHandler(h_cb, pattern=r"^(d|a|c|ok|no|dep|x|p|upd|e|g)(:|$)"))
+    app.add_handler(CallbackQueryHandler(h_cb, pattern=CB_PATTERN))
     app.add_handler(MessageHandler(filters.TEXT, h_text))
     app.add_error_handler(h_error)
 
@@ -437,6 +446,7 @@ def build_application(cfg: Config, ctx_factory) -> Application:
     jq.run_repeating(j_events, interval=t.events_interval_s, first=3)
     jq.run_repeating(j_clean, interval=60, first=30)
     jq.run_repeating(j_flush, interval=max(1, cfg.alerts.batch_window_s), first=4)
+    jq.run_repeating(j_presets, interval=300, first=90)  # robots conformes au preset ⭐ actif ?
     jq.run_repeating(j_dash, interval=2, first=5)        # refresh() : toutes les refresh_s, republication après repost_s
     jq.run_repeating(j_watchdog, interval=t.watchdog_interval_s, first=20)
     jq.run_repeating(j_build, interval=20, first=40)

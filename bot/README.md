@@ -54,6 +54,13 @@ Voir `LISEZMOI.txt` à la racine du dépôt : `INSTALL.bat` installe tout (BASE 
   🚀 déployer l'EA, ➕ nouveau compte, 🔕 mode silencieux. Toujours avec confirmation et un résumé par compte.
 - **🎯 Objectif immédiat** (hors créneaux horaires) : +0,5 / 1 / 2 / 3 / 5 / 10 %, ou ✏️ 10 (€), +3%, =1250 (solde cible) ;
   le bot envoie `OBJECTIF` puis `DEMARRER` : la série démarre tout de suite et s'arrête à l'objectif.
+- **💾 Presets** (⚡ Actions, ou 🧰 Commandes EA) : gardés par le bot (`data\presets.json`), communs à tous les robots.
+  📸 créer depuis les réglages d'un robot (le premier preset se fait ainsi, depuis Telegram) ; ⚙️ modifier réglage par
+  réglage ; 📤 appliquer à tous les robots lancés, tout de suite (seules les différences sont envoyées, puis chaque robot
+  est relu) : il devient le preset ⭐ actif. Toute modification du preset actif part aussitôt vers tous les robots ; un
+  contrôle toutes les 5 min affiche 🟠 sur l'accueil les robots dont les réglages s'en écartent.
+- **Capital insuffisant** : solde sous le seuil de reprise (125) → compte 🟠 sur l'accueil et alerte sonore (une fois,
+  puis une autre quand le solde remonte). Dépôts et retraits : notifiés avec son.
 - **📈 Rapports** : rapport des 24 h (aussi chaque soir), courbe des soldes, export CSV.
 - **🛠 Système** : versions bot/EA, VPS, BASE, GitHub (et expiration du jeton), surveillance externe, dernière sauvegarde,
   ⬆ mises à jour, 🔨 compiler l'EA, 📜 journaux, 🔄 redémarrer le bot, ⏪ revenir à la version précédente.

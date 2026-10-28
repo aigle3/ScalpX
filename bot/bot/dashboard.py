@@ -17,6 +17,8 @@ from mt5.procs import vps_load
 from . import render
 from .actions import CARD_CMDS, Ctx, target as act_target
 from .params_ui import ParamsUI
+from . import presets_ui as pui
+from core.presets import PresetStore
 from .ui import ALL_ID, Confirmations, EditResult, Keyboard, Sender, confirm_kb, short
 
 log = logging.getLogger(__name__)
@@ -30,8 +32,9 @@ class Dashboard:
     def __init__(self, ctx: Ctx, sender: Sender, chat_id: int, confirmations: Confirmations, vps=vps_load) -> None:
         self.ctx, self.sender, self.chat_id, self.conf = ctx, sender, chat_id, confirmations
         self.vps = vps
-        self.params = ParamsUI(ctx)
-        self.presets: dict[str, list[str]] = {}             # noms des presets de l'EA, par compte
+        self.store = PresetStore(ctx.cfg.paths.data / "presets.json")   # 💾 presets centraux
+        self.preset_check: pui.Check | None = None          # dernier contrôle des robots / preset actif
+        self.params = ParamsUI(ctx, self.store)
         self.filters: tuple[float, str, str] | None = None  # (heure, compte de référence, texte FILTRES de l'EA)
         self.silent = False                                  # mode silencieux (libellé du bouton de l'écran Actions)
         self.screen: tuple = ("dash",)
@@ -102,8 +105,15 @@ class Dashboard:
             self.screen = ("dash",)
         if kind == "cmds":
             return self._render_cmds(self.screen[1])
-        if kind == "pst":
-            return self._render_presets(self.screen[1])
+        if kind == "psl":
+            return pui.render_list(self.store, self.preset_check, now, self._flash_text())
+        if kind == "pso":
+            if self.screen[1] in self.store.presets:
+                return pui.render_one(self.store, self.screen[1], self.preset_check, self._flash_text())
+            return pui.render_list(self.store, self.preset_check, now, self._flash_text())
+        if kind == "psn":
+            insts = [i for i in self.ctx.db.list() if self.ctx.mgr.is_running(i)]
+            return pui.render_source(insts, self.screen[1] if len(self.screen) > 1 else "", self._flash_text())
         if kind == "sys":
             from core import update as upd
             from .system import BOT_ROOT, system_kb, system_text
@@ -162,7 +172,8 @@ class Dashboard:
         vps = self.vps(self.ctx.cfg.paths.data)
         ages = [v.st.age_s(now) for v in views if v.st]
         text = render.home_text(views, t, vps, cur, bot_version(), basemod.read_version(self.ctx.cfg.paths.base),
-                                pending, min(ages) if ages else None, now)
+                                pending, min(ages) if ages else None, now,
+                                extra_alerts=[a for a in [pui.alert_line(self.preset_check)] if a])
         kb = [[("🧭 Filtres et positions", "d:flt")],
               [("👥 Comptes", "d:lst"), ("⚡ Actions", "d:act")],
               [("📈 Rapports", "d:rpt"), sys_btn]]
@@ -190,6 +201,7 @@ class Dashboard:
             [("⏸ Pause (tous)", "d:pall"), ("▶ Tout reprendre", "d:rall")],
             [("🎯 Objectif (tous)", "g:all"), ("⚙️ Paramètres (tous)", "p:all")],
             [("🧰 Commandes (tous)", "d:gcmd"), ("🖥 Terminaux (tous)", "d:gterm")],
+            [("💾 Presets (tous les robots)", "s:l")],
             [("🚀 Déployer l'EA", "d:dep"), ("➕ Nouveau compte", "n")],
             [(("🔔 Rétablir le son" if silent else "🔕 Mode silencieux"), "d:sil")],
             [("⬅ Accueil", "d:home")],
@@ -313,7 +325,8 @@ class Dashboard:
             for i in range(0, len(CARD_CMDS), 3):
                 kb.append([(lbl, f"c:{c}:{i + j}") for j, (lbl, _) in enumerate(CARD_CMDS[i:i + 3])])
         kb.append([("🏖 Vacances : activer", f"e:{c}:von"), ("🏠 Vacances : quitter", f"e:{c}:voff")])
-        kb.append([("💾 Presets", f"e:{c}:ps"), ("✅ Valider les réglages", f"e:{c}:val")])
+        kb.append([("💾 Presets", "s:l"), ("✅ Valider les réglages", f"e:{c}:val")])
+        kb.append([("♻️ Réglages par défaut de l'EA", f"e:{c}:rs")])
         kb.append([("🎯 Annuler l'objectif", f"e:{c}:gx"), ("🛑 Tout fermer", f"e:{c}:fx")])
         kb.append([("⬅ Actions", "d:act")] if group else [("⬅ Fiche", f"a:{c}")])
         fl = self._flash_text()
@@ -336,19 +349,6 @@ class Dashboard:
                 "Le robot démarre et s'arrête quand l'objectif est atteint (sur chaque compte).\n"
                 "<i>✏️ Autre : 10 = +10 € · +3% · =1250 = solde cible</i>")
         return self._with_flash(text), kb
-
-    def _render_presets(self, iid: str) -> tuple[str, Keyboard]:
-        inst = act_target(self.ctx, iid)
-        c = short(iid)
-        names = self.presets.get(iid)
-        kb: Keyboard = [[(f"📥 {n}", f"e:{c}:pl:{i}"), ("🗑", f"e:{c}:pd:{i}")] for i, n in enumerate(names or [])]
-        kb.append([("💾 Enregistrer sous…", f"e:{c}:pn"), ("♻️ Valeurs par défaut", f"e:{c}:rs")])
-        kb.append([("🔃 Relire", f"e:{c}:ps"), ("⬅ Commandes", "d:gcmd" if iid == ALL_ID else f"a:{c}:cmds")])
-        body = ("<i>lecture…</i>" if names is None else
-                "Aucun preset enregistré." if not names else
-                "📥 charge les réglages enregistrés (à valider ensuite) · 🗑 supprime.")
-        fl = self._flash_text()
-        return (f"💾 <b>Presets — {render.esc(inst.label if inst else iid)}</b>\n{body}" + (f"\n\n{fl}" if fl else "")), kb
 
     # ---- envoi / édition
     @staticmethod

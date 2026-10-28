@@ -67,9 +67,18 @@ def bool_of(display: str) -> bool | None:
     return None
 
 
+def _code(iid: str) -> str:
+    """Code du callback : compte (8 hex), « all », ou preset (P…)."""
+    if iid.startswith("preset:"):
+        from .presets_ui import code_of
+        return code_of(iid[len("preset:"):])
+    return short(iid)
+
+
 class ParamsUI:
-    def __init__(self, ctx: Ctx) -> None:
+    def __init__(self, ctx: Ctx, store=None) -> None:
         self.ctx = ctx
+        self.store = store                                   # presets centraux (cible PresetTarget)
         self.vals: dict[str, tuple[float, dict[str, str]]] = {}
         self.last_error = ""
 
@@ -84,6 +93,14 @@ class ParamsUI:
     async def fetch(self, inst) -> bool:
         """Lit les valeurs via PARAMS. Le drapeau ok de l'accusé n'est PAS fiable ici : l'EA marque en échec
         tout texte contenant « ❌ », or chaque option désactivée s'affiche « ❌ ». Seul le contenu compte."""
+        if inst.id.startswith("preset:"):                       # preset : valeurs gardées par le bot
+            from core.presets import display_of
+            vals = self.store.presets.get(inst.name) if self.store else None
+            if vals is None:
+                self.last_error = "preset introuvable"
+                return False
+            self.vals[inst.id] = (time.time(), {k: display_of(cat.PARAMS[find(k)], v) for k, v in vals.items() if find(k) >= 0})
+            return True
         r = await send_cmd(self.ctx, getattr(inst, "ref", inst), "PARAMS", [])     # groupe : valeurs du 1er compte
         d = parse_params_text(r.message)
         if not d:
@@ -95,6 +112,8 @@ class ParamsUI:
 
     async def set_value(self, inst, idx: int, value: str) -> str:
         key = cat.PARAMS[idx][0]
+        if inst.id.startswith("preset:"):
+            return await self._set_preset(inst, idx, value)
         members = getattr(inst, "members", None)
         if members is not None:                                  # tous les comptes : même réglage partout
             res = await asyncio.gather(*[send_cmd(self.ctx, m, "SET", [key, value]) for m in members])
@@ -114,6 +133,25 @@ class ParamsUI:
         err = next((l for l in msg.splitlines() if "❌" in l), msg)
         return esc(err[:200]) if err.startswith("❌") else "❌ " + esc(err[:200])
 
+    async def _set_preset(self, inst, idx: int, value: str) -> str:
+        """Change la valeur dans le preset ; preset actif : envoyée aussitôt à tous les robots lancés."""
+        from core.presets import display_of
+        p = cat.PARAMS[idx]
+        if self.store is None or inst.name not in self.store.presets:
+            return "❌ Preset introuvable"
+        self.store.set_value(inst.name, p[0], value)
+        await self.fetch(inst)
+        head = f"{esc(p[1])} = {esc(display_of(p, value))}"
+        if self.store.active != inst.name:
+            return f"✅ {head} (preset enregistré ; 📤 Appliquer pour l'envoyer aux robots)"
+        members = [i for i in self.ctx.db.list() if self.ctx.mgr.is_running(i)]
+        if not members:
+            return f"✅ {head} (preset enregistré ; aucun robot lancé)"
+        res = await asyncio.gather(*[send_cmd(self.ctx, m, "SET", [p[0], value]) for m in members])
+        bad = [m.label for m, r in zip(members, res) if "Appliqué" not in (r.message or "")]
+        return (f"✅ {head} : preset + {len(members)} robot(s)" if not bad else
+                f"⚠️ {head} : preset enregistré, {len(members) - len(bad)}/{len(members)} robot(s) ; échec : {esc(', '.join(bad[:5]))}")
+
     def current_index(self, iid: str, idx: int) -> int | None:
         p = cat.PARAMS[idx]
         disp = self.cached(iid).get(p[0], "")
@@ -125,8 +163,9 @@ class ParamsUI:
     # ---- rendu
     def render(self, screen: tuple, label: str, flash: str = "") -> tuple[str, Keyboard]:
         kind, iid = screen[0], screen[1]
-        c = short(iid)
-        back = ("⬅ Actions", "d:act") if c == "all" else ("⬅ Fiche", f"a:{c}")
+        c = _code(iid)
+        back = (("⬅ Actions", "d:act") if c == "all" else ("⬅ Preset", f"s:o:{c}") if c.startswith("P")
+                else ("⬅ Fiche", f"a:{c}"))
         head = f"⚙️ <b>Paramètres — {esc(label)}</b>"
         fl = f"\n\n{flash}" if flash else ""
         vals = self.cached(iid)

@@ -183,8 +183,11 @@ def _inst(state=DEMARRE):
 
 def test_diagnostic_croise(cfg):
     now = time.time()
-    ok = Statut(id="1_a", connecte=True, algo_terminal=True, algo_ea=True, nb_graphiques_ea=1, devise="EUR", ts=int(now))
+    ok = Statut(id="1_a", connecte=True, algo_terminal=True, algo_ea=True, nb_graphiques_ea=1, devise="EUR", ts=int(now),
+                solde=300.0)
     assert diagnose(_inst(), ok, True, cfg, now).icon == "🟢"
+    d = diagnose(_inst(), ok.model_copy(update={"solde": 0.0}), True, cfg, now)          # sous le seuil de reprise (125)
+    assert d.icon == "🟠" and d.code == "CAPITAL" and "0.00 EUR (minimum 125 EUR)" in d.reasons[0]
     assert diagnose(_inst(), None, False, cfg, now).icon == "🔴"
     assert diagnose(_inst("ARRETE"), None, False, cfg, now).icon == "⚪"
     old = ok.model_copy(update={"ts": int(now) - 60})
@@ -287,3 +290,31 @@ async def test_monitor_arret_ea_explique(stack):
     ea.event("2_b", "ARRET_EA", "🔌 ScalpX arrêté (raison 9)", 1, {"raison": 9}, 2)
     await mon.poll_events()
     assert "sans demande du bot" in got[0].text and "à la demande du bot" in got[1].text
+
+
+def test_capital_insuffisant_notifie_une_fois_avec_son(cfg, db, tmp_path):
+    from core.service import Monitor
+    sent = []
+
+    async def emit(n):
+        sent.append(n)
+
+    class St:
+        def __init__(self): self.s = None
+        def read(self, iid): return self.s
+
+    sr = St()
+    db.add_instance(_inst())
+    mon = Monitor(cfg, db, sr, None, emit)
+    mon.events = type("E", (), {"drain": lambda self, iid: []})()
+    now = time.time()
+    sr.s = Statut(id="1_a", solde=0.0, devise="EUR", ts=int(now))
+    import asyncio
+    for _ in range(3):
+        mon.poll_status(now)
+        asyncio.run(mon.poll_events())
+    assert len(sent) == 1 and sent[0].prio == 2 and "CAPITAL INSUFFISANT" in sent[0].text and "0.00 EUR" in sent[0].text
+    sr.s = Statut(id="1_a", solde=200.0, devise="EUR", ts=int(now))
+    mon.poll_status(now)
+    asyncio.run(mon.poll_events())
+    assert len(sent) == 2 and "CAPITAL SUFFISANT" in sent[1].text

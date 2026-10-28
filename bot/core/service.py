@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 # priorités : 0 info (silencieux), 1 important, 2 critique (sonne toujours, même en mode silencieux)
 CRITICAL_TYPES = {"CLOTURE_500_LANCEE", "CLOTURE_500_OK", "CLOTURE_500_SOUS_SEUIL", "ARRET_500",
                   "REPRISE_RETRAIT", "CAPITAL_INSUFFISANT", "CONNEXION_PERDUE"}
-SILENT_TYPES = {"DEMARRAGE_EA", "ARRET_EA", "CASHFLOW", "ETAT"}
+SILENT_TYPES = {"DEMARRAGE_EA", "ARRET_EA", "ETAT"}            # CASHFLOW (dépôt/retrait) : avec son
 GROUP_ICON = {"CLOTURE_500_LANCEE": "🔒", "CLOTURE_500_OK": "🏁", "ARRET_500": "🏁", "CLOTURE_500_SOUS_SEUIL": "↩️",
               "REPRISE_RETRAIT": "🟢", "CAPITAL_INSUFFISANT": "⚠️"}
 
@@ -90,6 +90,7 @@ class Monitor:
         self._last_arret_balance: dict[str, float] = {}
         self._last_state: dict[str, str] = {}
         self._seen_version: dict[str, str] = {}
+        self._pending: list[Notice] = []                # notifications calculées sur les statuts (capital)
 
     # ---- statuts → historique
     def poll_status(self, now: float | None = None) -> None:
@@ -103,15 +104,37 @@ class Monitor:
             self._last_state[inst.id] = st.etat
             if st.devise and st.devise != inst.currency:
                 self.db.set_currency(inst.id, st.devise)
+            if st.age_s(now) < self.cfg.timing.heartbeat_stale_s:
+                self._check_capital(inst, st)
             if st.version and st.version != inst.ea_version:
                 self.db.set_version(inst.id, st.version, "heartbeat")
             if now - self._last_sample.get(inst.id, 0) >= 60 and st.age_s(now) < self.cfg.timing.heartbeat_stale_s * 4:
                 self._last_sample[inst.id] = now
                 self.db.add_balance(inst.id, st.solde, st.equity, st.flottant_ea, st.cycle, st.etat, int(now))
 
+    def _check_capital(self, inst, st) -> None:
+        """Solde sous le seuil de reprise : une alerte sonore à l'entrée, une à la sortie (état mémorisé en base)."""
+        from .health import low_capital
+        key = f"capital_low_{inst.id}"
+        low, was = low_capital(st), self.db.meta_get(key) == "1"
+        if low == was:
+            return
+        self.db.meta_set(key, "1" if low else "")
+        c = st.devise
+        if low:
+            text = (f"⚠️ CAPITAL INSUFFISANT\n💰 Solde {st.solde:.2f} {c} : sous le minimum de {st.seuil_reprise:.0f} {c}.\n"
+                    "Le robot ne peut pas trader normalement sur ce compte : dépose des fonds.")
+        else:
+            text = f"✅ CAPITAL SUFFISANT\n💰 Solde {st.solde:.2f} {c} (minimum {st.seuil_reprise:.0f} {c})."
+        if st.etat == "ARRET_500" and low:                 # l'EA envoie déjà CAPITAL_INSUFFISANT dans ce cas
+            return
+        self._pending.append(Notice(inst.id, inst.label, "CAPITAL", text, 2 if low else 1, None, int(time.time())))
+
     # ---- événements → historique + notifications
     async def poll_events(self) -> int:
         n = 0
+        while self._pending:
+            await self.emit(self._pending.pop(0))
         for inst in self.db.list():
             for ev in self.events.drain(inst.id):
                 n += 1

@@ -14,12 +14,17 @@ G, O, R, GEAR, LOCK, OFF, NEW = "🟢", "🟠", "🔴", "⚙️", "🔒", "⚪",
 @dataclass
 class Health:
     icon: str
-    code: str                       # OK | MUET | DECONNECTE | ALGO_OFF | DOUBLON | DEVISE | PROCESSUS | MAINT | CLOTURE500 | ARRETE | CREATION | ARCHIVE | DOSSIER
+    code: str                       # OK | CAPITAL | MUET | DECONNECTE | ALGO_OFF | DOUBLON | DEVISE | PROCESSUS | MAINT | CLOTURE500 | ARRETE | CREATION | ARCHIVE | DOSSIER
     reasons: list[str] = field(default_factory=list)
 
     @property
     def alert(self) -> bool:
         return self.code not in ("OK", "MAINT", "CLOTURE500", "ARRETE", "CREATION", "ARCHIVE")
+
+
+def low_capital(st: Statut) -> bool:
+    """Solde sous le seuil de reprise (125 par défaut) : le robot ne peut pas faire tourner son cycle."""
+    return st.seuil_reprise > 0 and st.solde < st.seuil_reprise
 
 
 def diagnose(inst: Instance, st: Statut | None, running: bool, cfg: Config, now: float | None = None,
@@ -55,6 +60,9 @@ def diagnose(inst: Instance, st: Statut | None, running: bool, cfg: Config, now:
         reasons.append(f"EA en double ({st.nb_graphiques_ea} graphiques)"); code = code if code != "OK" else "DOUBLON"
     if st.nb_graphiques_ea == 0:
         reasons.append("EA absent du graphique"); code = code if code != "OK" else "DOUBLON"
+    if low_capital(st):
+        reasons.append(f"capital insuffisant : {st.solde:.2f} {st.devise} (minimum {st.seuil_reprise:.0f} {st.devise})")
+        code = code if code != "OK" else "CAPITAL"
     if st.devise and cfg.alerts.expected_currency and st.devise != cfg.alerts.expected_currency:
         reasons.append(f"devise {st.devise} ≠ {cfg.alerts.expected_currency}"); code = code if code != "OK" else "DEVISE"
     if reasons:

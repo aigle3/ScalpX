@@ -775,18 +775,11 @@ async def test_actions_groupees_et_actions_ea(svc):
         assert await _until(lambda: ea.accounts[a.id].get("vacances") is True)
         await router.on_callback(f"e:{c}:fx")
         assert "TOUT FERMER" in await _confirm(router, dash)
-        # presets : liste lue depuis l'EA, enregistrement par message texte, suppression confirmée
-        await router.on_callback(f"e:{c}:ps")
-        assert await _until(lambda: dash.presets.get(a.id) == ["prudent"])
-        await router.on_callback(f"e:{c}:pn")
-        await router.on_text("agressif")
-        assert await _until(lambda: dash.presets.get(a.id) == ["prudent", "agressif"])
-        await router.on_callback(f"e:{c}:pd:0")
-        assert "prudent" in await _confirm(router, dash)
-        assert await _until(lambda: dash.presets.get(a.id) == ["agressif"])
-        await router.on_callback(f"e:{c}:pn")
-        await router.on_text("nom invalide !")
-        assert "Nom invalide" in dash.render()[0]
+        # réglages par défaut de l'EA (confirmation) ; 💾 Presets mène aux presets centraux
+        await router.on_callback(f"e:{c}:rs")
+        assert "valeurs par défaut" in await _confirm(router, dash)
+        await router.on_callback("s:l")
+        assert "gardés par le bot" in dash.render()[0]
     finally:
         await ea.stop()
 
@@ -922,3 +915,51 @@ async def test_tableau_de_bord_10s_si_dernier_puis_republie_apres_5_min(svc):
     assert dash.screen == ("rpt",) and dash.is_last            # même écran, de nouveau dernier message
     dash.note_message(new - 1)                                 # un message plus ancien ne compte pas
     assert dash.is_last
+
+
+@pytest.mark.asyncio
+async def test_presets_centraux_creer_appliquer_modifier_controler(svc):
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    st = ctx_stack(svc)
+    a = seed(st, 71, "Demo-Server 1")
+    b = seed(st, 72, "Demo-Server 1")
+    ea.start()
+    await asyncio.sleep(0.3)
+    try:
+        ea.accounts[a.id]["params"] = {"lot": "0.02 lot", "f_vol": "✅", "news_block": "✅", "tz": "UTC", "fast": "12"}
+        # 📸 nouveau preset depuis le robot A (2 robots : choix du modèle, puis nom par message texte)
+        await router.on_callback("s:new")
+        assert dash.screen[0] == "psn"
+        await router.on_callback(f"s:src:{short(a.id)}")
+        await router.on_text("base")
+        assert await _until(lambda: "base" in dash.store.presets)
+        assert dash.store.presets["base"] == {"lot": "0.02", "f_vol": "1", "news_block": "1", "tz": "2", "fast": "12"}
+        assert (ctx.cfg.paths.data / "presets.json").is_file()
+        # 📤 appliquer à tous : B reçoit seulement les différences, puis devient conforme ; le preset devient actif
+        from bot import presets_ui as pui
+        c = pui.code_of("base")
+        await router.on_callback(f"s:ap:{c}")
+        assert "2 robot(s)" in await _confirm(router, dash)
+        assert await _until(lambda: dash.store.active == "base" and dash.preset_check is not None, 120)
+        assert ea.accounts[b.id]["params"]["tz"] == "UTC" and ea.accounts[b.id]["params"]["lot"] == "0.02 lot"
+        assert dash.preset_check.diffs == {}
+        assert any("2/2 robot(s) conforme(s)" in t for _, t in sender.edits)
+        # ⚙️ modifier le preset actif : enregistré ET envoyé tout de suite à tous les robots
+        idx = next(i for i, p in enumerate(pui.ps.cat.PARAMS) if p[0] == "fast")
+        await router.on_callback(f"p:{c}")
+        assert await _until(lambda: dash.params.cached("preset:base").get("fast") == "12")
+        await router.on_callback(f"p:{c}:s{idx}:1")
+        assert await _until(lambda: ea.accounts[a.id]["params"]["fast"] == "13" and ea.accounts[b.id]["params"]["fast"] == "13")
+        assert dash.store.presets["base"]["fast"] == "13"
+        # un robot changé à la main : 🟠 sur l'accueil après le contrôle
+        ea.accounts[b.id]["params"]["lot"] = "0.05 lot"
+        await router.check_presets()
+        assert list(dash.preset_check.diffs) == [b.label]
+        dash.goto("dash")
+        assert "Réglages ≠ preset « base »" in dash.render()[0]
+        # suppression confirmée
+        await router.on_callback(f"s:del:{c}")
+        await _confirm(router, dash)
+        assert await _until(lambda: "base" not in dash.store.presets and dash.store.active == "")
+    finally:
+        await ea.stop()

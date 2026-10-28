@@ -127,7 +127,14 @@ class FakeEA:
             key, val = args[0], args[1]
             pv = acc.setdefault("params", dict(DEFAULT_PARAMS))
             old = pv.get(key, "")
-            pv[key] = ("✅" if val == "1" else "❌") if old in ("✅", "❌") else (val + (" lot" if key == "lot" else ""))
+            from core import params as cat
+            p = next((x for x in cat.PARAMS if x[0] == key), None)
+            if p and p[3] == "enum":
+                pv[key] = p[8][int(float(val))]
+            elif old in ("✅", "❌") or (p and p[3] == "bool"):
+                pv[key] = "✅" if val == "1" else "❌"
+            else:
+                pv[key] = val + (" lot" if key == "lot" else "")
             return True, f"⚙️ {key}\nValeur : {pv[key]}\n\n✅ Appliqué : {pv[key]}"
         if cmd == "PAUSE":
             acc["etat"] = "PAUSE"

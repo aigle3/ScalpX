@@ -19,6 +19,7 @@ from .notify import Notifier
 from .render import esc
 from .reports import build_report
 from . import params_ui as pu
+from . import presets_ui as pui
 from .ui import ALL_ID, Confirmations, Keyboard, Pending, Sender, resolve, short
 
 log = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ class Router:
         self._tasks: set[asyncio.Task] = set()
         self._dep_msg: int | None = None
         self.building = False
-        self.awaiting_preset: str | None = None             # compte dont on attend le nom de preset (message texte)
+        self.awaiting_preset: tuple[str, str] | None = None   # (compte modèle, preset remplacé) : nom attendu (texte)
         self.awaiting_goal: str | None = None               # compte (ou ALL_ID) dont on attend l'objectif (message texte)
         self._dep_sel: set[str] = set()
 
@@ -78,6 +79,8 @@ class Router:
                 return await self._goal_cb(parts)
             if head == "z":
                 return await self._pause_cb(parts)
+            if head == "s":
+                return await self._preset_cb(parts)
         except Exception:
             log.exception("callback en erreur : %s", head)
             return "Erreur"
@@ -223,7 +226,10 @@ class Router:
 
     # ------------------------------------------------------------------ paramètres de l'EA (boutons)
     def _target(self, code: str):
-        """Code court d'un compte, ou « all » : tous les comptes dont le terminal est lancé."""
+        """Code court d'un compte, « all » (tous les comptes lancés), ou « P… » (un preset : ⚙️ Paramètres du preset)."""
+        if code.startswith("P"):
+            name = pui.find(self.dash.store, code)
+            return pui.PresetTarget(name) if name else None
         return act.target(self.ctx, ALL_ID) if code == "all" else resolve(self.ctx.db, code)
 
     async def _prm_cb(self, p: list[str]) -> str:
@@ -298,14 +304,15 @@ class Router:
             await self._goal_confirm(inst, v.replace(",", "."))
             return
         if self.awaiting_preset:
-            iid, self.awaiting_preset = self.awaiting_preset, None
-            inst = act.target(self.ctx, iid)
+            iid, _ = self.awaiting_preset
+            self.awaiting_preset = None
+            inst = self.ctx.db.get(iid)
             name = text.strip()
             if inst is None or not re.fullmatch(r"[A-Za-z0-9_-]{1,30}", name):
                 self.dash.flash("❌ Nom invalide : lettres, chiffres, - et _ (30 max).")
                 await self.dash.refresh(force=True)
                 return
-            self._bg(self._ea_run(inst, "PRESET_SAVE", [name], then_presets=True))
+            self._bg(self._preset_capture(inst, name))
             return
         if self.awaiting:
             iid, idx = self.awaiting
@@ -447,6 +454,117 @@ class Router:
         await self.sender.edit(self.chat_id, mid, f"🖥 <b>{label}</b>\n" + "\n".join(lines), [[("✖ Fermer", "d:close")]])
         await self.dash.refresh(force=True)
 
+    # ------------------------------------------------------------------ 💾 presets centraux
+    def _running(self) -> list:
+        return [i for i in self.ctx.db.list() if self.ctx.mgr.is_running(i)]
+
+    async def _preset_cb(self, p: list[str]) -> str:
+        """s:l liste · s:o:<P> preset · s:new[:<P>] modèle · s:src:<compte>[:<P>] · s:ap:<P> appliquer · s:del:<P> · s:chk."""
+        store, dash = self.dash.store, self.dash
+        sub = p[1] if len(p) > 1 else "l"
+        name = pui.find(store, p[2]) if len(p) > 2 and sub in ("o", "ap", "del", "new") else ""
+        self.awaiting_preset = None
+        if sub == "o" and name:
+            dash.goto("pso", name)
+        elif sub == "new":
+            insts = self._running()
+            if not insts:
+                dash.flash("Aucun robot lancé : impossible de lire des réglages.")
+            elif len(insts) == 1:
+                return await self._preset_source(insts[0], name)
+            else:
+                dash.goto("psn", name) if name else dash.goto("psn")
+        elif sub == "src" and len(p) > 2:
+            inst = resolve(self.ctx.db, p[2])
+            over = pui.find(store, p[3]) if len(p) > 3 else ""
+            if inst is None:
+                return "Compte introuvable"
+            return await self._preset_source(inst, over)
+        elif sub == "ap" and name:
+            insts = self._running()
+            if not insts:
+                dash.flash("Aucun robot lancé.")
+            else:
+                return await self._ask(f"📤 <b>Appliquer le preset « {esc(name)} » à {len(insts)} robot(s) ?</b>\n"
+                                       + esc(", ".join(i.label for i in insts[:15])) +
+                                       "\nLes réglages sont changés <b>tout de suite</b>, même pendant une série en cours. "
+                                       "Il devient le preset ⭐ actif.",
+                                       lambda: self._preset_apply(name, insts), ("pso", name), "📤 Appliquer")
+        elif sub == "del" and name:
+            return await self._ask(f"🗑 <b>Supprimer le preset « {esc(name)} » ?</b>\nLes robots gardent leurs réglages actuels.",
+                                   lambda: self._preset_delete(name), ("pso", name), "🗑 Supprimer")
+        elif sub == "chk":
+            dash.goto("psl")
+            dash.flash("⏳ Contrôle des robots…")
+            self._bg(self.check_presets())
+        else:
+            dash.goto("psl")
+        await dash.refresh(force=True)
+        return ""
+
+    async def _preset_source(self, inst, overwrite: str) -> str:
+        """Robot modèle choisi : remplacement direct, sinon le nom du nouveau preset est attendu (message texte)."""
+        if overwrite:
+            return await self._ask(f"📸 <b>Remplacer le preset « {esc(overwrite)} » par les réglages actuels de {esc(inst.label)} ?</b>",
+                                   lambda: self._preset_capture(inst, overwrite), ("pso", overwrite), "📸 Remplacer")
+        self.awaiting_preset = (inst.id, "")
+        self.dash.goto("psl")
+        self.dash.flash(f"✏️ Envoie le <b>nom du nouveau preset</b> (lettres, chiffres, - et _) : il prendra les réglages de {esc(inst.label)}.", 120)
+        await self.dash.refresh(force=True)
+        return ""
+
+    async def _preset_capture(self, inst, name: str) -> None:
+        self.dash.flash(f"⏳ Lecture des réglages de {esc(inst.label)}…")
+        await self.dash.refresh(force=True)
+        raw = await pui.read_raw(self.ctx, inst)
+        if not raw:
+            self.dash.flash(f"❌ Réglages illisibles sur {esc(inst.label)} (terminal arrêté ?).")
+        else:
+            existed = name in self.dash.store.presets
+            self.dash.store.put(name, raw)
+            self.dash.params.vals.pop(pui.PREFIX + name, None)
+            self.dash.goto("pso", name)
+            self.dash.flash(f"✅ Preset « {esc(name)} » {'remplacé' if existed else 'créé'} : {len(raw)} réglages de {esc(inst.label)}."
+                            + (" Preset actif : 📤 Appliquer pour l'envoyer aux robots." if name == self.dash.store.active else ""))
+        await self.dash.refresh(force=True)
+
+    async def _preset_apply(self, name: str, insts) -> None:
+        values = self.dash.store.presets.get(name)
+        if values is None:
+            return
+        mid = await self.sender.send(self.chat_id, f"⏳ <b>Preset « {esc(name)} »</b> → {len(insts)} robot(s)…", None, True)
+        res = await asyncio.gather(*[pui.apply_to(self.ctx, i, values) for i in insts])
+        self.dash.store.set_active(name)
+        lines = []
+        for i, (ok, n, bad, err) in zip(insts, res):
+            if err:
+                lines.append(f"❌ <b>{esc(i.label)}</b> : {esc(err)}")
+            elif ok:
+                lines.append(f"✅ <b>{esc(i.label)}</b> : " + (f"{n} réglage(s) changé(s)" if n else "déjà conforme"))
+            else:
+                lines.append(f"⚠️ <b>{esc(i.label)}</b> : refusé par l'EA : {esc(pui._keys_text(bad))}")
+        good = sum(1 for ok, _, _, err in res if ok and not err)
+        await self.sender.edit(self.chat_id, mid, f"📤 <b>Preset « {esc(name)} »</b> ⭐ actif : {good}/{len(insts)} robot(s) conforme(s)\n"
+                               + "\n".join(lines), [[("✖ Fermer", "d:close")]])
+        await self.check_presets()
+
+    async def _preset_delete(self, name: str) -> None:
+        self.dash.store.delete(name)
+        self.dash.goto("psl")
+        self.dash.flash(f"🗑 Preset « {esc(name)} » supprimé.")
+        if self.dash.preset_check and self.dash.preset_check.preset == name:
+            self.dash.preset_check = None
+        await self.dash.refresh(force=True)
+
+    async def check_presets(self) -> None:
+        """Compare les réglages de chaque robot lancé au preset actif (toutes les 5 min et après une application)."""
+        store = self.dash.store
+        if not store.active:
+            self.dash.preset_check = None
+            return
+        self.dash.preset_check = await pui.check_all(self.ctx, store, self._running())
+        await self.dash.refresh(force=True)
+
     async def _pause_cb(self, p: list[str]) -> str:
         """z:<compte|all>:<choix> : pause immédiate ou programmée (reprise automatique par l'EA)."""
         from .dashboard import PAUSE_CHOICES
@@ -490,10 +608,6 @@ class Router:
             return "Compte introuvable"
         sub, lab = p[2], esc(inst.label)
         back_c = ("gcmd",) if inst.id == ALL_ID else ("cmds", inst.id)
-        back_p = ("pst", inst.id)
-        names = self.dash.presets.get(inst.id) or []
-        idx = int(p[3]) if len(p) > 3 and p[3].isdigit() else -1
-        name = names[idx] if 0 <= idx < len(names) else ""
         if sub == "von":
             return await self._ask(f"🏖 <b>Mode vacances sur {lab} ?</b>\nAucune nouvelle série ; les positions ouvertes restent gérées jusqu'au TP.",
                                    lambda: self._ea_run(inst, "VACANCES", ["on"]), back_c, "🏖 Activer")
@@ -507,22 +621,9 @@ class Router:
         elif sub == "fx":
             return await self._ask(f"🛑 <b>TOUT FERMER sur {lab} ?</b>\nToutes les positions et ordres sont fermés maintenant, "
                                    "puis le robot passe en PAUSE.", lambda: self._ea_run(inst, "FERMER_TOUT", []), back_c, "🛑 Tout fermer")
-        elif sub == "ps":
-            self.dash.goto("pst", inst.id)
-            self._bg(self._presets_fetch(inst))
-        elif sub == "pl" and name:
-            return await self._ask(f"📥 <b>Charger le preset « {esc(name)} » sur {lab} ?</b>\nLes réglages actuels sont remplacés ; "
-                                   "valide-les ensuite (✅ Valider les réglages).",
-                                   lambda: self._ea_run(inst, "PRESET_LOAD", [name], then_presets=True), back_p, "📥 Charger")
-        elif sub == "pd" and name:
-            return await self._ask(f"🗑 <b>Supprimer le preset « {esc(name)} » ?</b>",
-                                   lambda: self._ea_run(inst, "PRESET_DELETE", [name], then_presets=True), back_p, "🗑 Supprimer")
-        elif sub == "pn":
-            self.awaiting_preset = inst.id
-            self.dash.flash("✏️ Envoie maintenant le nom du preset (lettres, chiffres, - et _).")
         elif sub == "rs":
-            return await self._ask(f"♻️ <b>Remettre les valeurs par défaut sur {lab} ?</b>\nTous les réglages reviennent aux valeurs de l'EA ; "
-                                   "valide-les ensuite.", lambda: self._ea_run(inst, "RESET_PARAMS", []), back_p, "♻️ Rétablir")
+            return await self._ask(f"♻️ <b>Remettre les valeurs par défaut de l'EA sur {lab} ?</b>\nTous les réglages reviennent aux valeurs "
+                                   "de l'EA ; valide-les ensuite.", lambda: self._ea_run(inst, "RESET_PARAMS", []), back_c, "♻️ Rétablir")
         else:
             return "Action inconnue"
         await self.dash.refresh(force=True)
@@ -573,18 +674,7 @@ class Router:
         self.dash.flash(f"🎯 Objectif lancé sur {ok}/{len(members)} compte(s)")
         await self.dash.refresh(force=True)
 
-    async def _presets_fetch(self, inst) -> None:
-        self.dash.presets.pop(inst.id, None)
-        await self.dash.refresh(force=True)
-        r = await act.send_cmd(self.ctx, getattr(inst, "ref", inst), "PRESETS")         # groupe : presets du 1er compte
-        if r.timeout:
-            self.dash.flash("❌ EA injoignable (terminal arrêté ?).")
-            self.dash.presets[inst.id] = []
-        else:
-            self.dash.presets[inst.id] = [m.group(1) for m in re.finditer(r"(?m)^\s*•\s*([A-Za-z0-9_-]{1,30})\s*$", r.message or "")]
-        await self.dash.refresh(force=True)
-
-    async def _ea_run(self, inst, cmd: str, args: list[str], then_presets: bool = False) -> None:
+    async def _ea_run(self, inst, cmd: str, args: list[str]) -> None:
         self.dash.flash(f"⏳ {cmd} envoyé…")
         await self.dash.refresh(force=True)
         members = getattr(inst, "members", None)
@@ -597,10 +687,7 @@ class Router:
             r = await act.send_cmd(self.ctx, inst, cmd, args)
             first = (r.message or "").strip().splitlines()[0][:200] if r.message else ""
             self.dash.flash(("✅ " if r.ok else "❌ ") + esc(first or cmd))
-        if then_presets:
-            await self._presets_fetch(inst)
-        else:
-            await self.dash.refresh(force=True)
+        await self.dash.refresh(force=True)
 
     async def _cmd_with_output(self, inst, cmd: str) -> None:
         """Commande EA depuis la fiche : le texte renvoyé par l'EA (ex-réponse Telegram) est envoyé tel quel."""

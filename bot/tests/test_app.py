@@ -96,3 +96,18 @@ def test_assemblage_complet(stack):
         groups = [g for g, _ in app.handlers]
         assert -1 in groups and len(app.handlers) >= 4
         assert {j[1] for j in app.job_queue.jobs} >= {"j_dash", "j_events", "j_status", "j_flush", "j_watchdog", "j_report"}
+
+
+def test_tous_les_prefixes_de_boutons_sont_captes():
+    """Chaque préfixe traité par le routeur doit passer le filtre du CallbackQueryHandler (sinon le bouton ne fait rien)."""
+    import inspect
+    import re
+    from bot.router import Router
+    src = inspect.getsource(Router.on_callback)
+    heads = set(re.findall(r'head == "(\w+)"', src)) | {h for g in re.findall(r'head in \(([^)]*)\)', src) for h in re.findall(r'"(\w+)"', g)}
+    assert heads and all(re.match(botapp.CB_PATTERN, h + ":x") for h in heads), heads
+
+
+def test_le_handler_des_boutons_utilise_cb_pattern():
+    import inspect
+    assert "CallbackQueryHandler(h_cb, pattern=CB_PATTERN)" in inspect.getsource(botapp.build_application)

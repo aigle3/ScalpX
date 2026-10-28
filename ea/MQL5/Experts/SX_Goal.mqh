@@ -359,12 +359,12 @@ void AdjustForCashFlow(double amt)
       g_goalInit += amt; g_goalTarget += amt; g_goalPeak += amt;
       GoalSave();
    }
-   // [ARCHI] début
-   EvTyped("CASHFLOW", 0, "", "{\"montant\":" + NumS(amt) + ",\"solde\":" + NumS(AccountInfoDouble(ACCOUNT_BALANCE)) + "}");
-   // [ARCHI] fin
-   TgInfo((amt > 0 ? "💰 Dépôt " : "💸 Retrait ") + Sgn(amt) + " " + Cur() +
+   // [ARCHI] début : un seul événement, avec son (prio 1)
+   EvTyped("CASHFLOW", 1, (amt > 0 ? "💰 DÉPÔT " : "💸 RETRAIT ") + Sgn(amt) + " " + Cur() +
            "\n💼 Balance : " + F2(AccountInfoDouble(ACCOUNT_BALANCE)) + " " + Cur() +
-           (g_goalActive ? "\n🎯 Objectif ajusté (départ " + F2(g_goalInit) + ", cible " + F2(g_goalTarget) + ")" : ""));
+           (g_goalActive ? "\n🎯 Objectif ajusté (départ " + F2(g_goalInit) + ", cible " + F2(g_goalTarget) + ") : un dépôt n'est pas un gain" : ""),
+           "{\"montant\":" + NumS(amt) + ",\"solde\":" + NumS(AccountInfoDouble(ACCOUNT_BALANCE)) + "}");
+   // [ARCHI] fin
 }
 
 // Un deal est « à nous » si son magic est le nôtre, OU si c'est la sortie (manuelle : appli mobile, terminal,
