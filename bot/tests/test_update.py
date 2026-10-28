@@ -148,3 +148,14 @@ def test_detection_processus_reels():
     from mt5.procs import PsutilProcesses
     p = PsutilProcesses()
     assert p.is_running(psutil.Process().exe()) and not p.is_running("/nulle/part/terminal64.exe")
+
+
+def test_ping_de_surveillance(cfg):
+    from core import monitor
+    calls = []
+    http = lambda url, h: (calls.append(url) or (200, b"OK"))
+    assert monitor.ping(cfg, http) is False and calls == []                        # non configuré : rien envoyé
+    cfg.healthcheck_url = "https://hc-ping.com/abc"
+    assert monitor.ping(cfg, http) and monitor.ping(cfg, http, fail=True)
+    assert calls == ["https://hc-ping.com/abc", "https://hc-ping.com/abc/fail"]
+    assert monitor.ping(cfg, lambda u, h: (404, b"")) is False

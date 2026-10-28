@@ -329,6 +329,15 @@ async def j_update(context: ContextTypes.DEFAULT_TYPE) -> None:
     await s.router.on_update_available(plan)
 
 
+async def j_health(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Ping de surveillance externe (HEALTHCHECK_URL) : le silence signale un VPS ou un bot arrêté."""
+    from core import monitor
+    s = svc(context)
+    if s.ctx.cfg.healthcheck_url:
+        ok = await asyncio.get_running_loop().run_in_executor(None, monitor.ping, s.ctx.cfg)
+        s.ctx.db.meta_set("health_ok", "1" if ok else "0")
+
+
 async def j_prune(context: ContextTypes.DEFAULT_TYPE) -> None:
     svc(context).ctx.db.prune()
 
@@ -394,6 +403,7 @@ def build_application(cfg: Config, ctx_factory) -> Application:
     jq.run_repeating(j_watchdog, interval=t.watchdog_interval_s, first=20)
     jq.run_repeating(j_build, interval=20, first=40)
     jq.run_repeating(j_update, interval=max(20, cfg.update.check_s), first=60)
+    jq.run_repeating(j_health, interval=60, first=15)
     jq.run_daily(j_report, time=dtime(cfg.reports.daily_hour, 0))
     jq.run_daily(j_prune, time=dtime(4, 0))
     return app

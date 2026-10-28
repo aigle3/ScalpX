@@ -41,6 +41,11 @@ def system_text(ctx: Ctx, vps: dict[str, float]) -> str:
                  + (f" · <code>{esc(inst_c.split()[0])}</code>" if inst_c else ""))
     lines.append(f"🖥 CPU {vps.get('cpu', 0):.0f}%  RAM {vps.get('ram', 0):.0f}%  Disque {vps.get('disk', 0):.0f}%"
                  + f"  ({basemod.free_disk_gb(cfg.paths.instances):.1f} Go libres)")
+    if cfg.healthcheck_url:
+        hc = db.meta_get("health_ok")
+        lines.append("📡 Surveillance externe : " + ("✅ active" if hc == "1" else "⏳ en attente" if hc == "" else "❌ ping refusé (URL ?)"))
+    else:
+        lines.append("📡 Surveillance externe : non configurée (HEALTHCHECK_URL dans .env)")
     # comptes
     views = ctx.views()
     running = sum(1 for v in views if ctx.mgr.is_running(v.inst))

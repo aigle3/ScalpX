@@ -97,6 +97,7 @@ class Config(BaseModel):
     # secrets (depuis .env, jamais depuis config.toml)
     token: str = ""
     github_token: str = ""
+    healthcheck_url: str = ""              # HEALTHCHECK_URL (.env) : surveillance externe, ex. https://hc-ping.com/<uuid>
     allowed_chats: list[int] = Field(default_factory=list)
 
 
@@ -125,6 +126,7 @@ def load_config(config_path: Path, env_path: Path | None = None) -> Config:
         env = parse_env(env_path.read_text(encoding="utf-8-sig"))
     cfg.token = env.get("TELEGRAM_TOKEN", os.environ.get("TELEGRAM_TOKEN", "")).strip()
     cfg.github_token = env.get("GITHUB_TOKEN", os.environ.get("GITHUB_TOKEN", "")).strip()
+    cfg.healthcheck_url = env.get("HEALTHCHECK_URL", os.environ.get("HEALTHCHECK_URL", "")).strip()
     chats = env.get("ALLOWED_CHAT_IDS", env.get("CHAT_ID", os.environ.get("ALLOWED_CHAT_IDS", "")))
     cfg.allowed_chats = [int(x) for x in chats.replace(";", ",").split(",") if x.strip().lstrip("-").isdigit()]
     if not cfg.mt5.servers and cfg.mt5.default_server:

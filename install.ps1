@@ -211,6 +211,17 @@ if ($envTxt -notmatch '(?m)^GITHUB_TOKEN=\S+') {
 } else {
     Ok 'Jeton GitHub déjà présent dans .env.'
 }
+# ---- surveillance externe (facultatif) : healthchecks.io prévient si le VPS ou le bot s'arrête
+$envTxt = [System.IO.File]::ReadAllText($envFile)
+if ($envTxt -notmatch '(?m)^HEALTHCHECK_URL=\S+') {
+    Write-Host '  FACULTATIF - surveillance : crée un check gratuit sur healthchecks.io (période 1 min, délai de grâce 5 min)'
+    Write-Host '  et colle son URL de ping (https://hc-ping.com/...). Tu seras prévenu si le VPS ou le bot s''arrête.'
+    $hc = Ask 'HEALTHCHECK_URL (Entrée = passer)'
+    if ($hc -match '^https://\S+$') {
+        [System.IO.File]::WriteAllText($envFile, $envTxt.TrimEnd() + "`r`nHEALTHCHECK_URL=$hc`r`n", $Utf8)
+        Ok 'Surveillance externe enregistrée dans .env.'
+    }
+}
 $t = [System.IO.File]::ReadAllText($cfgFile)
 $t = [regex]::Replace($t, '(?ms)^\[update\].*?(?=^\[|\z)', '')
 $t = $t.TrimEnd() + "`r`n`r`n[update]`r`ngithub  = `"$repo`"            # mises à jour proposées dans Telegram`r`nbranch  = `"main`"`r`nsource  = `"C:\\ScalpX\\release`"`r`ncheck_s = 60`r`n"
