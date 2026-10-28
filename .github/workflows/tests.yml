@@ -56,6 +56,12 @@ jobs:
           if (-not (Test-Path $log)) { throw "Pas de journal de compilation" }
           $txt = Get-Content $log -Encoding Unicode -Raw
           Write-Output $txt
+          # annotations lisibles par l'API GitHub (erreurs, avertissements et résultat)
+          foreach ($l in ($txt -split "`r?`n")) {
+            if ($l -match ' : error ')       { Write-Output "::error::$l" }
+            elseif ($l -match ' : warning ') { Write-Output "::warning::$l" }
+            elseif ($l -match '^Result:')    { Write-Output "::notice::$l" }
+          }
           if ($txt -notmatch 'Result:\s+0 errors') { throw "Compilation de l'EA en erreur" }
 
   stable:
