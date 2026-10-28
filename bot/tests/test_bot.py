@@ -692,3 +692,31 @@ async def test_redemarrage_du_bot_depuis_telegram(svc, monkeypatch):
             break
     assert calls and u.STOP.is_set()
     u.STOP.clear()
+
+
+@pytest.mark.asyncio
+async def test_bouton_retour_version_precedente(svc, tmp_path, monkeypatch):
+    from core import update as u
+    import bot.system as sysm
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    root = tmp_path / "b"
+    (root / "data").mkdir(parents=True)
+    (root / "version.txt").write_text("1.1.0")
+    (root / "main.py").write_text("v1")
+    u.backup_bot(root)
+    (root / "version.txt").write_text("1.2.0")
+    monkeypatch.setattr(sysm, "BOT_ROOT", root)
+    monkeypatch.setattr(u, "restart_bot", lambda r: "task")
+    await router.on_callback("d:sys")
+    text, kb = dash.render()
+    assert any("Revenir au bot 1.1.0" in t for row in kb for t, _ in row)
+    await router.on_callback("d:rbk")
+    text, kb = dash.render()
+    tok = [d for row in kb for _, d in row if d.startswith("ok:")][0]
+    await router.on_callback(tok)
+    for _ in range(40):
+        await asyncio.sleep(0.05)
+        if u.STOP.is_set():
+            break
+    assert (root / "version.txt").read_text() == "1.1.0" and u.STOP.is_set()
+    u.STOP.clear()

@@ -94,10 +94,11 @@ class Dashboard:
         if kind == "cmds":
             return self._render_cmds(self.screen[1])
         if kind == "sys":
-            from .system import system_kb, system_text
+            from core import update as upd
+            from .system import BOT_ROOT, system_kb, system_text
             fl = self._flash_text()
             return ((f"{fl}\n\n" if fl else "") + system_text(self.ctx, self.vps(self.ctx.cfg.paths.data)),
-                    system_kb(bool(self.ctx.db.meta_get("update_pending"))))
+                    system_kb(bool(self.ctx.db.meta_get("update_pending")), upd.backup_version(BOT_ROOT)))
         if kind in ("prm", "prg", "prp"):
             inst = self.ctx.db.get(self.screen[1])
             if inst is not None:

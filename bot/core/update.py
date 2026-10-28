@@ -189,7 +189,55 @@ def install_ea(cfg: Config, plan: UpdatePlan) -> str:
     return new
 
 
+def backup_path(bot_root: Path) -> Path:
+    return Path(bot_root) / "data" / "backup_bot.zip"
+
+
+def backup_bot(bot_root: Path) -> Path:
+    """Copie du code actuel du bot (avant une mise à jour) : permet « ⏪ Version précédente »."""
+    import zipfile
+    dst = backup_path(bot_root)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_suffix(".tmp")
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
+        for p in _bot_files(Path(bot_root)):
+            z.write(p, str(p.relative_to(bot_root)).replace("\\", "/"))
+    os.replace(tmp, dst)
+    return dst
+
+
+def backup_version(bot_root: Path) -> str:
+    """Version contenue dans la copie de secours ('' si aucune)."""
+    import zipfile
+    try:
+        with zipfile.ZipFile(backup_path(bot_root)) as z:
+            return z.read("version.txt").decode("utf-8-sig").strip()
+    except (OSError, KeyError, zipfile.BadZipFile):
+        return ""
+
+
+def restore_bot(bot_root: Path) -> str:
+    """Remet le code de la copie de secours (fichiers en trop supprimés). Renvoie la version restaurée."""
+    import zipfile
+    root = Path(bot_root)
+    with zipfile.ZipFile(backup_path(root)) as z:
+        names = set(z.namelist())
+        for p in _bot_files(root):
+            if str(p.relative_to(root)).replace("\\", "/") not in names:
+                p.unlink(missing_ok=True)
+        for n in names:
+            target = (root / n).resolve()
+            if not str(target).startswith(str(root.resolve())):
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_name(target.name + ".upd")
+            tmp.write_bytes(z.read(n))
+            os.replace(tmp, target)
+    return backup_version(root)
+
+
 def install_bot(plan: UpdatePlan, bot_root: Path) -> None:
+    backup_bot(bot_root)
     for rel in plan.bot_files:
         _copy(plan.source / "bot" / rel, bot_root / rel)
     for rel in plan.bot_remove:

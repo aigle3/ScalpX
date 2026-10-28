@@ -76,8 +76,9 @@ def system_text(ctx: Ctx, vps: dict[str, float]) -> str:
     return "\n".join(lines)
 
 
-def system_kb(pending: bool) -> Keyboard:
-    return [
+def system_kb(pending: bool, previous: str = "") -> Keyboard:
+    extra: Keyboard = [[(f"⏪ Revenir au bot {previous}", "d:rbk")]] if previous else []
+    return extra + [
         [(("🔔 " if pending else "") + "⬆ Mises à jour", "d:upd"), ("🔨 Compiler l'EA", "d:bld")],
         [("📜 Journal du bot", "d:log"), ("🧾 Journal compilation", "d:clog")],
         [("💥 Plantages", "d:crash"), ("🏓 Ping", "d:png")],

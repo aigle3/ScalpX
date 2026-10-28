@@ -101,6 +101,17 @@ class Router:
         elif sub == "rst":
             return await self._ask("🔄 <b>Redémarrer le bot ?</b>\nEnviron 30 s sans bot. Les terminaux MT5 et l'EA continuent de trader.",
                                    self.restart_bot, ("sys",), "🔄 Redémarrer")
+        elif sub == "rbk":
+            from core import update as upd
+            from .system import BOT_ROOT
+            prev = upd.backup_version(BOT_ROOT)
+            if not prev:
+                self.dash.flash("Aucune version précédente enregistrée.")
+            else:
+                from core.version import bot_version
+                return await self._ask(f"⏪ <b>Revenir au bot {esc(prev)} ?</b>\nVersion actuelle : {esc(bot_version())}. "
+                                       "Le bot redémarre ; les terminaux continuent. La mise à jour restera disponible (🔔).",
+                                       self.rollback_bot, ("sys",), "⏪ Revenir")
         elif sub == "bld":
             if self.building or self.ctx.deploy.running:
                 return "Compilation ou déploiement déjà en cours"
@@ -462,6 +473,19 @@ class Router:
             return
         self.ctx.db.meta_set("update_pending", plan.stamp)
         await self.on_update_available(plan)
+
+    async def rollback_bot(self) -> None:
+        from core import update as upd
+        from .system import BOT_ROOT
+        try:
+            ver = await asyncio.get_running_loop().run_in_executor(None, upd.restore_bot, BOT_ROOT)
+        except Exception as exc:
+            log.exception("retour arrière")
+            await self.sender.send(self.chat_id, f"❌ Retour impossible : {esc(str(exc))}", [[("✖ Fermer", "d:close")]], True)
+            return
+        await self.sender.send(self.chat_id, f"⏪ Bot {esc(ver)} restauré : redémarrage…", None, True)
+        upd.restart_bot(BOT_ROOT)
+        upd.STOP.set()
 
     async def restart_bot(self) -> None:
         """Relance le bot (même mécanisme qu'après une mise à jour) : terminaux et EA non touchés."""

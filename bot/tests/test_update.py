@@ -81,7 +81,8 @@ def test_installation_bot_garde_config_et_secrets(tmp_path, cfg):
     u.install_bot(plan, bot_root)
     assert (bot_root / "bot" / "x.py").read_text() == "X = 2"
     assert "C:/perso" in (bot_root / "config.toml").read_text()
-    assert not (bot_root / ".env").exists() and not (bot_root / "data").exists()
+    assert not (bot_root / ".env").exists()
+    assert [x.name for x in (bot_root / "data").iterdir()] == ["backup_bot.zip"]       # seule la copie de secours
     assert u.plan_update(cfg, bot_root).empty
 
 
@@ -159,3 +160,21 @@ def test_ping_de_surveillance(cfg):
     assert monitor.ping(cfg, http) and monitor.ping(cfg, http, fail=True)
     assert calls == ["https://hc-ping.com/abc", "https://hc-ping.com/abc/fail"]
     assert monitor.ping(cfg, lambda u, h: (404, b"")) is False
+
+
+def test_copie_de_secours_et_retour_arriere(tmp_path, cfg):
+    bot_root = tmp_path / "botinst"
+    make_pkg(tmp_path, cfg, bot_root)
+    (bot_root / "version.txt").write_text("1.2.0")
+    (bot_root / "data").mkdir()
+    (bot_root / "data" / "scalpx.db").write_text("db")
+    (cfg.update.source and Path(cfg.update.source) / "bot" / "version.txt").write_text("1.3.0")
+    (Path(cfg.update.source) / "bot" / "bot" / "nouveau.py").write_text("N = 1")
+    plan = u.plan_update(cfg, bot_root)
+    u.install_bot(plan, bot_root)                                   # copie de secours faite avant d'installer
+    assert u.backup_version(bot_root) == "1.2.0" and (bot_root / "version.txt").read_text() == "1.3.0"
+    assert (bot_root / "bot" / "nouveau.py").exists()
+    assert u.restore_bot(bot_root) == "1.2.0"
+    assert (bot_root / "version.txt").read_text() == "1.2.0" and (bot_root / "bot" / "x.py").read_text() == "X = 1"
+    assert not (bot_root / "bot" / "nouveau.py").exists()            # fichier de la version récente retiré
+    assert (bot_root / "data" / "scalpx.db").read_text() == "db" and "C:/perso" in (bot_root / "config.toml").read_text()
