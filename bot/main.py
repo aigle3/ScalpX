@@ -203,5 +203,26 @@ def main() -> int:
     return 0
 
 
+def run() -> int:
+    """main() avec trace écrite dans data\\logs\\crash.log : sous pythonw (tâche planifiée) il n'y a pas de console."""
+    try:
+        return main()
+    except SystemExit:
+        raise
+    except BaseException:
+        import traceback
+        txt = traceback.format_exc()
+        try:
+            d = ROOT / "data" / "logs"
+            d.mkdir(parents=True, exist_ok=True)
+            with open(d / "crash.log", "a", encoding="utf-8") as f:
+                f.write(time.strftime("%Y-%m-%d %H:%M:%S") + "\n" + txt + "\n")
+        except OSError:
+            pass
+        logging.getLogger("main").critical("arrêt sur erreur :\n%s", txt)
+        print(txt, file=sys.stderr)
+        return 1
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run())
