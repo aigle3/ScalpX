@@ -1,4 +1,6 @@
 # Tests automatiques : sur « dev » (travail en cours, jamais proposé au VPS) et sur « main » (publication terminée).
+#  - tests du bot (Linux)
+#  - compilation de l'EA avec MetaEditor (Windows) : une erreur de compilation n'atteint jamais le VPS
 # Sur main, si tout passe, la branche « stable » avance : le bot du VPS ne télécharge QUE « stable ».
 name: Tests
 
@@ -11,7 +13,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: tests
+  group: tests-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -27,6 +29,40 @@ jobs:
       - name: Tests du bot
         working-directory: bot
         run: python -m pytest -q
+
+  compile-ea:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Installer MetaTrader 5 (pour MetaEditor)
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest 'https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe' -OutFile mt5setup.exe
+          Start-Process .\mt5setup.exe -ArgumentList '/auto' -Wait
+          $me = 'C:\Program Files\MetaTrader 5\MetaEditor64.exe'
+          for ($i = 0; $i -lt 120 -and -not (Test-Path $me); $i++) { Start-Sleep -Seconds 5 }
+          if (-not (Test-Path $me)) { throw "MetaEditor introuvable après l'installation" }
+          Start-Sleep -Seconds 10
+          Get-Process terminal64, metaeditor64 -ErrorAction SilentlyContinue | Stop-Process -Force
+      - name: Compiler l'EA
+        shell: pwsh
+        run: |
+          $me  = 'C:\Program Files\MetaTrader 5\MetaEditor64.exe'
+          $src = Join-Path $env:GITHUB_WORKSPACE 'ea\MQL5\Experts\ScalpX_v5.mq5'
+          $log = Join-Path $env:GITHUB_WORKSPACE 'compile.log'
+          Start-Process -FilePath $me -ArgumentList @("/compile:`"$src`"", "/log:`"$log`"") -Wait
+          if (-not (Test-Path $log)) { throw "Pas de journal de compilation" }
+          $txt = Get-Content $log -Encoding Unicode -Raw
+          Write-Output $txt
+          if ($txt -notmatch 'Result:\s+0 errors') { throw "Compilation de l'EA en erreur" }
+
+  stable:
+    if: github.ref == 'refs/heads/main'
+    needs: [tests, compile-ea]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - name: Valider la publication (branche stable)
-        if: github.ref == 'refs/heads/main'
         run: git push origin HEAD:refs/heads/stable --force
