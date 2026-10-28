@@ -190,7 +190,7 @@ def main() -> int:
     from bot.app import build_application
     app = build_application(cfg, lambda: make_ctx(cfg))
     quit_l = QuitListener(lock)
-    stopping = threading.Event()
+    stopping = STOPPING
 
     async def j_quit(context) -> None:
         from core.update import STOP
@@ -213,25 +213,38 @@ def main() -> int:
     return 0
 
 
+STOPPING = threading.Event()          # arrêt demandé (mise à jour, redémarrage, nouveau bot) : la fin de boucle n'est pas un plantage
+
+
 def run() -> int:
     """main() avec trace écrite dans data\\logs\\crash.log : sous pythonw (tâche planifiée) il n'y a pas de console."""
     try:
         return main()
     except SystemExit:
         raise
+    except RuntimeError as exc:
+        if STOPPING.is_set():                         # PTB peut lever « Event loop stopped… » pendant un arrêt demandé
+            logging.getLogger("main").info("arrêt terminé (%s)", exc)
+            return 0
+        return _crash()
     except BaseException:
-        import traceback
-        txt = traceback.format_exc()
-        try:
-            d = ROOT / "data" / "logs"
-            d.mkdir(parents=True, exist_ok=True)
-            with open(d / "crash.log", "a", encoding="utf-8") as f:
-                f.write(time.strftime("%Y-%m-%d %H:%M:%S") + "\n" + txt + "\n")
-        except OSError:
-            pass
-        logging.getLogger("main").critical("arrêt sur erreur :\n%s", txt)
-        print(txt, file=sys.stderr)
-        return 1
+        return _crash()
+
+
+def _crash() -> int:
+    """Trace de l'exception en cours dans crash.log et bot.log."""
+    import traceback
+    txt = traceback.format_exc()
+    try:
+        d = ROOT / "data" / "logs"
+        d.mkdir(parents=True, exist_ok=True)
+        with open(d / "crash.log", "a", encoding="utf-8") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S") + "\n" + txt + "\n")
+    except OSError:
+        pass
+    logging.getLogger("main").critical("arrêt sur erreur :\n%s", txt)
+    print(txt, file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":
