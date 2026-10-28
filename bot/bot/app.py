@@ -16,6 +16,7 @@ from telegram.ext import (Application, ApplicationBuilder, ApplicationHandlerSto
                           ContextTypes, ConversationHandler, Defaults, MessageHandler, TypeHandler, filters)
 
 from core.config import Config
+from core.version import bot_version
 from core.events import EventReader
 from core.service import Monitor, Notice
 from mt5.build import pending_build
@@ -340,7 +341,7 @@ async def startup(app: Application) -> None:
     s: Services = app.bot_data["svc"]
     try:
         launched = await s.ctx.watchdog.startup_launch()
-        await s.sender.reply_menu(s.chat_id, f"🤖 Bot démarré · {len(launched)} terminal(aux) relancé(s).\n"
+        await s.sender.reply_menu(s.chat_id, f"🤖 Bot {bot_version()} démarré · {len(launched)} terminal(aux) relancé(s).\n"
                                               f"Le bouton <b>{MENU_BUTTON}</b> (en bas) affiche le panneau.")
         await s.dash.bring_down()
         if s.ctx.deploy.interrupted():

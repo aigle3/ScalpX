@@ -37,8 +37,9 @@ def system_text(ctx: Ctx, vps: dict[str, float]) -> str:
     lines = ["🛠 <b>Système</b>", ""]
     # bot
     inst_c = db.meta_get("installed_commit")
-    lines.append(f"🤖 Bot actif depuis {render.ago(now - ctx.started_at)}"
-                 + (f" · version <code>{esc(inst_c)}</code>" if inst_c else ""))
+    from core.version import bot_version
+    lines.append(f"🤖 Bot <b>{esc(bot_version())}</b> actif depuis {render.ago(now - ctx.started_at)}"
+                 + (f" · <code>{esc(inst_c.split()[0])}</code>" if inst_c else ""))
     lines.append(f"🖥 CPU {vps.get('cpu', 0):.0f}%  RAM {vps.get('ram', 0):.0f}%  Disque {vps.get('disk', 0):.0f}%"
                  + f"  ({basemod.free_disk_gb(cfg.paths.instances):.1f} Go libres)")
     # comptes

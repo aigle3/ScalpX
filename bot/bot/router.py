@@ -409,9 +409,16 @@ class Router:
     # ------------------------------------------------------------------ mise à jour depuis OneDrive
     async def on_update_available(self, plan) -> None:
         self._upd_plan = plan
+        from core.version import bot_version, read as vread
+        from mt5 import base as basemod
         lines = ["⬆ <b>Mise à jour ScalpX disponible</b>"]
         if plan.note:
             lines.append("📝 " + esc(plan.note.splitlines()[0][:200]))
+        if plan.bot_files:
+            new_b = vread(plan.source / "bot" / "version.txt") or "?"
+            lines.append(f"🤖 Bot {esc(bot_version())} → <b>{esc(new_b)}</b>")
+        if any(f.lower().endswith((".mq5", ".mqh")) for f in plan.ea_files):
+            lines.append(f"📈 EA {esc(basemod.read_version(self.ctx.cfg.paths.base) or '?')} → <b>{esc(plan.version or '?')}</b>")
         if plan.bot_files:
             lines.append(f"🤖 Bot : {len(plan.bot_files)} fichier(s) — redémarrage du bot (≈ 30 s, les terminaux continuent)")
         if plan.ea_files:

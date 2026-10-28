@@ -101,10 +101,11 @@ def _write(p: Path, text: str, enc: str, bom: bytes) -> None:
 
 
 def prop_version(ver: str) -> str:
-    """#property version attend « X.YY » : 5.1 → 5.10, 5.12 → 5.12, 5 → 5.00."""
+    """#property version attend « X.YY » : majeur.mineur sur 2 chiffres (5.3.1 → 5.03, 5.12.0 → 5.12).
+    La version complète à 3 niveaux est dans SX_VERSION (affichée partout)."""
     parts = ver.split(".")
     major = parts[0]
-    minor = (parts[1] if len(parts) > 1 else "0")[:2].ljust(2, "0")
+    minor = (parts[1] if len(parts) > 1 else "0")[-2:].rjust(2, "0")
     return f"{major}.{minor}"
 
 

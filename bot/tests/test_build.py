@@ -69,7 +69,7 @@ async def test_compilation_auto_met_la_version_et_compile(cfg, db):
     core = (ex / "SX_Core.mqh").read_bytes()
     mq5 = (ex / "ScalpX_v5.mq5").read_bytes()
     assert core.startswith(b"\xef\xbb\xbf") and b'#define SX_VERSION   "5.2"\r\n' in core      # BOM et CRLF conservés
-    assert b'#property version     "5.20"' in mq5 and b"ScalpX v5.2 " in mq5
+    assert b'#property version     "5.02"' in mq5 and b"ScalpX v5.2 " in mq5
     assert b.pending_build(cfg, db) is None                      # pas de nouvelle tentative
     assert (ex / "ScalpX_v5.ex5").read_text() == "compiled 5.2"
 
@@ -85,4 +85,4 @@ async def test_compilation_en_erreur_une_seule_tentative(cfg, db):
 
 
 def test_prop_version():
-    assert b.prop_version("5.1") == "5.10" and b.prop_version("5.12") == "5.12" and b.prop_version("6") == "6.00"
+    assert b.prop_version("5.3.1") == "5.03" and b.prop_version("5.12.0") == "5.12" and b.prop_version("6") == "6.00"
