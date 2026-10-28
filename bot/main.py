@@ -190,16 +190,25 @@ def main() -> int:
     from bot.app import build_application
     app = build_application(cfg, lambda: make_ctx(cfg))
     quit_l = QuitListener(lock)
+    stopping = threading.Event()
 
     async def j_quit(context) -> None:
         from core.update import STOP
-        if quit_l.requested.is_set() or STOP.is_set():
+        if (quit_l.requested.is_set() or STOP.is_set()) and not stopping.is_set():
+            stopping.set()                              # UNE seule demande d'arrêt (deux = boucle stoppée en plein arrêt)
+            context.job.schedule_removal()
+            log.info("arrêt demandé (mise à jour ou nouveau bot) : arrêt propre")
             context.application.stop_running()
 
     app.job_queue.run_repeating(j_quit, interval=1, first=1)
     log.info("ScalpX central démarré (%d chat autorisé)", len(cfg.allowed_chats))
-    app.run_polling(allowed_updates=["message", "callback_query"], drop_pending_updates=False,
-                    bootstrap_retries=-1)          # Telegram injoignable au démarrage : on réessaie au lieu de s'arrêter
+    try:
+        app.run_polling(allowed_updates=["message", "callback_query"], drop_pending_updates=False,
+                        bootstrap_retries=-1)      # Telegram injoignable au démarrage : on réessaie au lieu de s'arrêter
+    except RuntimeError as exc:
+        if not stopping.is_set():
+            raise
+        log.info("arrêt terminé (%s)", exc)            # arrêt demandé : fin de boucle anticipée sans conséquence
     lock.close()
     return 0
 
