@@ -1,0 +1,23 @@
+SCALPX - INSTALLATION SUR LE VPS
+================================
+
+AVANT : installe le MetaTrader 5 de ton broker (emplacement par defaut), ne te connecte a aucun compte, ferme-le.
+        Windows Server 2016 : installe Python 3.12 depuis python.org (coche "Add python.exe to PATH").
+
+1. Sur le VPS, ouvre github.com/aigle3/scalpx (connecte-toi) > bouton vert "Code" > "Download ZIP".
+2. Decompresse le ZIP (par ex. sur le Bureau) et double-clique sur INSTALL.bat.
+3. Reponds aux questions : token Telegram, chat_id, serveur MT5, jeton GitHub (github_pat_..., lecture seule).
+4. A la fin, le bot demarre et se relance tout seul a chaque ouverture de session.
+   Tu peux ensuite supprimer le dossier decompresse.
+
+MISES A JOUR : RIEN A COPIER
+- Chaque modification publiee sur GitHub est detectee par le bot (toutes les minutes).
+- Telegram : "Mise a jour ScalpX disponible" + bouton Installer.
+- Bot : copie dans C:\ScalpX\bot puis redemarrage du bot (les terminaux MT5 continuent).
+- EA : sources et .set copies dans C:\MT5\BASE, compilation automatique, puis proposition
+  de deploiement sur les comptes (tous / un compte d'abord / selection / plus tard).
+- Jamais touches : .env, config.toml, data\ (base SQLite), comptes de C:\MT5\instances.
+
+IMPORTANT
+- Un compte MT5 ne doit tourner que sur UNE machine. Un token Telegram = un seul bot en marche.
+- Garde la session Windows du VPS ouverte (les terminaux MT5 ont besoin du bureau).

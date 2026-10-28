@@ -1,0 +1,58 @@
+# ScalpX — configuration du bot central (les secrets sont dans .env, jamais ici)
+
+[paths]
+base      = "C:\\MT5\\BASE"            # installation MT5 portable SANS compte (jamais modifiée par le bot)
+instances = "C:\\MT5\\instances"       # un dossier <login>_<serveur> par compte
+archives  = "C:\\MT5\\archives"        # dossiers archivés (échecs de création, comptes supprimés)
+# common_files = "C:\\Users\\<toi>\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files"   # défaut : %APPDATA%\MetaQuotes\Terminal\Common\Files
+data      = "data"                      # base SQLite et logs (relatif au dossier du bot)
+
+[mt5]
+terminal_exe   = "terminal64.exe"
+ea_name        = "ScalpX_v5"            # EA lancé au démarrage (MQL5\Experts, sans extension)
+ea_file        = "ScalpX_v5.ex5"
+set_name       = "scalpx_v5.set"        # MQL5\Presets
+symbol         = "XAUUSD"
+period         = "M5"
+profile        = "Default"              # profil MT5 dont le bot supprime les graphiques (dans chaque terminal, jamais dans BASE) : seul le graphique de l'EA s'ouvre
+default_server = "MonBroker-Demo"       # <-- à adapter
+servers        = ["MonBroker-Demo", "MonBroker-Live"]   # <-- noms EXACTS des serveurs MT5
+
+[timing]
+heartbeat_stale_s   = 30     # heartbeat plus vieux : 🟠
+create_timeout_s    = 120    # attente du premier heartbeat connecté à la création
+stop_wait_s         = 30     # attente après FERMER_TERMINAL avant kill
+launch_stagger_s    = 5      # écart entre deux relances au démarrage
+ack_timeout_s       = 20
+close500_wait_max_s = 300    # attente max d'une clôture à 500 avant un arrêt
+maintenance_wait_s  = 600    # déploiement : attente de 0 position
+restarts_per_hour   = 3      # watchdog : relances max par heure et par compte
+watchdog_interval_s = 15
+events_interval_s   = 3
+status_interval_s   = 5
+verify_deploy_s     = 120
+
+[alerts]
+min_disk_gb       = 2.0
+expected_currency = "EUR"
+silent_mode       = false
+batch_window_s    = 4
+
+[dashboard]
+interval_s = 12              # édition du message épinglé : 10 à 15 s minimum
+page_size  = 8
+
+[reports]
+daily_hour   = 22
+timezone     = "Europe/Paris"
+history_days = 30
+
+[runtime]
+lock_port = 47653
+log_level = "INFO"
+
+[update]
+github  = "aigle3/scalpx"        # dépôt des mises à jour (jeton GITHUB_TOKEN en lecture seule dans .env)
+branch  = "main"
+source  = "C:\\ScalpX\\release"  # copie locale du paquet téléchargé
+check_s = 60
