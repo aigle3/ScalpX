@@ -1,10 +1,10 @@
-# Tests automatiques à chaque publication sur main.
-# Si tout passe, la branche « stable » avance sur ce commit : le bot du VPS ne télécharge QUE « stable ».
+# Tests automatiques : sur « dev » (travail en cours, jamais proposé au VPS) et sur « main » (publication terminée).
+# Sur main, si tout passe, la branche « stable » avance : le bot du VPS ne télécharge QUE « stable ».
 name: Tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 
 permissions:
@@ -28,4 +28,5 @@ jobs:
         working-directory: bot
         run: python -m pytest -q
       - name: Valider la publication (branche stable)
+        if: github.ref == 'refs/heads/main'
         run: git push origin HEAD:refs/heads/stable --force

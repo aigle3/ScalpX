@@ -2,7 +2,10 @@
 
 Dépôt de publication. Chaque push sur `main` lance les tests GitHub (`.github/workflows/tests.yml`) ; s'ils passent,
 la branche `stable` avance et le bot du VPS (qui ne lit QUE `stable`) propose « ⬆ Installer » dans Telegram.
-Lancer les tests en local avant chaque push ; vérifier ensuite le résultat (`gh run list -R aigle3/ScalpX`).
+- TRAVAILLER SUR LA BRANCHE `dev` (commits et pushes intermédiaires) : rien n'y est proposé au VPS.
+- Ne fusionner dans `main` (puis pousser) qu'UNE FOIS la demande entièrement terminée et testée : une seule mise à jour proposée.
+- Lancer les tests en local avant chaque push ; vérifier ensuite le résultat (`gh run list -R aigle3/ScalpX`).
+- Filet de sécurité côté bot : un nouveau commit de `stable` n'est proposé qu'après 10 min sans autre publication.
 
 ## Structure
 - `bot/` : bot central Python 3.11+ (python-telegram-bot v21, SQLite). Tests : `cd bot && python -m pytest -q` (stub telegram dans tests/stubs).

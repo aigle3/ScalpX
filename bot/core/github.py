@@ -33,6 +33,7 @@ class FetchResult:
     message: str = ""
     error: str = ""
     token_expires: str = ""                     # date d'expiration du jeton (AAAA-MM-JJ), si GitHub l'indique
+    waiting: bool = False                       # nouveau commit vu, en attente du délai de stabilité
 
 
 def _headers(cfg: Config) -> dict[str, str]:
@@ -120,8 +121,12 @@ def http_get(url: str, headers: dict) -> tuple[int, bytes]:
         return e.code, b"", {k.lower(): v for k, v in (e.headers or {}).items()}
 
 
-def fetch(cfg: Config, http: Http | None = None) -> FetchResult:
-    """Met à jour la copie locale du paquet si la branche a un nouveau commit."""
+_SEEN = {"sha": "", "since": 0.0}             # dernier commit vu sur la branche et depuis quand
+
+
+def fetch(cfg: Config, http: Http | None = None, force: bool = False, now: float | None = None) -> FetchResult:
+    """Met à jour la copie locale du paquet si la branche a un nouveau commit, resté inchangé depuis
+    [update] settle_min minutes (évite de proposer une publication en cours). force=True : sans attente."""
     get = http or http_get
     repo = cfg.update.github.strip()
     branch = "stable" if cfg.update.validated_only else (cfg.update.branch or "main")
@@ -139,6 +144,11 @@ def fetch(cfg: Config, http: Http | None = None) -> FetchResult:
         msg = (j.get("commit", {}).get("message") or "").strip()
         if sha and sha == local_sha(dest):
             return FetchResult(True, False, sha, msg, token_expires=expires)
+        t = now if now is not None else time.time()
+        if sha != _SEEN["sha"]:
+            _SEEN["sha"], _SEEN["since"] = sha, t
+        if not force and t - _SEEN["since"] < cfg.update.settle_min * 60:
+            return FetchResult(True, False, sha, msg, token_expires=expires, waiting=True)
         res = get(f"{API}/repos/{repo}/zipball/{sha}", _headers(cfg))
         code, data = res[0], res[1]
         if code != 200:

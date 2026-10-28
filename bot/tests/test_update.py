@@ -114,13 +114,19 @@ def test_github_telecharge_le_paquet_une_fois_par_commit(tmp_path, cfg):
             return 200, _zip({"bot/main.py": b"print(1)", "ea/version.txt": b"5.4", "../evil.txt": b"x"})
         return 404, b""
 
-    r = gh.fetch(cfg, http)
+    gh._SEEN.update(sha="", since=0.0)
+    r = gh.fetch(cfg, http, now=1000.0)
+    assert r.ok and r.waiting and not r.changed and state["zips"] == 0      # nouveau commit : attente de stabilité
+    r = gh.fetch(cfg, http, now=1000.0 + 9 * 60)
+    assert r.waiting and state["zips"] == 0
+    r = gh.fetch(cfg, http, now=1000.0 + 10 * 60)
     assert r.ok and r.changed and (tmp_path / "release" / "bot" / "main.py").read_text() == "print(1)"
     assert not (tmp_path / "evil.txt").exists()
     assert u.commit_info(tmp_path / "release")["message"].startswith("Ajout pause news")
     assert gh.fetch(cfg, http).changed is False and state["zips"] == 1         # même commit : rien retéléchargé
     state["sha"] = "s2"
-    assert gh.fetch(cfg, http).changed and state["zips"] == 2
+    assert gh.fetch(cfg, http).waiting                                          # publication suivante : nouvelle attente
+    assert gh.fetch(cfg, http, force=True).changed and state["zips"] == 2      # bouton « Mises à jour » : immédiat
 
 
 def test_github_jeton_refuse(tmp_path, cfg):

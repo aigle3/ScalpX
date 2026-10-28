@@ -554,7 +554,7 @@ class Router:
         cfg = self.ctx.cfg
         loop = asyncio.get_running_loop()
         if cfg.update.github:
-            res = await loop.run_in_executor(None, gh.fetch, cfg)
+            res = await loop.run_in_executor(None, lambda: gh.fetch(cfg, force=True))      # demandé : sans délai
             if not res.ok:
                 await self.sender.send(self.chat_id, f"⚠️ Mises à jour : {esc(res.error)}", [[("✖ Fermer", "d:close")]], True)
                 return
