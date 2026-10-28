@@ -6,6 +6,7 @@ Les numéros de ligne sont ceux des fichiers v5.
 ## Versions
 | Version | Date | Changement |
 |---|---|---|
+| 5.6.0 | 2026-10-28 | Reprise automatique expliquée : événement `REPRISE_PROGRAMMEE` au redémarrage (heure du redémarrage, heure de reprise, ⏸ pour l'empêcher), message de reprise avec la raison, `reprise_auto` dans le statut. Logique de reprise inchangée. |
 | 5.5.1 | 2026-10-28 | Pause programmée échue pendant un arrêt du terminal (moins de 12 h) : reprise automatique au redémarrage. |
 | 5.5.0 | 2026-10-28 | Nettoyage (aucun changement de la stratégie ni de ses paramètres) : ancienne interface Telegram de l'EA supprimée (`SX_TgBot.mqh`, `SX_TgExtra.mqh` → `SX_Commands.mqh`, commandes en accès direct), ancien multi-instances (`inst_*.txt`), rapport journalier de l'EA (celui du bot reste), heures calmes et résumé groupé, réglages `ch_atr` et `live`, inputs Telegram/rapport/ATR obsolètes. **News = vrai filtre** (8e ligne : panneau, journal, alerte globale, statut) ; calendrier toujours lu ; le statut publie les filtres, le signal, l'autorisation de trader et les 3 prochaines news. `PAUSE 2h` / `PAUSE 14:30` : pause programmée avec reprise automatique. |
 | 5.4.0 | 2026-10-28 | Sous-fenêtre ATR retirée du graphique (et supprimée si une version précédente l'avait ajoutée) ; l'ATR reste calculé pour la grille. Affichage seulement. |

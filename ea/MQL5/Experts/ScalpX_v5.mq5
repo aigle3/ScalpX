@@ -17,8 +17,8 @@
 //|   SX_Panel.mqh     panneau d'informations dynamique              |
 //+------------------------------------------------------------------+
 #property copyright   "ScalpX"
-#property version     "5.05"
-#property description "ScalpX v5.5.1 — EMA 10/20 + grille ATR + TP commun + filtres multi-timeframe, pilotage par bot central (fichiers)"
+#property version     "5.06"
+#property description "ScalpX v5.6.0 — EMA 10/20 + grille ATR + TP commun + filtres multi-timeframe, pilotage par bot central (fichiers)"
 
 // [SEUIL500] début : TEST UNIQUEMENT (test B-3 de la checklist). Décommenter pour simuler un glissement de 2.0 (devise du compte)
 // sur le solde final de la clôture à 500 → événement CLOTURE_500_SOUS_SEUIL. Laisser commenté en production.
@@ -186,6 +186,7 @@ int OnInit()
       else if(PInt(P_AUTORESUME) > 0)
       {
          g_resumeAt = TimeCurrent() + PInt(P_AUTORESUME) * 60;
+         g_resumeFrom = LocalNow();
          Log("Robot rattaché : reprise automatique dans " + IntegerToString(PInt(P_AUTORESUME)) + " min");
       }
    }
@@ -197,6 +198,12 @@ int OnInit()
 
    // [ARCHI] début
    ArchiInit();                       // état, créneaux, premier statut, événement DEMARRAGE_EA
+   if(g_resumeAt > 0)                 // le robot tournait : annonce de la reprise automatique (annulable par ⏸ Pause)
+      EvTyped("REPRISE_PROGRAMMEE", 1, "🔌 TERMINAL RELANCÉ — REPRISE AUTOMATIQUE À " + Hh(ZoneFromServer(g_resumeAt)) +
+              "\n━━━━━━━━━━━━━━━━━━\nLe robot tournait quand le terminal (ou l'EA) a été relancé à " + Hh(g_resumeFrom) + "." +
+              "\n🎯 Objectif en cours : " + Sgn(GoalAmount()) + " " + Cur() + " | progression " + F0(GoalProgressPct()) + " %" +
+              "\n⏳ Il reprend tout seul dans " + IntegerToString(PInt(P_AUTORESUME)) + " min (réglage « Reprise auto après retrait »)." +
+              "\n⏸ Pause pour l'en empêcher.", "{\"a\":\"" + TimeToString(ZoneFromServer(g_resumeAt), TIME_DATE | TIME_MINUTES) + "\"}");
    // [ARCHI] fin
 
    ChartRefreshAll(true);
@@ -337,8 +344,9 @@ void OnTimer()
          {
             g_resumeAt = 0;
             g_enabled = true;
-            TgQueue("▶️ REPRISE AUTOMATIQUE\n━━━━━━━━━━━━━━━━━━\nLe robot a été rattaché au graphique et reprend son travail.\n🎯 Objectif : " +
-                    Sgn(GoalAmount()) + " " + Cur() + " | progression " + F0(GoalProgressPct()) + " %");
+            TgQueue("▶️ REPRISE AUTOMATIQUE\n━━━━━━━━━━━━━━━━━━\nLe terminal (ou l'EA) avait été relancé à " + Hh(g_resumeFrom) +
+                    " alors que le robot tournait : le délai de " + IntegerToString(PInt(P_AUTORESUME)) + " min est écoulé, il reprend son travail." +
+                    "\n🎯 Objectif : " + Sgn(GoalAmount()) + " " + Cur() + " | progression " + F0(GoalProgressPct()) + " %");
          }
       }
       ShotTick();                        // captures demandées par le bot

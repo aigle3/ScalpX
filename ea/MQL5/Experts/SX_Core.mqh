@@ -3,7 +3,7 @@
 //| Noyau : variables globales, registre de paramètres (tous les     |
 //| réglages sont modifiables à chaud), persistance, presets.        |
 //+------------------------------------------------------------------+
-#define SX_VERSION   "5.5.1"
+#define SX_VERSION   "5.6.0"
 #define SX_PREFIX    "SX4_"
 #define SX_MAXQ      40
 
@@ -69,7 +69,8 @@ bool     g_enabled        = false;   // robot démarré (entrées + grille autor
 bool     g_stoppedManually= false;   // arrêt manuel (pas de reprise auto)
 bool     g_configOK       = false;   // paramètres validés par l'utilisateur
 bool     g_closing        = false;   // fermeture groupée en cours
-datetime g_resumeAt       = 0;       // reprise automatique programmée
+datetime g_resumeAt       = 0;       // reprise automatique programmée (heure serveur)
+datetime g_resumeFrom     = 0;       // heure (fuseau) du redémarrage qui l'a programmée
 ulong    g_cooldownUntilMs= 0;       // pas d'entrée avant (ms)
 ulong    g_nextTradeMs    = 0;       // backoff après échec d'ordre (ms)
 int      g_failCount      = 0;       // échecs d'ordre consécutifs
