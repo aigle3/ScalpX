@@ -60,7 +60,8 @@ void PauseInit()
 {
    g_pauseUntil = GlobalVariableCheck(GVN("pzuntil")) ? (datetime)(long)GlobalVariableGet(GVN("pzuntil")) : 0;
    if(g_pauseUntil > LocalNow()) g_enabled = false;
-   else if(g_pauseUntil != 0) { g_pauseUntil = 0; GlobalVariableDel(GVN("pzuntil")); }
+   else if(g_pauseUntil != 0 && LocalNow() - g_pauseUntil > 12 * 3600) { g_pauseUntil = 0; GlobalVariableDel(GVN("pzuntil")); }
+   // échue pendant un arrêt du terminal (moins de 12 h) : PauseTick fait la reprise au premier passage
 }
 
 // Fin de la pause programmée (commande PAUSE 2h / 14:30) : même effet que REPRISE
