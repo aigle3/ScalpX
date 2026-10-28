@@ -20,6 +20,10 @@ from .ui import ALL_ID, Confirmations, EditResult, Keyboard, Sender, confirm_kb,
 
 log = logging.getLogger(__name__)
 
+# Choix de pause : (clé du bouton, libellé, argument de la commande PAUSE de l'EA)
+PAUSE_CHOICES = [("0", "Jusqu'à ▶ Reprise", ""), ("1h", "1 h", "1h"), ("2h", "2 h", "2h"), ("4h", "4 h", "4h"),
+                 ("t8", "🌙 Jusqu'à 08:00", "08:00")]
+
 
 class Dashboard:
     def __init__(self, ctx: Ctx, sender: Sender, chat_id: int, confirmations: Confirmations, vps=vps_load) -> None:
@@ -121,6 +125,8 @@ class Dashboard:
             self.screen = ("dash",)
         if kind == "gcmd":
             return self._render_cmds(ALL_ID)
+        if kind == "pz":
+            return self._render_pause(self.screen[1])
         if kind == "lst":
             return self._render_list(now)
         if kind == "act":
@@ -179,7 +185,7 @@ class Dashboard:
                 "Objectif, réglages et commandes partent vers chaque compte, avec confirmation.\n"
                 "Pour un seul compte : 👥 Comptes → le compte.")
         kb: Keyboard = [
-            [("⏸ Tout en pause", "d:pall"), ("▶ Tout reprendre", "d:rall")],
+            [("⏸ Pause (tous)", "d:pall"), ("▶ Tout reprendre", "d:rall")],
             [("🎯 Objectif (tous)", "g:all"), ("⚙️ Paramètres (tous)", "p:all")],
             [("🧰 Commandes (tous)", "d:gcmd"), ("🖥 Terminaux (tous)", "d:gterm")],
             [("🚀 Déployer l'EA", "d:dep"), ("➕ Nouveau compte", "n")],
@@ -278,6 +284,23 @@ class Dashboard:
             [("⬅ Comptes", "d:lst"), ("🔃", f"a:{c}:refresh")],
         ]
         return text, kb
+
+    def _render_pause(self, iid: str) -> tuple[str, Keyboard]:
+        """⏸ Pause : tout de suite (jusqu'à ▶ Reprise) ou programmée (reprise automatique)."""
+        inst = act_target(self.ctx, iid)
+        c = short(iid)
+        group = iid == ALL_ID
+        who = "tous les comptes lancés" if group else render.esc(inst.label if inst else iid)
+        text = (f"⏸ <b>Pause — {who}</b>\n\nPlus aucune nouvelle position ni ordre de grille ; les positions ouvertes restent "
+                "gérées (TP, protections).\nAvec une durée, le robot <b>reprend tout seul</b> à l'heure prévue.")
+        fl = self._flash_text()
+        kb: Keyboard = [
+            [("⏸ Jusqu'à ▶ Reprise", f"z:{c}:0")],
+            [(lbl, f"z:{c}:{k}") for k, lbl, _ in PAUSE_CHOICES[1:4]],
+            [(PAUSE_CHOICES[4][1], f"z:{c}:{PAUSE_CHOICES[4][0]}")],
+            [("⬅ Actions", "d:act")] if group else [("⬅ Fiche", f"a:{c}")],
+        ]
+        return (f"{fl}\n\n{text}" if fl else text), kb
 
     def _render_cmds(self, iid: str) -> tuple[str, Keyboard]:
         inst = act_target(self.ctx, iid)

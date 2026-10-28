@@ -76,6 +76,8 @@ class Router:
                 return await self._ea_cb(parts)
             if head == "g":
                 return await self._goal_cb(parts)
+            if head == "z":
+                return await self._pause_cb(parts)
         except Exception:
             log.exception("callback en erreur : %s", head)
             return "Erreur"
@@ -168,8 +170,13 @@ class Router:
         elif sub == "rst":
             return await self._ask("🔄 <b>Redémarrer le bot ?</b>\nEnviron 30 s sans bot. Les terminaux MT5 et l'EA continuent de trader.",
                                    self.restart_bot, ("sys",), "🔄 Redémarrer")
-        elif sub in ("pall", "rall"):
-            cmd = "PAUSE" if sub == "pall" else "REPRISE"
+        elif sub == "pall":
+            if not any(self.ctx.mgr.is_running(v.inst) for v in self.ctx.views()):
+                self.dash.flash("Aucun terminal lancé.")
+            else:
+                self.dash.goto("pz", ALL_ID)
+        elif sub == "rall":
+            cmd = "REPRISE"
             insts = [v.inst for v in self.ctx.views() if self.ctx.mgr.is_running(v.inst)]
             if not insts:
                 self.dash.flash("Aucun terminal lancé.")
@@ -329,7 +336,7 @@ class Router:
         elif verb == "term":
             dash.goto("term", inst.id)
         elif verb == "pause":
-            self._bg(self._run_cmd_flash(inst, "PAUSE"))
+            dash.goto("pz", inst.id)
         elif verb == "resume":
             self._bg(self._run_cmd_flash(inst, "REPRISE"))
         elif verb == "start":
@@ -440,13 +447,38 @@ class Router:
         await self.sender.edit(self.chat_id, mid, f"🖥 <b>{label}</b>\n" + "\n".join(lines), [[("✖ Fermer", "d:close")]])
         await self.dash.refresh(force=True)
 
-    async def _group(self, insts, cmd: str) -> None:
+    async def _pause_cb(self, p: list[str]) -> str:
+        """z:<compte|all>:<choix> : pause immédiate ou programmée (reprise automatique par l'EA)."""
+        from .dashboard import PAUSE_CHOICES
+        choice = next((c for c in PAUSE_CHOICES if len(p) > 2 and c[0] == p[2]), None)
+        if choice is None or len(p) < 2:
+            return "Choix invalide"
+        _, label, arg = choice
+        args = [arg] if arg else []
+        if p[1] == "all":
+            insts = [v.inst for v in self.ctx.views() if self.ctx.mgr.is_running(v.inst)]
+            if not insts:
+                self.dash.flash("Aucun terminal lancé.")
+                await self.dash.refresh(force=True)
+                return ""
+            return await self._ask(f"⏸ <b>Pause {esc(label.lower())} sur {len(insts)} compte(s) ?</b>\n"
+                                   + esc(", ".join(i.label for i in insts[:15])),
+                                   lambda: self._group(insts, "PAUSE", args), ("dash",), "⏸ Confirmer")
+        inst = resolve(self.ctx.db, p[1])
+        if inst is None:
+            return "Compte introuvable"
+        self.dash.goto("acc", inst.id)
+        self._bg(self._run_cmd_flash(inst, "PAUSE", args))
+        return ""
+
+    async def _group(self, insts, cmd: str, args: list[str] | None = None) -> None:
         """Même commande sur plusieurs comptes, en parallèle ; un seul message de résultat."""
-        mid = await self.sender.send(self.chat_id, f"⏳ <b>{cmd}</b> sur {len(insts)} compte(s)…", None, True)
-        res = await asyncio.gather(*[act.send_cmd(self.ctx, i, cmd) for i in insts])
+        title = cmd + (" " + " ".join(args) if args else "")
+        mid = await self.sender.send(self.chat_id, f"⏳ <b>{esc(title)}</b> sur {len(insts)} compte(s)…", None, True)
+        res = await asyncio.gather(*[act.send_cmd(self.ctx, i, cmd, args) for i in insts])
         lines = [f"{'✅' if r.ok else '❌'} <b>{esc(i.label)}</b> : {esc((r.message or '').splitlines()[0][:120] if r.message else '')}"
                  for i, r in zip(insts, res)]
-        await self.sender.edit(self.chat_id, mid, f"<b>{cmd}</b>\n" + "\n".join(lines), [[("✖ Fermer", "d:close")]])
+        await self.sender.edit(self.chat_id, mid, f"<b>{esc(title)}</b>\n" + "\n".join(lines), [[("✖ Fermer", "d:close")]])
         await self.dash.refresh(force=True)
 
     async def _ea_cb(self, p: list[str]) -> str:

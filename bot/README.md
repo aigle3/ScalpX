@@ -33,16 +33,21 @@ Voir `LISEZMOI.txt` à la racine du dépôt : `INSTALL.bat` installe tout (BASE 
 
 ## Utilisation (tout par boutons, aucune commande « / »)
 
-- **Accueil** (un message édité en place ; **📊 Tableau de bord** ou tout message le ramène en bas) : l'état de l'ensemble
-  (comptes 🟢/🟠/🔴, solde, jour, à retirer, alertes, VPS, versions, 🔔 mise à jour) puis une ligne par compte,
-  et 4 menus : **👥 Comptes**, **⚡ Actions**, **📈 Rapports**, **🛠 Système**.
+- **Accueil** (un message édité en place ; **📊 Tableau de bord** ou tout message le ramène en bas). **En tout premier,
+  l'état du trading** (lu sur le robot le plus récent : tous ont les mêmes réglages) : 🟢 trading autorisé / ⛔ entrées
+  bloquées (raison) / ⏸ pause (jusqu'à…) / ⚪ sans objectif / 🏖 vacances, les positions en cours, le **filtre News**
+  (actif, désactivé ou news en cours), chaque filtre 🟢/🔴 avec la raison d'un blocage, et les 3 prochaines news.
+  Puis l'état de l'ensemble (comptes 🟢/🟠/🔴, solde, jour, à retirer, alertes, VPS, versions, 🔔 mise à jour), une ligne
+  par compte, et 4 menus : **👥 Comptes**, **⚡ Actions**, **📈 Rapports**, **🛠 Système**.
 - **🧭 Filtres et positions** (accueil) : état des filtres (lu sur un robot : tous ont les mêmes réglages), signal
   bloqué ou non, et positions / ordres / flottant de chaque compte avec le total ; 📋 détail des positions en un message.
 - **👥 Comptes** : liste détaillée, un bouton par compte, 🔎 filtre et ↕ tri (un bouton chacun, qui fait défiler les choix).
-- **Fiche compte** : ⏸ Pause, ▶️ Reprise, **🎯 Objectif**, **⚙️ Paramètres** (83 réglages par boutons), **🧰 Commandes EA**
+- **⏸ Pause** (fiche ou ⚡ Actions pour tous) : tout de suite jusqu'à ▶ Reprise, ou **programmée** 1 h / 2 h / 4 h /
+  jusqu'à 08:00 : l'EA reprend tout seul à l'heure prévue (commande `PAUSE 2h`, `PAUSE 08:00`).
+- **Fiche compte** : ⏸ Pause, ▶️ Reprise, **🎯 Objectif**, **⚙️ Paramètres** (75 réglages par boutons), **🧰 Commandes EA**
   (consultations, vacances, presets, valider, annuler l'objectif, 🛑 tout fermer), **🖥 Terminal** (redémarrer, lancer,
   arrêter, reconnecter, mettre à jour l'EA, supprimer), 📈 graphique.
-- **⚡ Actions — tous les comptes lancés à la fois** : ⏸ tout en pause, ▶ tout reprendre, **🎯 Objectif (tous)**,
+- **⚡ Actions — tous les comptes lancés à la fois** : ⏸ pause (immédiate ou programmée), ▶ tout reprendre, **🎯 Objectif (tous)**,
   **⚙️ Paramètres (tous)** (lecture sur le 1er compte, réglage envoyé à chacun), **🧰 Commandes (tous)**, **🖥 Terminaux (tous)** (redémarrer, lancer, arrêter, réduire les fenêtres),
   🚀 déployer l'EA, ➕ nouveau compte, 🔕 mode silencieux. Toujours avec confirmation et un résumé par compte.
 - **🎯 Objectif immédiat** (hors créneaux horaires) : +0,5 / 1 / 2 / 3 / 5 / 10 %, ou ✏️ 10 (€), +3%, =1250 (solde cible) ;

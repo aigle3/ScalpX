@@ -14,7 +14,7 @@ GROUPS = [
  "⚡ Exécution",
  "🔔 Notifications",
  "🎨 Graphique",
- "🧠 Alertes & live"
+ "🧠 Alertes & news"
 ]
 
 # (clé, libellé, groupe, type, min, max, pas, unité, options)
@@ -81,24 +81,17 @@ PARAMS = [
     ("n_filters", "Alertes globales des filtres", 9, "bool", 0.0, 1.0, 1.0, "", []),
     ("n_progress", "Progression de l'objectif", 9, "bool", 0.0, 1.0, 1.0, "", []),
     ("n_errors", "Erreurs d'ordres", 9, "bool", 0.0, 1.0, 1.0, "", []),
-    ("n_report", "Rapport journalier", 9, "bool", 0.0, 1.0, 1.0, "", []),
-    ("reporthour", "Heure du rapport", 9, "int", 0.0, 23.0, 1.0, " h", []),
     ("ch_style", "Style moderne du graphique", 10, "bool", 0.0, 1.0, 1.0, "", []),
     ("ch_ema", "Afficher les EMA", 10, "bool", 0.0, 1.0, 1.0, "", []),
     ("ch_levels", "Afficher TP / prix moyen / grille", 10, "bool", 0.0, 1.0, 1.0, "", []),
     ("ch_panel", "Afficher le panneau", 10, "bool", 0.0, 1.0, 1.0, "", []),
-    ("n_quiet", "Mode silencieux (plage horaire)", 11, "bool", 0.0, 1.0, 1.0, "", []),
-    ("q_start", "Silence : début", 11, "int", 0.0, 23.0, 1.0, " h", []),
-    ("q_end", "Silence : fin", 11, "int", 0.0, 23.0, 1.0, " h", []),
-    ("n_digest", "Résumé groupé (minutes)", 11, "int", 0.0, 120.0, 5.0, " min", []),
     ("n_watchdog", "Surveillance (watchdog)", 11, "bool", 0.0, 1.0, 1.0, "", []),
     ("n_market", "Alertes spread / swap", 11, "bool", 0.0, 1.0, 1.0, "", []),
     ("n_news", "Alerte news économiques", 11, "bool", 0.0, 1.0, 1.0, "", []),
     ("news_min", "News : préavis", 11, "int", 5.0, 180.0, 5.0, " min", []),
     ("news_imp", "News : importance", 3, "enum", 0.0, 1.0, 1.0, "", ["Haute", "Moyenne + Haute"]),
-    ("news_block", "News : pause auto des nouvelles séries", 3, "bool", 0.0, 1.0, 1.0, "", []),
-    ("news_before", "News : pause avant l'annonce", 3, "int", 0.0, 120.0, 5.0, " min", []),
-    ("news_after", "News : pause après l'annonce", 3, "int", 0.0, 180.0, 5.0, " min", []),
-    ("live", "Panneau d'état Telegram", 11, "bool", 0.0, 1.0, 1.0, "", []),
+    ("news_block", "Filtre News (pas d'entrée autour des annonces)", 3, "bool", 0.0, 1.0, 1.0, "", []),
+    ("news_before", "Filtre News : blocage avant l'annonce", 3, "int", 0.0, 120.0, 5.0, " min", []),
+    ("news_after", "Filtre News : blocage après l'annonce", 3, "int", 0.0, 180.0, 5.0, " min", []),
     ("vac_risk", "Mode vacances : plafond de risque", 6, "dbl", 0.5, 50.0, 0.5, " %", []),
 ]

@@ -7,6 +7,28 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class Filtre(BaseModel):
+    """Un filtre de l'EA (5.5.0+) : nom, activé, au vert, info courante, raison du blocage."""
+    model_config = ConfigDict(extra="allow")
+
+    nom: str = ""
+    actif: bool = False
+    ok: bool = True
+    info: str = ""
+    raison: str = ""
+
+
+class NewsItem(BaseModel):
+    """Prochaine annonce économique (calendrier MT5, heure du fuseau de l'EA)."""
+    model_config = ConfigDict(extra="allow")
+
+    heure: str = ""                     # « 2026.10.28 14:30 »
+    dans_min: int = 0                   # négatif : en cours
+    devise: str = ""
+    nom: str = ""
+    haute: bool = False
+
+
 class Statut(BaseModel):
     """Contenu de statut_<id>.json (heartbeat de l'EA)."""
     model_config = ConfigDict(extra="allow")
@@ -47,6 +69,16 @@ class Statut(BaseModel):
     seuil500_actif: bool = True
     prochain_creneau: str = ""
     raison_blocage: str = ""
+    # EA 5.5.0+ (None / vide avec un EA plus ancien)
+    trading_autorise: bool | None = None
+    pause_jusqua: str = ""
+    vacances: bool = False
+    signal: str = ""                    # achat | vente | ""
+    filtres: list[Filtre] | None = None
+    news_filtre: bool = False
+    news_bloque: bool = False
+    news_raison: str = ""
+    news: list[NewsItem] = Field(default_factory=list)
     magic: int = 0
     ts: int = 0                         # secondes Unix GMT
     ts_iso: str = ""

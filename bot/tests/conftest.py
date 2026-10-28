@@ -130,7 +130,9 @@ class FakeEA:
             pv[key] = ("✅" if val == "1" else "❌") if old in ("✅", "❌") else (val + (" lot" if key == "lot" else ""))
             return True, f"⚙️ {key}\nValeur : {pv[key]}\n\n✅ Appliqué : {pv[key]}"
         if cmd == "PAUSE":
-            acc["etat"] = "PAUSE"; return True, "pause"
+            acc["etat"] = "PAUSE"
+            acc["pause_arg"] = " ".join(self._args)
+            return True, "pause" + (f" jusqu'à {acc['pause_arg']}" if self._args else "")
         if cmd == "REPRISE":
             acc["etat"] = "ACTIF"; return True, "reprise"
         if cmd == "MAINTENANCE_ON":

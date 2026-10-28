@@ -55,13 +55,93 @@ def home_line(v: AccountView, label_w: int = 10) -> str:
     return f"{v.health.icon} {name} {v.st.solde:>9.2f} {bar(v.st.progress500())} {pct:>3}%{STATE_TAG.get(v.st.etat, '')}"
 
 
+def _hhmm(s: str) -> str:
+    """« 2026.10.28 14:30 » → « 14:30 » (ou « 29/10 14:30 » si ce n'est pas aujourd'hui)."""
+    if len(s) < 16:
+        return s
+    if s[:10] == time.strftime("%Y.%m.%d"):
+        return s[11:16]
+    return f"{s[8:10]}/{s[5:7]} {s[11:16]}"
+
+
+def _in_min(m: int) -> str:
+    if m < 0:
+        return "en cours"
+    return f"dans {m} min" if m < 90 else f"dans {m // 60} h {m % 60:02d}"
+
+
+def trading_ref(views: list[AccountView], now: float):
+    """Statut de référence pour l'état du trading (tous les robots ont les mêmes réglages) : le plus récent."""
+    fresh = [v.st for v in views if v.st is not None and v.st.age_s(now) < 120]
+    return max(fresh, key=lambda s: s.ts) if fresh else None
+
+
+def trading_block(views: list[AccountView], now: float) -> list[str]:
+    """Bloc « en tout premier » de l'accueil : le robot trade-t-il, peut-il trader, chaque filtre (dont News), prochaines news."""
+    st = trading_ref(views, now)
+    sts = [v.st for v in views if v.st is not None and v.st.age_s(now) < 120]
+    if st is None:
+        return ["🤖 <b>Trading : aucune donnée</b> (aucun robot ne répond)"]
+    npos = sum(s.positions for s in sts)
+    nacc = sum(1 for s in sts if s.positions > 0)
+    flot = sum(s.flottant_ea for s in sts)
+    pos_line = (f"📌 {npos} position(s) ouverte(s) sur {nacc} compte(s) · flottant {money(flot, st.devise, True)}"
+                if npos else "📌 Aucune position ouverte")
+    stopped = True
+    if st.etat == "ARRET_500":
+        head = "🏁 <b>ARRÊT À 500</b> : retrait attendu"
+    elif st.vacances:
+        head = "🏖 <b>MODE VACANCES</b> : aucune nouvelle série"
+    elif st.etat == "PAUSE" or (st.objectif_actif and not st.ea_demarre):
+        head = "⏸ <b>EN PAUSE</b>" + (f" jusqu'à {_hhmm(st.pause_jusqua)} (reprise automatique)" if st.pause_jusqua else "")
+    elif not st.objectif_actif:
+        head = "⚪ <b>À L'ARRÊT</b> : aucun objectif" + (f" · prochain créneau {_hhmm(st.prochain_creneau)}" if st.prochain_creneau else "")
+    else:
+        stopped = False
+        head = "🟢 <b>EN TRAIN DE TRADER</b> : série en cours" if npos else "🟡 <b>EN ATTENTE</b> : aucune position"
+    lines = [head, pos_line]
+    if not stopped:
+        blocked = st.trading_autorise is False or (st.trading_autorise is None and bool(st.raison_blocage))
+        if blocked:
+            lines.append(f"⛔ Nouvelles séries <b>bloquées</b> : {esc(st.raison_blocage or '?')}")
+        else:
+            sig = {"achat": " · signal achat", "vente": " · signal vente"}.get(st.signal, "")
+            lines.append(f"✅ Nouvelles séries <b>autorisées</b> : entrée au prochain signal{sig}")
+    if st.filtres is None:
+        lines.append("🛡 Filtres : détail après la mise à jour de l'EA (5.5.0)")
+        return lines
+    # News, mis en avant
+    if not st.news_filtre:
+        lines.append("📰 Filtre News <b>désactivé</b> : le robot trade pendant les annonces")
+    elif st.news_bloque:
+        lines.append(f"📰 <b>NEWS EN COURS</b> : {esc(st.news_raison)} → pas de nouvelle entrée")
+    else:
+        lines.append("📰 Filtre News actif : aucune news en cours")
+    on = [f for f in st.filtres if f.actif]
+    off = [f.nom for f in st.filtres if not f.actif]
+    lines.append("🛡 " + " · ".join(("🟢 " if f.ok else "🔴 ") + esc(f.nom) for f in on) if on else "🛡 Aucun filtre actif")
+    for f in on:
+        if not f.ok and f.raison:
+            lines.append(f"   ↳ {esc(f.nom)} : {esc(f.raison)}")
+    if off:
+        lines.append("⚪ Désactivés : " + esc(", ".join(off)))
+    if st.news:
+        items = [f"{'🔴' if n.haute else '🟠'} {_hhmm(n.heure)} {esc(n.devise)} {esc(n.nom[:40])} ({_in_min(n.dans_min)})" for n in st.news[:3]]
+        lines.append("📅 <b>Prochaines news</b> :\n   " + "\n   ".join(items))
+    else:
+        lines.append("📅 Aucune news importante dans les 24 h")
+    return lines
+
+
 def home_text(views: list[AccountView], t: Totals, vps: dict[str, float], cur: str, bot_v: str, ea_v: str,
               update_pending: bool, data_age_s: float | None, now: float, max_lines: int = 8) -> str:
     """Accueil : état de l'ensemble (comptes, argent, alertes, VPS), puis une ligne par compte."""
     c = "" if t.currency_mixed else cur
     counts = "   ".join(f"{icon} {t.by_icon.get(icon, 0)}" for icon, _ in ICON_ORDER
                         if t.by_icon.get(icon, 0) or icon in ("🟢", "🟠", "🔴"))
-    lines = [f"📊 <b>ScalpX</b> — {time.strftime('%H:%M', time.localtime(now))}", SEP, counts,
+    lines = [f"📊 <b>ScalpX</b> — {time.strftime('%H:%M', time.localtime(now))}", SEP]
+    lines += trading_block(views, now)
+    lines += [SEP, counts,
              f"💰 Solde <b>{money(t.balance, c)}</b> · jour {money(t.pl_jour, c, True)}"]
     if t.pl_latent:
         lines.append(f"📉 Latent {money(t.pl_latent, c, True)}")

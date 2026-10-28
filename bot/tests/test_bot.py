@@ -210,12 +210,16 @@ async def test_fiche_compte_pause_ack_et_confirmation_arret(svc):
         await router.on_callback("a:" + short(inst.id))
         text, kb = dash.render()
         assert inst.id.split("_")[0] in text and any("a:" + short(inst.id) + ":pause" == d for row in kb for _, d in row)
-        await router.on_callback(f"a:{short(inst.id)}:pause")
+        await router.on_callback(f"a:{short(inst.id)}:pause")                    # écran des choix de pause
+        text, kb = dash.render()
+        datas = [d for row in kb for _, d in row]
+        assert "reprend tout seul" in text and f"z:{short(inst.id)}:2h" in datas and f"z:{short(inst.id)}:t8" in datas
+        await router.on_callback(f"z:{short(inst.id)}:0")                         # pause jusqu'à ▶ Reprise
         for _ in range(40):
             await asyncio.sleep(0.1)
             if ea.accounts[inst.id]["etat"] == "PAUSE":
                 break
-        assert ea.accounts[inst.id]["etat"] == "PAUSE"
+        assert ea.accounts[inst.id]["etat"] == "PAUSE" and ea.accounts[inst.id]["pause_arg"] == ""
         await asyncio.sleep(0.8)
         assert "✅ PAUSE" in dash.render()[0]                                  # ⏳ envoyé → ✅ exécuté
         # arrêt : confirmation obligatoire
@@ -453,7 +457,7 @@ async def test_panneau_sans_commande_menu_boutons_et_retour_en_bas(svc):
         dash.goto(scr)
         labels += [t for row in dash.render()[1] for t, _ in row]
     for want in ("➕ Nouveau compte", "🚀 Déployer l'EA", "📝 Rapport des 24 h", "📤 Export CSV", "🔕 Mode silencieux",
-                 "🏓 Ping", "📜 Bot", "⏸ Tout en pause"):
+                 "🏓 Ping", "📜 Bot", "⏸ Pause (tous)"):
         assert want in labels
     assert "/" not in "".join(labels)
     dash.goto("dash")
@@ -758,9 +762,13 @@ async def test_actions_groupees_et_actions_ea(svc):
     await asyncio.sleep(0.3)
     try:
         # tout en pause : confirmation puis un seul message de résultat
-        await router.on_callback("d:pall")
+        await router.on_callback("d:pall")                                         # choix de la durée
+        assert any(d == "z:all:2h" for row in dash.render()[1] for _, d in row)
+        await router.on_callback("z:all:2h")
         assert "2 compte(s)" in await _confirm(router, dash)
         assert await _until(lambda: ea.accounts[a.id]["etat"] == "PAUSE" and ea.accounts[b.id]["etat"] == "PAUSE")
+        assert ea.accounts[a.id]["pause_arg"] == "2h" and ea.accounts[b.id]["pause_arg"] == "2h"
+        assert await _until(lambda: "PAUSE 2h" in sender.sent[-1][1] or any("PAUSE 2h" in e[1] for e in sender.edits))
         # vacances (confirmation), tout fermer (confirmation)
         await router.on_callback(f"e:{c}:von")
         await _confirm(router, dash)
