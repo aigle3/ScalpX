@@ -210,14 +210,7 @@ void ChartEnsureATR()
          string nm = ChartIndicatorName(0, w, k);
          if(StringFind(nm, "ATR") == 0) ChartIndicatorDelete(0, w, nm);
       }
-   return;
    // [ARCHI] fin
-   if(!PBool(P_CH_ATR) || ChartPeriod(0) != g_sigTF || g_hATR == INVALID_HANDLE) { ChartRemoveATR(); return; }
-   if(g_atrIndName != "") return;
-   int sub = (int)ChartGetInteger(0, CHART_WINDOWS_TOTAL);
-   if(!ChartIndicatorAdd(0, sub, g_hATR)) { Dbg("ATR : ajout au graphique impossible (code " + IntegerToString(GetLastError()) + ")"); return; }
-   int tot = ChartIndicatorsTotal(0, sub);
-   if(tot > 0) { g_atrIndName = ChartIndicatorName(0, sub, tot - 1); g_atrSubWin = sub; }
 }
 
 //+------------------------------------------------------------------+

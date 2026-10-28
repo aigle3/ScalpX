@@ -195,7 +195,7 @@ void FinishGoal(bool early)
                  "\n💰 Solde : " + F2(bal) + " | 🏁 Cible : " + F2(g_goalTarget) + " " + Cur() +
                  "\n📊 Il manque : " + F2(g_goalTarget - bal) + " " + Cur() +
                  (st_posCount + st_pendCount > 0 ? "\n⚠️ Il reste " + IntegerToString(st_posCount + st_pendCount) + " élément(s) non fermé(s)." : "") +
-                 "\n\n▶️ La série n'est pas terminée : l'objectif reste actif.", TgMainMenuMarkup());
+                 "\n\n▶️ La série n'est pas terminée : l'objectif reste actif.");
       return;
    }
    g_finishFails = 0;
@@ -300,7 +300,7 @@ void RiskTick()
             int c = CancelPendingFast();
             TgCrit("🛑 DRAWDOWN — ROBOT MIS EN PAUSE\n━━━━━━━━━━━━━━━━━━\n" + head +
                     "\n🧹 " + IntegerToString(c) + " ordre(s) en attente annulé(s)" +
-                    "\n\n💡 Les positions ouvertes restent gérées (TP). Relance avec ▶️ Démarrer.", TgMainMenuMarkup());
+                    "\n\n💡 Les positions ouvertes restent gérées (TP). Relance avec ▶️ Démarrer.");
          }
          else
             TgCrit("⚠️ DRAWDOWN DÉTECTÉ\n━━━━━━━━━━━━━━━━━━\n" + head + "\n\n💡 Le robot continue (arrêt auto désactivé).");
@@ -324,7 +324,7 @@ void RiskTick()
                  "\n❌ Perte à l'instant : " + F2(lossBefore) + " " + Cur() + " (" + F1(lossBefore / g_goalInit * 100.0) + " %)" +
                  "\n💼 Balance initiale : " + F2(g_goalInit) + " | finale : " + F2(balAfter) + " " + Cur() +
                  "\n🔒 " + IntegerToString(closed) + " élément(s) fermé(s)" +
-                 "\n\n⏸ Objectif terminé, robot en pause.", TgMainMenuMarkup());
+                 "\n\n⏸ Objectif terminé, robot en pause.");
          return;
       }
    }
@@ -340,7 +340,7 @@ void RiskTick()
          TgCrit("⛔ LIMITE DE PERTE DE SESSION ATTEINTE\n━━━━━━━━━━━━━━━━━━" +
                  "\n📉 Perte : " + F2(g_sesStartBal - eq) + " " + Cur() + " (" + F1(loss) + " %, limite " + F0(PDbl(P_SESSPCT)) + " %)" +
                  "\n🧹 " + IntegerToString(c) + " ordre(s) en attente annulé(s)" +
-                 "\n\n⏸ Robot en pause. Les positions ouvertes restent gérées.", TgMainMenuMarkup());
+                 "\n\n⏸ Robot en pause. Les positions ouvertes restent gérées.");
       }
    }
 }
@@ -422,7 +422,7 @@ void OnDealAdded(ulong deal)
 }
 
 //+------------------------------------------------------------------+
-//| Session / rapport                                                |
+//| Session                                                          |
 //+------------------------------------------------------------------+
 void SessionInit()
 {
@@ -432,40 +432,3 @@ void SessionInit()
    g_sesProfit = 0;
    g_peakEq = AccountInfoDouble(ACCOUNT_EQUITY);
 }
-
-string ReportText(string title)
-{
-   int total = g_sesWins + g_sesLosses;
-   double wr = (total > 0) ? (double)g_sesWins / total * 100.0 : 0;
-   double bal = AccountInfoDouble(ACCOUNT_BALANCE);
-   double sp = bal - g_sesStartBal;
-   double spp = (g_sesStartBal > 0) ? sp / g_sesStartBal * 100.0 : 0;
-   int secs = (int)(TimeCurrent() - g_sesStart);
-   return title + "\n━━━━━━━━━━━━━━━━━━" +
-          "\n⏱️ Durée session : " + IntegerToString(secs / 3600) + " h " + IntegerToString((secs % 3600) / 60) + " min" +
-          "\n\n💼 BALANCE" +
-          "\n   Début : " + F2(g_sesStartBal) + " " + Cur() +
-          "\n   Actuelle : " + F2(bal) + " " + Cur() +
-          "\n   Résultat : " + Sgn(sp) + " (" + Sgn(spp) + " %)" +
-          "\n\n📊 PERFORMANCE" +
-          "\n   ✅ Gagnants : " + IntegerToString(g_sesWins) +
-          "\n   ❌ Perdants : " + IntegerToString(g_sesLosses) +
-          "\n   🎯 Taux de réussite : " + F1(wr) + " %" +
-          "\n   💰 Moyenne / trade : " + Sgn(total > 0 ? g_sesProfit / total : 0) +
-          "\n   📉 Drawdown actuel : " + F1(CurrentDDPct()) + " %" +
-          "\n\n🏆 Objectifs atteints : " + IntegerToString(g_sesGoals);
-}
-
-void DailyReportTick()
-{
-   if(!PBool(P_N_REPORT)) return;
-   MqlDateTime dt;
-   TimeToStruct(LocalNow(), dt);
-   if(dt.day_of_week < 1 || dt.day_of_week > 5) return;
-   if(dt.hour != PInt(P_REPORTHOUR) || dt.min >= 5) return;
-   int key = dt.year * 10000 + dt.mon * 100 + dt.day;
-   if(key == g_lastReportDay) return;
-   g_lastReportDay = key;
-   DailyReportSend("📅 RAPPORT JOURNALIER " + IntegerToString(dt.day) + "/" + IntegerToString(dt.mon) + "/" + IntegerToString(dt.year));
-}
-//+------------------------------------------------------------------+

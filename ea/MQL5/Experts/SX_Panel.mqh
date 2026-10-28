@@ -469,8 +469,8 @@ void PanelUpdate()
       PText("m_3c", (xl + xr) / 2, y, "EMA " + hiN + " " + aHi, cHi, 9, 2);
       PText("m_3r", xr, y, "Bougie " + hiN + " " + aCa, cCa, 9, 1);
       y += 18;
-      string pn[7];
-      bool   on[7], ok[7];
+      string pn[FB_N];
+      bool   on[FB_N], ok[FB_N];
       pn[0] = "ATR";   on[0] = PBool(P_F_ATR);  ok[0] = f_ok[0];
       pn[1] = "EMA";   on[1] = PBool(P_F_EMA);  ok[1] = f_ok[1];
       pn[2] = "VOL";   on[2] = PBool(P_F_VOL);  ok[2] = f_ok[2];
@@ -478,8 +478,9 @@ void PanelUpdate()
       pn[4] = loN;           on[4] = PBool(P_F_LO);  ok[4] = f_ok[3];
       pn[5] = hiN;           on[5] = PBool(P_F_HI);  ok[5] = f_ok[4];
       pn[6] = "BG " + hiN;   on[6] = PBool(P_F_CAN); ok[6] = f_ok[5];
+      pn[7] = "NEWS";        on[7] = PBool(P_NEWS_BLOCK); ok[7] = !g_newsBlock;
       int slot = iw / 4;
-      for(int i = 0; i < 7; i++)
+      for(int i = 0; i < FB_N; i++)
       {
          int cx = i % 4, row = i / 4;
          color c = !on[i] ? PC_GREY : (ok[i] ? PC_GREEN : PC_RED);

@@ -1,8 +1,8 @@
 ﻿//+------------------------------------------------------------------+
-//| SX_Journal.mqh - ScalpX v4.5                                     |
+//| SX_Journal.mqh - ScalpX                                          |
 //| Journée en cours uniquement : compteurs du jour, journal des     |
-//| filtres du jour, courbe d'equity du jour, instances multiples,   |
-//| rapport journalier. Aucun historique des jours précédents.       |
+//| filtres du jour, courbe d'equity du jour, rapport du jour.       |
+//| Aucun historique des jours précédents.                           |
 //+------------------------------------------------------------------+
 #define EQ_MAX 1500
 
@@ -315,11 +315,11 @@ void JournalTick()
 //+------------------------------------------------------------------+
 //| Journal des filtres : temps de blocage par filtre                |
 //+------------------------------------------------------------------+
-double   g_fjSec[7];
-int      g_fjCnt[7];
+double   g_fjSec[FB_N];
+int      g_fjCnt[FB_N];
 double   g_fjAny = 0;
-bool     g_fjPrev[7];
-datetime g_fjStart[7];
+bool     g_fjPrev[FB_N];
+datetime g_fjStart[FB_N];
 ulong    g_fjLastMs = 0;
 string   g_fjEv[12];
 int      g_fjEvN = 0;
@@ -337,7 +337,7 @@ void FjEvent(int i, datetime a, datetime b)
 
 void FjSave()
 {
-   for(int i = 0; i < 7; i++)
+   for(int i = 0; i < FB_N; i++)
    {
       GlobalVariableSet(GVN("fjs" + IntegerToString(i)), g_fjSec[i]);
       GlobalVariableSet(GVN("fjc" + IntegerToString(i)), g_fjCnt[i]);
@@ -348,7 +348,7 @@ void FjSave()
 void FjLoad()
 {
    if(!GlobalVariableCheck(GVN("dk")) || (int)GlobalVariableGet(GVN("dk")) != DayKeyNow()) return;
-   for(int i = 0; i < 7; i++)
+   for(int i = 0; i < FB_N; i++)
    {
       if(GlobalVariableCheck(GVN("fjs" + IntegerToString(i)))) g_fjSec[i] = GlobalVariableGet(GVN("fjs" + IntegerToString(i)));
       if(GlobalVariableCheck(GVN("fjc" + IntegerToString(i)))) g_fjCnt[i] = (int)GlobalVariableGet(GVN("fjc" + IntegerToString(i)));
@@ -364,7 +364,7 @@ void FilterJournalTick()
    if(dt > 5.0) dt = 1.0;                                   // coupure / lenteur : on ne compte pas le trou
    bool relevant = (g_enabled && f_marketOpen);             // le blocage ne « coûte » que si le robot est actif et le marché ouvert
    bool any = false;
-   for(int i = 0; i < 7; i++)
+   for(int i = 0; i < FB_N; i++)
    {
       bool blk = FbOn(i) && !FbOK(i);
       if(blk) { any = true; if(relevant) g_fjSec[i] += dt; }
@@ -379,7 +379,7 @@ string FilterJournalText()
 {
    string s = "🧾 JOURNAL DES FILTRES\n━━━━━━━━━━━━━━━━━━\n📅 AUJOURD'HUI (robot actif, marché ouvert)";
    bool none = true;
-   for(int k = 0; k < 7; k++)
+   for(int k = 0; k < FB_N; k++)
    {
       int i = FbOrder(k);
       if(g_fjSec[i] < 1 && g_fjCnt[i] == 0) continue;
@@ -414,7 +414,7 @@ void DayTick()
    DayDDTrack();
    int key = DayKeyNow();
    if(key == g_dayKey) return;
-   for(int i = 0; i < 7; i++) { g_fjSec[i] = 0; g_fjCnt[i] = 0; }
+   for(int i = 0; i < FB_N; i++) { g_fjSec[i] = 0; g_fjCnt[i] = 0; }
    g_fjAny = 0;
    g_fjEvN = 0;                                           // les blocages d'hier ne sont pas conservés
    g_dayKey = key;
@@ -429,122 +429,7 @@ void DayTick()
 }
 
 //+------------------------------------------------------------------+
-//| Multi-instances : un fichier d'état par robot (dossier commun)   |
-//+------------------------------------------------------------------+
-string InstName() { return "inst_" + IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN)) + "_" + IntegerToString(MagicNumber) + "_" + _Symbol + ".txt"; }
-
-int InstStateCode()
-{
-   if(!g_goalActive) return 0;              // aucun objectif
-   if(g_vacation) return 5;                 // vacances
-   if(!g_enabled) return 1;                 // pause
-   if(st_posCount == 0 && g_blockReason != "") return 2;   // en attente
-   return 3;                                // actif
-}
-
-void InstWrite(bool stopped = false)
-{
-   FolderCreate("ScalpX", FILE_COMMON);
-   int h = FileOpen("ScalpX\\" + InstName(), FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_COMMON);
-   if(h == INVALID_HANDLE) return;
-   FileWriteString(h, "ts=" + IntegerToString((long)TimeGMT()) + "\r\n");
-   FileWriteString(h, "sym=" + _Symbol + "\r\n");
-   FileWriteString(h, "cur=" + Cur() + "\r\n");
-   FileWriteString(h, "magic=" + IntegerToString(MagicNumber) + "\r\n");
-   FileWriteString(h, "login=" + IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN)) + "\r\n");
-   FileWriteString(h, "state=" + IntegerToString(stopped ? 4 : InstStateCode()) + "\r\n");
-   FileWriteString(h, "bal=" + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2) + "\r\n");
-   FileWriteString(h, "eq=" + DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2) + "\r\n");
-   FileWriteString(h, "flt=" + DoubleToString(st_floating, 2) + "\r\n");
-   FileWriteString(h, "pos=" + IntegerToString(st_posCount) + "\r\n");
-   FileWriteString(h, "pend=" + IntegerToString(st_pendCount) + "\r\n");
-   FileWriteString(h, "goal=" + DoubleToString(GoalProgressPct(), 0) + "\r\n");
-   FileWriteString(h, "dd=" + DoubleToString(CurrentDDPct(), 1) + "\r\n");
-   FileWriteString(h, "blk=" + IntegerToString(FbBlockedCount()) + "\r\n");
-   FileWriteString(h, "day=" + DoubleToString(g_dayNet, 2) + "\r\n");
-   FileClose(h);
-}
-
-string InstStateLabel(int c)
-{
-   switch(c)
-   {
-      case 0: return "⚪ sans objectif";
-      case 1: return "⏸ pause";
-      case 2: return "🟡 en attente";
-      case 3: return "🟢 actif";
-      case 4: return "🔌 arrêté";
-      case 5: return "🏖 vacances";
-   }
-   return "?";
-}
-
-string MultiText()
-{
-   InstWrite();
-   string s = "🌐 TOUTES LES INSTANCES\n━━━━━━━━━━━━━━━━━━";
-   string fname;
-   long hd = FileFindFirst("ScalpX\\inst_*.txt", fname, FILE_COMMON);
-   if(hd == INVALID_HANDLE) return s + "\nAucune autre instance détectée.";
-   string curN[6];
-   double curEq[6], curFlt[6], curDay[6];
-   int nCur = 0, shown = 0;
-   do
-   {
-      int fh = FileOpen("ScalpX\\" + fname, FILE_READ | FILE_TXT | FILE_ANSI | FILE_COMMON | FILE_SHARE_READ | FILE_SHARE_WRITE);
-      if(fh == INVALID_HANDLE) continue;
-      long ts = 0;
-      string sym = "", cur = "", mg = "";
-      int state = 0, pos = 0, pend = 0, goal = 0, blk = 0;
-      double eq = 0, flt = 0, dd = 0, dayN = 0;
-      while(!FileIsEnding(fh))
-      {
-         string l = FileReadString(fh);
-         int p = StringFind(l, "=");
-         if(p <= 0) continue;
-         string k = StringSubstr(l, 0, p), v = StringSubstr(l, p + 1);
-         StringTrimRight(v);
-         if(k == "ts") ts = StringToInteger(v);
-         else if(k == "sym") sym = v;
-         else if(k == "cur") cur = v;
-         else if(k == "magic") mg = v;
-         else if(k == "state") state = (int)StringToInteger(v);
-         else if(k == "eq") eq = StringToDouble(v);
-         else if(k == "flt") flt = StringToDouble(v);
-         else if(k == "pos") pos = (int)StringToInteger(v);
-         else if(k == "pend") pend = (int)StringToInteger(v);
-         else if(k == "goal") goal = (int)StringToInteger(v);
-         else if(k == "dd") dd = StringToDouble(v);
-         else if(k == "blk") blk = (int)StringToInteger(v);
-         else if(k == "day") dayN = StringToDouble(v);
-      }
-      FileClose(fh);
-      if(ts == 0) continue;
-      long age = (long)TimeGMT() - ts;
-      if(age > 7 * 86400) continue;                          // vieux fichier abandonné
-      bool stale = (age > 90 && state != 4);
-      s += "\n\n" + string(stale ? "⚠️" : (flt >= 0 ? "🟢" : "🔴")) + " " + sym + " #" + mg + " · " + InstStateLabel(state) +
-           "\n   Equity " + F2(eq) + " " + cur + " · Flottant " + Sgn(flt) + " · Jour " + Sgn(dayN) +
-           "\n   📊 " + IntegerToString(pos) + " pos · 🧱 " + IntegerToString(pend) + " · 🎯 " + IntegerToString(goal) + " % · 📉 " + F1(dd) + " %" +
-           (blk > 0 ? " · ⛔ " + IntegerToString(blk) + " filtre(s)" : "") +
-           (stale ? "\n   ⚠️ silencieux depuis " + FmtDur((double)age) + " — robot arrêté ou MT5 fermé ?" : "");
-      shown++;
-      int ci = -1;
-      for(int c = 0; c < nCur; c++) if(curN[c] == cur) ci = c;
-      if(ci < 0 && nCur < 6) { ci = nCur; curN[ci] = cur; curEq[ci] = 0; curFlt[ci] = 0; curDay[ci] = 0; nCur++; }
-      if(ci >= 0) { curEq[ci] += eq; curFlt[ci] += flt; curDay[ci] += dayN; }
-   }
-   while(FileFindNext(hd, fname));
-   FileFindClose(hd);
-   if(shown == 0) return s + "\nAucune instance active.";
-   s += "\n\n━━━━━━━━━━━━━━━━━━\n💼 TOTAL";
-   for(int c = 0; c < nCur; c++)
-      s += "\n   " + curN[c] + " : Equity " + F2(curEq[c]) + " · Flottant " + Sgn(curFlt[c]) + " · Jour " + Sgn(curDay[c]);
-   return s;
-}
-
-//+------------------------------------------------------------------+
-//| Rapport journalier visuel                                        |
+//| Rapport du jour (commande RAPPORT)                               |
 //+------------------------------------------------------------------+
 string TodayReportText(string title)
 {
@@ -560,7 +445,7 @@ string TodayReportText(string title)
               "\n💼 Balance " + F2(bal) + " · Equity " + F2(AccountInfoDouble(ACCOUNT_EQUITY)) + " " + Cur() +
               "\n📈 " + EquitySpark(24);
    string fl = "";
-   for(int k = 0; k < 7; k++)
+   for(int k = 0; k < FB_N; k++)
    {
       int i = FbOrder(k);
       if(g_fjSec[i] >= 60) fl += "\n   🔴 " + FbName(i) + " · " + FmtDur(g_fjSec[i]) + " (" + IntegerToString(g_fjCnt[i]) + "×)";
@@ -568,16 +453,6 @@ string TodayReportText(string title)
    s += "\n\n🛡️ FILTRES (temps de blocage)" + (fl != "" ? fl : "\n   ✅ Aucun blocage notable");
    if(g_sesGoals > 0) s += "\n\n🏆 Objectifs atteints : " + IntegerToString(g_sesGoals);
    return s;
-}
-
-//--- Demandes d'images (traitées par le timer)
-string g_shotReq = "";
-string g_curveReq = "";
-
-void DailyReportSend(string title)
-{
-   TgQueueP(TodayReportText(title), "", 1);
-   g_curveReq = "1";     // [ARCHI] la courbe est déposée dans Common\Files
 }
 
 //+------------------------------------------------------------------+
@@ -591,17 +466,16 @@ void JournalInit()
    DayLoad();
    FjLoad();
    EquityLoad();
-   InstWrite();
+   FileDelete("ScalpX\\inst_" + IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN)) + "_" + IntegerToString(MagicNumber) + "_" + _Symbol + ".txt", FILE_COMMON);   // fichier de l'ancien multi-instances
 }
 
 void JournalTick1Hz()
 {
-   static ulong lastInst = 0, lastSave = 0;
+   static ulong lastSave = 0;
    ulong now = GetTickCount64();
    DayTick();
    EquitySample();
    FilterJournalTick();
    JournalTick();
-   if(now - lastInst >= 10000) { lastInst = now; InstWrite(); }
    if(now - lastSave >= 60000) { lastSave = now; DaySave(); FjSave(); }
 }

@@ -9,17 +9,16 @@
 //|   SX_Filters.mqh   filtres (ATR, Prix/EMA, Volume, Heure, M1/M15)|
 //|   SX_Goal.mqh      objectif, risque, session, dépôts/retraits    |
 //|   SX_Archi.mqh     [ARCHI] fichiers, commandes, états, 500, créneaux|
-//|   SX_TgBot.mqh     commandes et textes (réponses dans les accusés)|
-//|   SX_FilterBoard.mqh  message live des filtres + alerte globale  |
-//|   SX_Journal.mqh   rapport du jour, journal filtres, multi        |
-//|   SX_Smart.mqh     silence, résumé, watchdog, news, PIN, vacances |
-//|   SX_TgExtra.mqh   outils, réglages rapides, vacances             |
+//|   SX_Commands.mqh  textes et actions des commandes du bot        |
+//|   SX_FilterBoard.mqh  tableau des filtres (dont News) + alerte   |
+//|   SX_Journal.mqh   rapport du jour, journal des filtres          |
+//|   SX_Smart.mqh     alertes, watchdog, news, pause, vacances      |
 //|   SX_Chart.mqh     style, EMA, ATR, niveaux sur le graphique     |
 //|   SX_Panel.mqh     panneau d'informations dynamique              |
 //+------------------------------------------------------------------+
 #property copyright   "ScalpX"
-#property version     "5.04"
-#property description "ScalpX v5.4.0 — EMA 10/20 + grille ATR + TP commun + filtres multi-timeframe, pilotage par bot central (fichiers)"
+#property version     "5.05"
+#property description "ScalpX v5.5.0 — EMA 10/20 + grille ATR + TP commun + filtres multi-timeframe, pilotage par bot central (fichiers)"
 
 // [SEUIL500] début : TEST UNIQUEMENT (test B-3 de la checklist). Décommenter pour simuler un glissement de 2.0 (devise du compte)
 // sur le solde final de la clôture à 500 → événement CLOTURE_500_SOUS_SEUIL. Laisser commenté en production.
@@ -106,25 +105,18 @@ input int    AutoResumeMinutes = 20;                  // Reprise auto après ret
 input long   MagicNumber = 123456;                    // Magic Number
 
 input group "══ Notifications (v5 : envoyées au bot central) ══"
-input string TelegramToken = "";                      // OBSOLÈTE (ignoré, conservé pour la compatibilité du .set)
-input string TelegramChatID = "";                     // OBSOLÈTE (ignoré, conservé pour la compatibilité du .set)
-input string TelegramAllowedChats = "";               // OBSOLÈTE (ignoré, conservé pour la compatibilité du .set)
-input string TelegramPIN = "";                        // OBSOLÈTE (ignoré, conservé pour la compatibilité du .set)
 input bool   NotifyFilters = true;                    // Alertes de filtres
 input bool   NotifyProgress = true;                   // Alertes de progression (25/50/75 %)
 input bool   NotifyErrors = true;                     // Alertes d'erreurs d'ordres
-input bool   NotifyDailyReport = true;                // Rapport journalier
-input int    DailyReportHour = 22;                    // Heure du rapport (fuseau choisi)
 
 input group "══ Graphique ══"
 input bool   ChartModernStyle = true;                 // Thème moderne (sans grille ni volumes)
 input bool   ChartShowEMA = true;                     // Tracer les EMA
-input bool   ChartShowATR = false;                    // [ARCHI] ATR en sous-fenêtre : plus affiché (5.4.0)
 input bool   ChartShowLevels = true;                  // Lignes prix moyen / TP / grille
 input bool   ChartShowPanel = true;                   // Panneau d'informations
 
 input group "══ Divers ══"
-input bool   UseSavedParams = true;                   // Reprendre les réglages modifiés via Telegram
+input bool   UseSavedParams = true;                   // Reprendre les réglages modifiés depuis le bot
 input bool   VerboseLogs = false;                     // Journal détaillé
 
 // [ARCHI] début
@@ -147,11 +139,10 @@ input bool   FermerAutresGraphiques = true;              // Ferme les autres gra
 #include "SX_Filters.mqh"
 #include "SX_Goal.mqh"
 #include "SX_Archi.mqh"
-#include "SX_TgBot.mqh"
+#include "SX_Commands.mqh"
 #include "SX_FilterBoard.mqh"
 #include "SX_Journal.mqh"
 #include "SX_Smart.mqh"
-#include "SX_TgExtra.mqh"
 #include "SX_Chart.mqh"
 #include "SX_Panel.mqh"
 
@@ -226,7 +217,6 @@ void OnDeinit(const int reason)
    EventKillTimer();
    SaveParams();
 
-   if(!reload) InstWrite(true);
    // [ARCHI] début
    ArchiDeinit(reason);
    // [ARCHI] fin
@@ -236,7 +226,7 @@ void OnDeinit(const int reason)
 
 //+------------------------------------------------------------------+
 //| Boucle de trading : uniquement des tâches rapides et locales.    |
-//| (Telegram, filtres, graphique = OnTimer)                         |
+//| (commandes, filtres, graphique = OnTimer)                         |
 //+------------------------------------------------------------------+
 void OnTick()
 {
@@ -338,7 +328,6 @@ void OnTimer()
       FilterAlertTick();
       JournalTick1Hz();
       SmartTick1Hz();
-      DailyReportTick();
       ChartDrawEMAs(false);
 
       if(g_resumeAt > 0)
@@ -349,10 +338,10 @@ void OnTimer()
             g_resumeAt = 0;
             g_enabled = true;
             TgQueue("▶️ REPRISE AUTOMATIQUE\n━━━━━━━━━━━━━━━━━━\nLe robot a été rattaché au graphique et reprend son travail.\n🎯 Objectif : " +
-                    Sgn(GoalAmount()) + " " + Cur() + " | progression " + F0(GoalProgressPct()) + " %", TgMainMenuMarkup());
+                    Sgn(GoalAmount()) + " " + Cur() + " | progression " + F0(GoalProgressPct()) + " %");
          }
       }
-      ShotTick();                        // captures demandées sur Telegram
+      ShotTick();                        // captures demandées par le bot
       if(!PBool(P_CH_PANEL)) ChartRedraw(0);
    }
 

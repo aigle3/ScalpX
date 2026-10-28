@@ -1,14 +1,13 @@
 ﻿//+------------------------------------------------------------------+
-//| SX_FilterBoard.mqh - ScalpX v4.2                                 |
-//| Filtres sur Telegram :                                           |
-//|  - écran « Filtres » (menu) avec bascules                        |
+//| SX_FilterBoard.mqh - ScalpX                                      |
+//| Tableau des filtres (bot, panneau, journal, statut) :            |
+//|  - 8 filtres dont News (calendrier MT5)                          |
 //|  - UNE alerte globale cohérente : « filtres bloquants » puis     |
 //|    « tous les filtres OK, le trading reprend » (confirmée 30 s)  |
-//|  - l'état en direct est dans le panneau (SX_TgExtra.mqh)         |
 //+------------------------------------------------------------------+
 #define FA_CONFIRM_MS   30000     // un état global doit durer 30 s avant d'être annoncé
 
-//--- Les 7 lignes : 0 ATR, 1 Prix/EMA, 2 Volume, 3 EMA inf., 4 EMA sup., 5 Bougie sup., 6 Horaire
+//--- Les FB_N lignes : 0 ATR, 1 Prix/EMA, 2 Volume, 3 EMA inf., 4 EMA sup., 5 Bougie sup., 6 Horaire, 7 News
 bool FbOn(int i)
 {
    switch(i)
@@ -19,11 +18,17 @@ bool FbOn(int i)
       case 3: return PBool(P_F_LO);
       case 4: return PBool(P_F_HI);
       case 5: return PBool(P_F_CAN);
-      default: return PBool(P_F_TIME);
+      case 6: return PBool(P_F_TIME);
+      default: return PBool(P_NEWS_BLOCK);
    }
 }
 
-bool FbOK(int i) { return (i == 6) ? !f_timeBlocked : f_ok[i]; }
+bool FbOK(int i)
+{
+   if(i == 6) return !f_timeBlocked;
+   if(i == 7) return !g_newsBlock;
+   return f_ok[i];
+}
 
 string FbName(int i)
 {
@@ -35,7 +40,8 @@ string FbName(int i)
       case 3: return "EMA " + TfNameP(P_LOTF);
       case 4: return "EMA " + TfNameP(P_HITF);
       case 5: return "Bougie " + TfNameP(P_HITF) + " précédente";
-      default: return "Horaire";
+      case 6: return "Horaire";
+      default: return "News";
    }
 }
 
@@ -51,21 +57,27 @@ string FbInfo(int i)
       case 3: return FbTrend(mk_loF, mk_loS);
       case 4: return FbTrend(mk_hiF, mk_hiS);
       case 5: return (mk_candleDir > 0 ? "▲ haussière" : (mk_candleDir < 0 ? "▼ baissière" : "– neutre")) + ", corps " + F0(MathAbs(mk_candleBody)) + "/" + F0(mk_candleMin) + " pts";
-      default: return "blocage " + IntegerToString(PInt(P_T_START)) + "h–" + IntegerToString(PInt(P_T_END)) + "h";
+      case 6: return "blocage " + IntegerToString(PInt(P_T_START)) + "h–" + IntegerToString(PInt(P_T_END)) + "h";
+      default:
+      {
+         string nx = NewsNextText();
+         return "-" + IntegerToString(PInt(P_NEWS_BEFORE)) + "/+" + IntegerToString(PInt(P_NEWS_AFTER)) + " min" + (nx != "" ? " · prochaine : " + nx : " · aucune news dans les 24 h");
+      }
    }
 }
 
 string FbWhy(int i)
 {
    if(i == 6) return f_timeBlocked ? "plage de blocage en cours" : "";
+   if(i == 7) return g_newsBlock ? "news : " + g_newsWhy : "";
    return f_why[i];
 }
 
-int FbOrder(int k) { int o[7] = { 0, 1, 2, 6, 3, 4, 5 }; return o[k]; }   // même ordre que le panneau du graphique
+int FbOrder(int k) { int o[FB_N] = { 0, 1, 2, 6, 7, 3, 4, 5 }; return o[k]; }   // même ordre que le panneau du graphique
 
 bool FiltersAllOK()
 {
-   for(int i = 0; i < 7; i++)
+   for(int i = 0; i < FB_N; i++)
       if(FbOn(i) && !FbOK(i)) return false;
    return true;
 }
@@ -73,7 +85,7 @@ bool FiltersAllOK()
 int FbBlockedCount()
 {
    int n = 0;
-   for(int i = 0; i < 7; i++)
+   for(int i = 0; i < FB_N; i++)
       if(FbOn(i) && !FbOK(i)) n++;
    return n;
 }
@@ -81,7 +93,7 @@ int FbBlockedCount()
 string FbBlockedList()
 {
    string s = "";
-   for(int k = 0; k < 7; k++)
+   for(int k = 0; k < FB_N; k++)
    {
       int i = FbOrder(k);
       if(!FbOn(i) || FbOK(i)) continue;
@@ -90,30 +102,16 @@ string FbBlockedList()
    return s;
 }
 
-//--- Lignes supplémentaires : 0 = robot (pause / vacances), 1 = pause auto news (si activée)
-bool XOn(int e) { return (e == 0) ? true : PBool(P_NEWS_BLOCK); }
-bool XOK(int e) { return (e == 0) ? (g_enabled && !g_vacation) : !g_newsBlock; }
-string XName(int e) { return (e == 0) ? (g_vacation ? "Mode vacances" : "Robot (pause)") : "News"; }
-string XInfo(int e)
-{
-   if(e == 0) return XOK(0) ? "actif" : (g_vacation ? "aucune nouvelle série" : "en pause");
-   return "-" + IntegerToString(PInt(P_NEWS_BEFORE)) + " / +" + IntegerToString(PInt(P_NEWS_AFTER)) + " min · " + string(PInt(P_NEWS_IMP) == 0 ? "haute" : "moyenne+haute");
-}
-string XWhy(int e) { return (e == 1 && !XOK(1)) ? g_newsWhy : ""; }
-
-int XBlockedCount()
-{
-   int n = 0;
-   for(int e = 0; e < 2; e++) if(XOn(e) && !XOK(e)) n++;
-   return n;
-}
+//--- Robot lui-même (pause / vacances) : affiché sous les filtres
+bool   RobotOK()   { return g_enabled && !g_vacation; }
+string RobotLine() { return g_vacation ? "Mode vacances · aucune nouvelle série" : "Robot · en pause"; }
 
 //--- Texte de l'écran « Filtres » (les filtres désactivés sont regroupés sur une ligne)
 string FilterBoardText()
 {
    string s = "🛡️ FILTRES\n━━━━━━━━━━━━━━━━━━";
    string off = "";
-   for(int k = 0; k < 7; k++)
+   for(int k = 0; k < FB_N; k++)
    {
       int i = FbOrder(k);
       if(!FbOn(i)) { off += (off != "" ? ", " : "") + FbName(i); continue; }
@@ -123,47 +121,15 @@ string FilterBoardText()
       if(inf != "") s += " · " + inf;
       if(!ok && FbWhy(i) != "") s += "\n      ↳ " + FbWhy(i);
    }
-   for(int e = 0; e < 2; e++)
-   {
-      if(!XOn(e)) { off += (off != "" ? ", " : "") + XName(e); continue; }
-      bool ok = XOK(e);
-      s += "\n" + string(ok ? "🟢" : "🔴") + " " + XName(e) + " · " + XInfo(e);
-      if(!ok && XWhy(e) != "") s += "\n      ↳ " + XWhy(e);
-   }
+   if(!RobotOK()) s += "\n🔴 " + RobotLine();
    if(off != "") s += "\n⚪ Désactivés : " + off;
    s += "\n━━━━━━━━━━━━━━━━━━\n";
-   int nb = FbBlockedCount() + XBlockedCount();
+   int nb = FbBlockedCount() + (RobotOK() ? 0 : 1);
    if(nb > 0)                  s += "⛔ NOUVELLES SÉRIES BLOQUÉES (" + IntegerToString(nb) + ")";
    else if(g_blockReason == "") s += "✅ TRADING AUTORISÉ";
    else                        s += "✅ Filtres OK\n⏸ Mais : " + g_blockReason;
    s += "\n🕐 " + TimeToString(LocalNow(), TIME_SECONDS);
    return s;
-}
-
-//--- Clavier : bascules des filtres (le message est modifié sur place)
-string FilterBoardMarkup()
-{
-   string rows = "";
-   AddRow(rows, KRow(Btn(string(PBool(P_F_ATR) ? "✅" : "❌") + " Volatilité", "t:" + IntegerToString(P_F_ATR) + ":f"),
-                     Btn(string(PBool(P_F_EMA) ? "✅" : "❌") + " Prix/EMA", "t:" + IntegerToString(P_F_EMA) + ":f")));
-   AddRow(rows, KRow(Btn(string(PBool(P_F_VOL) ? "✅" : "❌") + " Volume", "t:" + IntegerToString(P_F_VOL) + ":f"),
-                     Btn(string(PBool(P_F_TIME) ? "✅" : "❌") + " Horaire", "t:" + IntegerToString(P_F_TIME) + ":f")));
-   AddRow(rows, KRow(Btn(string(PBool(P_F_LO) ? "✅" : "❌") + " EMA " + TfNameP(P_LOTF), "t:" + IntegerToString(P_F_LO) + ":f"),
-                     Btn(string(PBool(P_F_HI) ? "✅" : "❌") + " EMA " + TfNameP(P_HITF), "t:" + IntegerToString(P_F_HI) + ":f")));
-   AddRow(rows, KRow(Btn(string(PBool(P_F_CAN) ? "✅" : "❌") + " Bougie " + TfNameP(P_HITF), "t:" + IntegerToString(P_F_CAN) + ":f"),
-                     Btn(string(PBool(P_NEWS_BLOCK) ? "✅" : "❌") + " News", "t:" + IntegerToString(P_NEWS_BLOCK) + ":f")));
-   AddRow(rows, KRow(Btn("⚙️ Seuils", "g:" + IntegerToString(G_FILTERS)), Btn("⏰ Horaire", "g:" + IntegerToString(G_TIME)), Btn("🔭 Multi-TF", "g:" + IntegerToString(G_MTF))));
-   AddRow(rows, KRow(Btn("📰 Réglages news", "nw"), Btn("🔄", "fl"), Btn("🏠 Menu", "m")));
-   return KB(rows);
-}
-
-//--- Signature de l'état : change seulement quand une LED ou le statut global bouge
-string FilterBoardSig()
-{
-   string g = "";
-   for(int i = 0; i < 7; i++) g += !FbOn(i) ? "o" : (FbOK(i) ? "g" : "r");
-   g += (XOK(0) ? "g" : "r") + string(XOn(1) ? (XOK(1) ? "g" : "r") : "o");
-   return g + (g_blockReason != "" ? "B" : "-") + (g_enabled ? "E" : "P");
 }
 
 //--- Alerte globale : une seule notification à chaque vrai changement d'état

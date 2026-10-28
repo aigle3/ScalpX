@@ -31,8 +31,6 @@ int      g_cycle        = 0;           // compteur de cycles (persisté)
 bool     g_phase500     = false;       // phase CLÔTURE 500 (mémoire seulement)
 bool     g_maint        = false;       // verrou MAINTENANCE (mémoire seulement)
 bool     g_capSent      = false;       // CAPITAL_INSUFFISANT déjà émis
-bool     g_capture      = false;       // true pendant l'exécution d'une commande : les textes vont dans l'accusé
-string   g_capBuf       = "";
 long     g_evSeq        = 0;
 ulong    g_phaseRetryMs = 0;
 ulong    g_termCloseAt  = 0;           // fermeture du terminal demandée (ms)
@@ -332,26 +330,16 @@ void EvTyped(const string type, int prio, const string text, const string dataJs
               ",\"id\":\"" + g_aid + "\"" +
               ",\"type\":\"" + type + "\"" +
               ",\"prio\":" + IntegerToString(prio) +
-              ",\"silencieux\":" + BoolS(TgSilentFor(prio)) +
+              ",\"silencieux\":" + BoolS(prio <= 0) +
               ",\"texte\":\"" + JsonEsc(text) + "\"";
    if(dataJson != "") l += ",\"data\":" + dataJson;
    l += "}";
    EvPush(l);
 }
 
-//--- Sortie des messages de l'EA : reprend l'interface TgQueue/TgQueueP/TgInfo/TgCrit des modules existants.
-//    Pendant l'exécution d'une commande, le texte devient le message de l'accusé ; sinon c'est un événement NOTIF.
-void TgQueueP(string text, string markup = "", int prio = 1, long editMsg = 0)
-{
-   if(g_capture)
-   {
-      g_capBuf += (g_capBuf == "" ? "" : "\n\n") + text;
-      return;
-   }
-   EvTyped("NOTIF", prio, text);
-}
-
-void TgQueue(string text, string markup = "", long editMsg = 0) { TgQueueP(text, markup, 1, editMsg); }
+//--- Messages de l'EA vers le bot : événement NOTIF (prio : 0 info, 1 important, 2 critique)
+void TgQueueP(string text, int prio = 1) { EvTyped("NOTIF", prio, text); }
+void TgQueue(string text)                { TgQueueP(text, 1); }
 
 //+------------------------------------------------------------------+
 //| Persistance de l'état                                            |
@@ -751,6 +739,22 @@ void StatutWrite()
    j += ",\"seuil500_actif\":" + BoolS(ActiverSeuil500);
    j += ",\"prochain_creneau\":\"" + (ns > 0 ? TimeToString(ns, TIME_DATE | TIME_MINUTES) : "") + "\"";
    j += ",\"raison_blocage\":\"" + JsonEsc(g_blockReason) + "\"";
+   j += ",\"trading_autorise\":" + BoolS(g_blockReason == "");
+   j += ",\"pause_jusqua\":\"" + (g_pauseUntil > 0 ? TimeToString(g_pauseUntil, TIME_DATE | TIME_MINUTES) : "") + "\"";
+   j += ",\"vacances\":" + BoolS(g_vacation);
+   j += ",\"signal\":\"" + (mk_fast > mk_slow ? "achat" : (mk_fast < mk_slow ? "vente" : "")) + "\"";
+   j += ",\"filtres\":[";
+   for(int k = 0; k < FB_N; k++)
+   {
+      int i = FbOrder(k);
+      j += (k > 0 ? "," : "") + "{\"nom\":\"" + JsonEsc(FbName(i)) + "\",\"actif\":" + BoolS(FbOn(i)) + ",\"ok\":" + BoolS(FbOK(i)) +
+           ",\"info\":\"" + JsonEsc(FbInfo(i)) + "\",\"raison\":\"" + JsonEsc(FbWhy(i)) + "\"}";
+   }
+   j += "]";
+   j += ",\"news_filtre\":" + BoolS(PBool(P_NEWS_BLOCK));
+   j += ",\"news_bloque\":" + BoolS(g_newsBlock);
+   j += ",\"news_raison\":\"" + JsonEsc(g_newsWhy) + "\"";
+   j += ",\"news\":" + NewsJson(3);
    j += ",\"magic\":" + IntegerToString((long)MagicNumber);
    j += ",\"ts\":" + IntegerToString((long)TimeGMT());
    j += ",\"ts_iso\":\"" + IsoNow() + "\"";
@@ -761,28 +765,6 @@ void StatutWrite()
 //+------------------------------------------------------------------+
 //| Commandes                                                        |
 //+------------------------------------------------------------------+
-string RunLegacy(const string slash)
-{
-   g_capBuf = "";
-   g_capture = true;
-   TgOnText(slash);
-   g_capture = false;
-   string r = g_capBuf;
-   g_capBuf = "";
-   return r;
-}
-
-string RunButton(const string data)
-{
-   g_capBuf = "";
-   g_capture = true;
-   TgOnCallback(0, "", data);
-   g_capture = false;
-   string r = g_capBuf;
-   g_capBuf = "";
-   return r;
-}
-
 bool OkFromText(const string t) { return StringFind(t, "❌") < 0; }
 
 string JoinArgs(string &a[], int from)
@@ -792,18 +774,27 @@ string JoinArgs(string &a[], int from)
    return r;
 }
 
-bool CmdPause(string &msg)
+// PAUSE [durée] : sans argument, pause jusqu'à REPRISE ; « 2h », « 45m », « 14:30 » = reprise automatique (SmartTick : PauseTick)
+bool CmdPause(string &msg, const string arg = "")
 {
+   datetime until = 0;
+   if(arg != "")
+   {
+      until = ParsePauseArg(arg);
+      if(until == 0) { msg = "❌ Durée non reconnue (exemples : 2h, 45m, 14:30)."; return false; }
+   }
    bool wasPause = (g_state == ST_PAUSE);
-   g_capBuf = "";
-   g_capture = true;
    ActPause();
-   g_capture = false;
-   g_capBuf = "";
    RefreshState();
    int c = CancelPendingFast();                             // plus aucun remplissage de la grille pendant la pause
-   if(!wasPause) SetState(ST_PAUSE, true, "Commande PAUSE");
+   if(!wasPause) SetState(ST_PAUSE, true, until > 0 ? "Pause programmée" : "Commande PAUSE");
+   g_pauseUntil = until;
+   if(until > 0) GlobalVariableSet(GVN("pzuntil"), (double)until);
+   else GlobalVariableDel(GVN("pzuntil"));
    msg = "⏸ PAUSE : positions " + IntegerToString(st_posCount) + ", ordres en attente annulés : " + IntegerToString(c) + " (la grille sera reposée à la reprise).";
+   if(until > 0)
+      msg += "\n⏰ Reprise automatique à " + TimeToString(until, (until - LocalNow() > 20 * 3600) ? TIME_DATE | TIME_MINUTES : TIME_MINUTES) +
+             " (dans " + FmtDur((double)(until - LocalNow())) + ").";
    return true;
 }
 
@@ -819,46 +810,34 @@ bool CmdReprise(string &msg)
    g_pauseUntil = 0;
    GlobalVariableDel(GVN("pzuntil"));
    SetState(ST_ACTIF, true, "Commande REPRISE");
-   if(g_goalActive)
-   {
-      g_capBuf = "";
-      g_capture = true;
-      ActStart();
-      g_capture = false;
-      msg = g_capBuf;
-      g_capBuf = "";
-      if(msg == "") msg = "▶️ Robot repris.";
-      return OkFromText(msg);
-   }
+   if(g_goalActive) return ActStart(msg);
    msg = "▶️ État ACTIF. Aucun objectif en cours : prochain créneau " + NextSlotText() + ".";
    return true;
 }
 
-string SlashFor(const string cmd)
+bool CmdVacances(const string arg, string &msg)
 {
-   if(cmd == "POSITIONS") return "/positions";
-   if(cmd == "PARAMS")    return "/params";
-   if(cmd == "FILTRES")   return "/filtres";
-   if(cmd == "RISQUE")    return "/risque";
-   if(cmd == "PRESETS")   return "/presets";
-   if(cmd == "RAPPORT")   return "/rapport";
-   if(cmd == "AIDE")      return "/aide";
-   if(cmd == "STATS")     return "/stats";
-   if(cmd == "JOURNAL")   return "/journal";
-   if(cmd == "MULTI")     return "/multi";
-   if(cmd == "NEWS")      return "/news";
-   if(cmd == "OUTILS")    return "/outils";
-   if(cmd == "RAPIDE")    return "/rapide";
-   if(cmd == "LOT")       return "/lot";
-   if(cmd == "TP")        return "/tp";
-   if(cmd == "GRILLE")    return "/grille";
-   if(cmd == "SPREAD")    return "/spread";
-   if(cmd == "VACANCES")  return "/vacances";
-   if(cmd == "CAPTURE")   return "/capture";
-   if(cmd == "COURBE")    return "/courbe";
-   if(cmd == "SET")       return "/set";
-   if(cmd == "OBJECTIF")  return "/objectif";
-   return "";
+   string a = arg;
+   StringToLower(a);
+   if(a == "on" || a == "off") VacationSet(a == "on");
+   msg = g_vacation ? "🏖 MODE VACANCES ACTIF\n━━━━━━━━━━━━━━━━━━\n• Aucune nouvelle série ne démarre\n• La grille n'est plus étendue\n" +
+                      "• Les positions ouvertes restent gérées jusqu'à leur TP\n• Plafond de risque : tout est fermé si la perte flottante dépasse " +
+                      F1(PDbl(P_VAC_RISK)) + " % de la balance"
+                    : "🏠 Mode vacances désactivé : fonctionnement normal.";
+   return true;
+}
+
+bool CmdSet(string &args[], string &msg)
+{
+   if(ArraySize(args) < 2) { msg = "❌ Format : SET clé valeur"; return false; }
+   int id = FindParamByKey(args[0]);
+   if(id < 0) { msg = "❌ Clé inconnue : " + args[0]; return false; }
+   double v;
+   if(!ParseValue(id, JoinArgs(args, 1), v)) { msg = "❌ Valeur non reconnue pour " + g_pName[id]; return false; }
+   string err;
+   if(!SetParam(id, v, err)) { msg = "❌ " + err; return false; }
+   msg = "⚙️ " + g_pName[id] + "\n✅ Appliqué : " + PValStr(id);
+   return true;
 }
 
 bool CmdExecute(string cmd, string &args[], string &msg)
@@ -869,7 +848,7 @@ bool CmdExecute(string cmd, string &args[], string &msg)
    string rest = JoinArgs(args, 0);
 
    if(cmd == "PING")  { msg = "pong"; return true; }
-   if(cmd == "PAUSE") return CmdPause(msg);
+   if(cmd == "PAUSE") return CmdPause(msg, rest);
    if(cmd == "REPRISE" || cmd == "DEMARRER") return CmdReprise(msg);
    if(cmd == "STATUT")
    {
@@ -908,17 +887,10 @@ bool CmdExecute(string cmd, string &args[], string &msg)
    }
    if(cmd == "FERMER_TOUT")
    {
-      g_confirmCloseUntil = GetTickCount64() + 5000;       // la confirmation est faite côté bot
-      g_capBuf = "";
-      g_capture = true;
-      ActCloseAll();
-      g_capture = false;
-      msg = g_capBuf;
-      g_capBuf = "";
+      msg = ActCloseAll();
       g_stoppedManually = true;
       GlobalVariableSet(GVN("stopped"), 1);
       SetState(ST_PAUSE, true, "Commande FERMER_TOUT");
-      if(msg == "") msg = "🛑 Tout fermé, robot en PAUSE.";
       return OkFromText(msg);
    }
    if(cmd == "ANNULER_OBJECTIF")
@@ -927,6 +899,25 @@ bool CmdExecute(string cmd, string &args[], string &msg)
       msg = "✅ Objectif annulé.";
       return true;
    }
+   if(cmd == "OBJECTIF")
+   {
+      if(rest == "") { msg = GoalText(); return true; }
+      bool ok = GoalSetFromArg(rest, msg);
+      msg = (ok ? "✅ " : "❌ ") + msg;
+      return ok;
+   }
+   if(cmd == "SET") return CmdSet(args, msg);
+   if(cmd == "PARAMS")  { msg = ParamListText(); return true; }
+   if(cmd == "RISQUE")  { msg = GroupText(G_RISK); return true; }
+   if(cmd == "FILTRES") { UpdateFilters(); msg = FilterBoardText(); return true; }
+   if(cmd == "NEWS")    { NewsScan(); msg = NewsText(); return true; }
+   if(cmd == "POSITIONS") { msg = PositionsText(); return true; }
+   if(cmd == "RAPPORT" || cmd == "STATS") { msg = TodayReportText("📅 RAPPORT DU JOUR"); return true; }
+   if(cmd == "JOURNAL") { msg = FilterJournalText(); return true; }
+   if(cmd == "PRESETS") { msg = PresetsText(); return true; }
+   if(cmd == "VACANCES") return CmdVacances(a0, msg);
+   if(cmd == "CAPTURE") { g_shotReq = "1"; msg = "📸 Capture en route…"; return true; }
+   if(cmd == "COURBE")  { g_curveReq = "1"; msg = "📈 Courbe en route…"; return true; }
    if(cmd == "PRESET_SAVE")
    {
       bool ok = PresetSave(a0);
@@ -964,28 +955,6 @@ bool CmdExecute(string cmd, string &args[], string &msg)
       GlobalVariableDel(GVN("cfgok"));
       msg = "✅ Valeurs par défaut rétablies. ⚠️ Valide les paramètres (VALIDER) avant la reprise.";
       return true;
-   }
-   if(cmd == "BOUTON")
-   {
-      // actions de boutons de l'ancienne interface (données de rappel conservées) ; les actions d'état passent par les commandes dédiées
-      if(a0 == "pa") return CmdPause(msg);
-      if(a0 == "go" || a0 == "gv") return CmdReprise(msg);
-      if(a0 == "cy" || a0 == "ca" || a0 == "gx1" || a0 == "rs1" || a0 == "cf")
-      {
-         string c2 = (a0 == "cy" || a0 == "ca") ? "FERMER_TOUT" : (a0 == "gx1" ? "ANNULER_OBJECTIF" : (a0 == "rs1" ? "RESET_PARAMS" : "VALIDER"));
-         string none[];
-         return CmdExecute(c2, none, msg);
-      }
-      msg = RunButton(a0);
-      return OkFromText(msg);
-   }
-
-   string slash = SlashFor(cmd);
-   if(slash != "")
-   {
-      msg = RunLegacy(slash + (rest != "" ? " " + rest : ""));
-      if(msg == "") msg = "OK";
-      return OkFromText(msg);
    }
    msg = "Commande inconnue : " + cmd;
    return false;

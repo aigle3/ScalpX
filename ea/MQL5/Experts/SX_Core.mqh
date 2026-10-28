@@ -3,7 +3,7 @@
 //| Noyau : variables globales, registre de paramètres (tous les     |
 //| réglages sont modifiables à chaud), persistance, presets.        |
 //+------------------------------------------------------------------+
-#define SX_VERSION   "5.4.0"
+#define SX_VERSION   "5.5.0"
 #define SX_PREFIX    "SX4_"
 #define SX_MAXQ      40
 
@@ -32,12 +32,12 @@ enum ENUM_PID
    // Exécution
    P_DEVIATION, P_RETRIES, P_AUTORESUME,
    // Notifications
-   P_N_FILTERS, P_N_PROGRESS, P_N_ERRORS, P_N_REPORT, P_REPORTHOUR,
+   P_N_FILTERS, P_N_PROGRESS, P_N_ERRORS,
    // Graphique
-   P_CH_STYLE, P_CH_EMA, P_CH_ATR, P_CH_LEVELS, P_CH_PANEL,
-   // v4.3 : alertes intelligentes, boards live, mode vacances
-   P_N_QUIET, P_Q_START, P_Q_END, P_N_DIGEST, P_N_WATCHDOG, P_N_MARKET,
-   P_N_NEWS, P_NEWS_MIN, P_NEWS_IMP, P_NEWS_BLOCK, P_NEWS_BEFORE, P_NEWS_AFTER, P_LIVE, P_VAC_RISK,
+   P_CH_STYLE, P_CH_EMA, P_CH_LEVELS, P_CH_PANEL,
+   // Alertes, news, mode vacances
+   P_N_WATCHDOG, P_N_MARKET,
+   P_N_NEWS, P_NEWS_MIN, P_NEWS_IMP, P_NEWS_BLOCK, P_NEWS_BEFORE, P_NEWS_AFTER, P_VAC_RISK,
    P_COUNT
 };
 
@@ -119,14 +119,14 @@ int      mk_candleDir = 0;                                  // bougie sup. préc
 double   mk_candleBody = 0, mk_candleMin = 0;               // corps et seuil (points)
 bool     f_timeBlocked = false;
 bool     f_marketOpen  = true;
-//--- Tableau de bord des filtres sur Telegram (SX_FilterBoard.mqh)
-long     g_fbMsgId  = 0;           // id du message « live » (mémorisé entre deux lancements)
-string   g_fbSig    = "";          // signature des LED lors du dernier envoi
-ulong    g_fbLastMs = 0;
-bool     g_fbForce  = true;
+//--- Tableau des filtres (SX_FilterBoard.mqh) : les 6 filtres de marché + Horaire + News
+#define FB_N 8
 int      g_faState  = -1;          // dernier état global annoncé : 1 = tous OK, 0 = bloqué, -1 = inconnu
 ulong    g_faSince  = 0;
-//--- v4.3 : multi-chats, mode vacances, pause programmée, news, boards live
+//--- Demandes d'images du bot (traitées par le timer : ShotTick)
+string   g_shotReq  = "";
+string   g_curveReq = "";
+//--- Mode vacances, pause programmée, news
 bool     g_vacation = false;          // mode vacances : aucune nouvelle série, plafond de risque réduit
 datetime g_pauseUntil = 0;            // pause programmée (heure du fuseau)
 bool     g_newsBlock = false;         // fenêtre de news : nouvelles séries bloquées
@@ -154,12 +154,8 @@ datetime g_sesStart   = 0;
 int      g_sesWins = 0, g_sesLosses = 0, g_sesGoals = 0;
 double   g_sesProfit  = 0;
 double   g_profitAccum= 0;
-int      g_lastReportDay = 0;
 
-//--- Saisies en attente (commandes à valeur)
-int      g_awMode     = 0;               // 0 rien, 1 valeur de paramètre, 2 objectif, 3 nom de preset
-int      g_awParam    = -1;
-ulong    g_confirmCloseUntil = 0;
+//--- Presets
 string   g_psNames[12];
 int      g_psCount    = 0;
 
@@ -242,7 +238,7 @@ void InitParams()
    g_groupName[G_EXEC]    = "⚡ Exécution";
    g_groupName[G_NOTIF]   = "🔔 Notifications";
    g_groupName[G_CHART]   = "🎨 Graphique";
-   g_groupName[G_SMART]   = "🧠 Alertes & live";
+   g_groupName[G_SMART]   = "🧠 Alertes & news";
 
    // --- Signal & timeframe
    Reg(P_TF, "tf", "Timeframe de trading", G_SIGNAL, PT_ENUM, TfToIndex(TradingTimeframe), 0, 5, 1, "",
@@ -387,35 +383,23 @@ void InitParams()
 
    // --- Notifications
    Reg(P_N_FILTERS, "n_filters", "Alertes globales des filtres", G_NOTIF, PT_BOOL, NotifyFilters ? 1 : 0, 0, 1, 1, "",
-       "Une seule alerte quand les filtres bloquent / quand tout repasse au vert. Le détail LED par LED est dans le message « Filtres en direct ».");
+       "Une seule alerte quand les filtres bloquent / quand tout repasse au vert. Le détail est dans le bot (🧭 Filtres).");
    Reg(P_N_PROGRESS, "n_progress", "Progression de l'objectif", G_NOTIF, PT_BOOL, NotifyProgress ? 1 : 0, 0, 1, 1, "",
        "Messages à 25 %, 50 % et 75 % de l'objectif.");
    Reg(P_N_ERRORS, "n_errors", "Erreurs d'ordres", G_NOTIF, PT_BOOL, NotifyErrors ? 1 : 0, 0, 1, 1, "",
        "Message en cas d'échecs d'ordres répétés.");
-   Reg(P_N_REPORT, "n_report", "Rapport journalier", G_NOTIF, PT_BOOL, NotifyDailyReport ? 1 : 0, 0, 1, 1, "",
-       "Envoie un bilan chaque jour ouvré.");
-   Reg(P_REPORTHOUR, "reporthour", "Heure du rapport", G_NOTIF, PT_INT, DailyReportHour, 0, 23, 1, " h",
-       "Heure d'envoi du rapport (dans le fuseau choisi).");
 
    // --- Graphique
    Reg(P_CH_STYLE, "ch_style", "Style moderne du graphique", G_CHART, PT_BOOL, ChartModernStyle ? 1 : 0, 0, 1, 1, "",
        "Thème sombre, bougies nettes, sans grille ni volumes. Le style d'origine est restauré au retrait du robot.", "", PF_CHART);
    Reg(P_CH_EMA, "ch_ema", "Afficher les EMA", G_CHART, PT_BOOL, ChartShowEMA ? 1 : 0, 0, 1, 1, "",
        "Trace les deux EMA du robot directement sur le graphique.", "", PF_CHART);
-   Reg(P_CH_ATR, "ch_atr", "Afficher l'ATR", G_CHART, PT_BOOL, ChartShowATR ? 1 : 0, 0, 1, 1, "",
-       "Ajoute l'ATR dans une sous-fenêtre (si le graphique est sur le même timeframe que le robot).", "", PF_CHART);
    Reg(P_CH_LEVELS, "ch_levels", "Afficher TP / prix moyen / grille", G_CHART, PT_BOOL, ChartShowLevels ? 1 : 0, 0, 1, 1, "",
        "Lignes du prix moyen, du TP et des prochains niveaux de grille (remplace les lignes d'ordres natives).", "", PF_CHART);
    Reg(P_CH_PANEL, "ch_panel", "Afficher le panneau", G_CHART, PT_BOOL, ChartShowPanel ? 1 : 0, 0, 1, 1, "",
        "Panneau d'informations dynamique sur le graphique.", "", PF_CHART);
 
-   // --- v4.3 : alertes intelligentes & boards live
-   Reg(P_N_QUIET, "n_quiet", "Mode silencieux (plage horaire)", G_SMART, PT_BOOL, 0, 0, 1, 1, "",
-       "Pendant la plage, seules les alertes critiques (drawdown, déconnexion, erreurs graves) sonnent. Le reste arrive en silence.");
-   Reg(P_Q_START, "q_start", "Silence : début", G_SMART, PT_INT, 22, 0, 23, 1, " h", "Heure PC de début du mode silencieux.");
-   Reg(P_Q_END, "q_end", "Silence : fin", G_SMART, PT_INT, 7, 0, 23, 1, " h", "Heure PC de fin du mode silencieux.");
-   Reg(P_N_DIGEST, "n_digest", "Résumé groupé (minutes)", G_SMART, PT_INT, 0, 0, 120, 5, " min",
-       "Regroupe les petites notifications (progression, profit cumulé, dépôts...) en un seul message toutes les N minutes. 0 = envoi immédiat (en silence).");
+   // --- Alertes, news, mode vacances
    Reg(P_N_WATCHDOG, "n_watchdog", "Surveillance (watchdog)", G_SMART, PT_BOOL, 1, 0, 1, 1, "",
        "Alerte en cas de perte de connexion au broker, d'AutoTrading coupé, de ticks absents ou de marge faible.");
    Reg(P_N_MARKET, "n_market", "Alertes spread / swap", G_SMART, PT_BOOL, 1, 0, 1, 1, "",
@@ -424,15 +408,13 @@ void InitParams()
        "Prévient avant une annonce économique (calendrier MT5) concernant les devises du symbole.");
    Reg(P_NEWS_MIN, "news_min", "News : préavis", G_SMART, PT_INT, 30, 5, 180, 5, " min", "Délai d'avance de l'alerte.");
    Reg(P_NEWS_IMP, "news_imp", "News : importance", G_FILTERS, PT_ENUM, 0, 0, 1, 1, "",
-       "Haute = annonces majeures seulement. Moyenne+Haute = plus d'annonces (alertes et pause auto).", "Haute|Moyenne + Haute");
-   Reg(P_NEWS_BLOCK, "news_block", "News : pause auto des nouvelles séries", G_FILTERS, PT_BOOL, NewsPauseEnabledAtStart ? 1 : 0, 0, 1, 1, "",   // [ARCHI] activé par défaut
-       "Bloque l'ouverture de nouvelles séries autour d'une annonce (la grille et les sorties continuent).");
-   Reg(P_NEWS_BEFORE, "news_before", "News : pause avant l'annonce", G_FILTERS, PT_INT, 10, 0, 120, 5, " min",
+       "Haute = annonces majeures seulement. Moyenne+Haute = plus d'annonces (alertes et filtre News).", "Haute|Moyenne + Haute");
+   Reg(P_NEWS_BLOCK, "news_block", "Filtre News (pas d'entrée autour des annonces)", G_FILTERS, PT_BOOL, NewsPauseEnabledAtStart ? 1 : 0, 0, 1, 1, "",   // [ARCHI] activé par défaut
+       "Filtre News : aucune nouvelle série autour d'une annonce du calendrier MT5 (la grille et les sorties continuent). Désactivé = le robot trade pendant les news.");
+   Reg(P_NEWS_BEFORE, "news_before", "Filtre News : blocage avant l'annonce", G_FILTERS, PT_INT, 10, 0, 120, 5, " min",
        "Les nouvelles séries sont bloquées pendant ce délai AVANT l'annonce.");
-   Reg(P_NEWS_AFTER, "news_after", "News : pause après l'annonce", G_FILTERS, PT_INT, 15, 0, 180, 5, " min",
+   Reg(P_NEWS_AFTER, "news_after", "Filtre News : blocage après l'annonce", G_FILTERS, PT_INT, 15, 0, 180, 5, " min",
        "Les nouvelles séries restent bloquées pendant ce délai APRÈS l'annonce.");
-   Reg(P_LIVE, "live", "Panneau d'état Telegram", G_SMART, PT_BOOL, 1, 0, 1, 1, "",
-       "Petit résumé (balance, equity, objectif, drawdown, filtres) toujours en bas de la discussion : actualisé toutes les 30 s, remis en dernier toutes les 5 min (en silence).");
    Reg(P_VAC_RISK, "vac_risk", "Mode vacances : plafond de risque", G_RISK, PT_DBL, 5.0, 0.5, 50.0, 0.5, " %",
        "En mode vacances, toutes les positions sont fermées si la perte flottante dépasse ce % de la balance.");
 }

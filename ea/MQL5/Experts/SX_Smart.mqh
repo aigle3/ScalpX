@@ -1,74 +1,12 @@
 ﻿//+------------------------------------------------------------------+
-//| SX_Smart.mqh - ScalpX v4.3                                       |
-//| Alertes intelligentes : priorités + mode silencieux, résumé      |
-//| groupé, watchdog, spread/swap, news, pause programmée, mode      |
-//| vacances, code PIN, captures d'écran / courbe d'equity.          |
+//| SX_Smart.mqh - ScalpX                                            |
+//| Alertes (priorités), watchdog, spread/swap, news, pause          |
+//| programmée, mode vacances, captures d'écran / courbe d'equity.   |
 //+------------------------------------------------------------------+
 
-//+------------------------------------------------------------------+
-//| Priorités, silence, résumé groupé                                |
-//+------------------------------------------------------------------+
-bool InQuietHours()
-{
-   if(!PBool(P_N_QUIET)) return false;
-   MqlDateTime dt;
-   TimeToStruct(LocalNow(), dt);
-   int h = dt.hour, s = PInt(P_Q_START), e = PInt(P_Q_END);
-   if(s == e) return false;
-   if(s < e) return (h >= s && h < e);
-   return (h >= s || h < e);
-}
-
-// prio : 0 = information (toujours silencieuse), 1 = important (silencieuse pendant le mode silencieux), 2 = critique (toujours sonore)
-bool TgSilentFor(int prio)
-{
-   if(prio <= 0) return true;
-   if(prio >= 2) return false;
-   return InQuietHours();
-}
-
-string g_dgBuf = "";
-int    g_dgCount = 0;
-ulong  g_dgLastMs = 0;
-
-void DigestAdd(string text)
-{
-   string ln[];
-   int n = StringSplit(text, '\n', ln);
-   string item = "";
-   for(int i = 0; i < n; i++)
-   {
-      string l = ln[i];
-      StringTrimLeft(l); StringTrimRight(l);
-      if(l == "" || StringFind(l, "━") >= 0) continue;
-      item += (item == "" ? "" : " · ") + l;
-   }
-   if(item == "") return;
-   if(g_dgCount == 0) g_dgLastMs = GetTickCount64();
-   if(StringLen(g_dgBuf) < 3000) g_dgBuf += "• " + item + "\n";
-   g_dgCount++;
-}
-
-// Information : silencieuse, et regroupée si le résumé est activé
-void TgInfo(string text, string markup = "")
-{
-   if(PInt(P_N_DIGEST) > 0 && markup == "") { DigestAdd(text); return; }
-   TgQueueP(text, markup, 0);
-}
-
-void TgCrit(string text, string markup = "") { TgQueueP(text, markup, 2); }
-
-void DigestTick()
-{
-   if(g_dgCount == 0) return;
-   int dm = PInt(P_N_DIGEST);
-   ulong now = GetTickCount64();
-   if(dm > 0 && now - g_dgLastMs < (ulong)dm * 60000) return;
-   TgQueueP("🗂 RÉSUMÉ — " + IntegerToString(g_dgCount) + " événement" + (g_dgCount > 1 ? "s" : "") + "\n━━━━━━━━━━━━━━━━━━\n" + g_dgBuf, "", 0);
-   g_dgBuf = "";
-   g_dgCount = 0;
-   g_dgLastMs = now;
-}
+// prio 0 = information (silencieuse), 2 = critique (toujours sonore)
+void TgInfo(string text) { TgQueueP(text, 0); }
+void TgCrit(string text) { TgQueueP(text, 2); }
 
 //+------------------------------------------------------------------+
 //| Pause programmée                                                 |
@@ -118,26 +56,6 @@ datetime NextLocalHour(int hour)
    return t;
 }
 
-void PauseUntil(datetime until, long edit = 0)
-{
-   RefreshState();
-   if(!g_goalActive)
-   {
-      TgQueue("❌ Aucun objectif actif : le robot est déjà à l'arrêt.", KB(KRow(Btn("🎯 Définir un objectif", "gl"), Btn("🏠 Menu", "m"))), edit);
-      return;
-   }
-   g_enabled = false;
-   g_stoppedManually = false;
-   GlobalVariableDel(GVN("stopped"));
-   g_pauseUntil = until;
-   GlobalVariableSet(GVN("pzuntil"), (double)until);
-   string when = (until - LocalNow() > 20 * 3600) ? TimeToString(until, TIME_DATE | TIME_MINUTES) : TimeToString(until, TIME_MINUTES);
-   string s = "⏸ PAUSE PROGRAMMÉE\n━━━━━━━━━━━━━━━━━━\n⏰ Reprise automatique à " + when + " (dans " + FmtDur((double)(until - LocalNow())) + ")" +
-              "\n📊 Positions : " + IntegerToString(st_posCount) + " | 🧱 Ordres : " + IntegerToString(st_pendCount) +
-              "\n\nℹ️ Plus aucune nouvelle position ni ordre de grille. Les positions ouvertes restent gérées (TP, protections).";
-   TgQueue(s, KB(KRow(Btn("▶️ Reprendre maintenant", "go"), Btn("🏠 Menu", "m"))), edit);
-}
-
 void PauseInit()
 {
    g_pauseUntil = GlobalVariableCheck(GVN("pzuntil")) ? (datetime)(long)GlobalVariableGet(GVN("pzuntil")) : 0;
@@ -145,21 +63,15 @@ void PauseInit()
    else if(g_pauseUntil != 0) { g_pauseUntil = 0; GlobalVariableDel(GVN("pzuntil")); }
 }
 
+// Fin de la pause programmée (commande PAUSE 2h / 14:30) : même effet que REPRISE
 void PauseTick()
 {
    if(g_pauseUntil == 0) return;
-   if(g_enabled) { g_pauseUntil = 0; GlobalVariableDel(GVN("pzuntil")); return; }   // relancé à la main
+   if(g_enabled || g_state != ST_PAUSE) { g_pauseUntil = 0; GlobalVariableDel(GVN("pzuntil")); return; }   // repris à la main
    if(LocalNow() < g_pauseUntil) return;
-   g_pauseUntil = 0;
-   GlobalVariableDel(GVN("pzuntil"));
-   string w;
-   if(g_goalActive && g_configOK && !g_stoppedManually && TradeEnvOK(w))
-   {
-      g_enabled = true;
-      g_failCount = 0;
-      g_nextTradeMs = 0;
-      TgQueueP("▶️ FIN DE PAUSE — LE ROBOT REPREND\n━━━━━━━━━━━━━━━━━━\nLa pause programmée est terminée.", "", 1);
-   }
+   string msg;
+   bool ok = CmdReprise(msg);
+   EvTyped("FIN_PAUSE", 1, "▶️ FIN DE LA PAUSE PROGRAMMÉE\n━━━━━━━━━━━━━━━━━━\n" + msg, "{\"ok\":" + BoolS(ok) + "}");
 }
 
 //+------------------------------------------------------------------+
@@ -167,7 +79,7 @@ void PauseTick()
 //+------------------------------------------------------------------+
 void VacationInit() { g_vacation = (GlobalVariableCheck(GVN("vac")) && GlobalVariableGet(GVN("vac")) > 0); }
 
-void VacationSet(bool on, long edit = 0)
+void VacationSet(bool on)
 {
    RefreshState();
    g_vacation = on;
@@ -178,12 +90,11 @@ void VacationSet(bool on, long edit = 0)
       if(st_posCount == 0) CancelPendingFast();
       s = "🏖 MODE VACANCES ACTIVÉ\n━━━━━━━━━━━━━━━━━━\n" +
           "• Aucune nouvelle série ne démarre\n• La grille n'est plus étendue\n• Les positions ouvertes restent gérées jusqu'à leur TP\n" +
-          "• Plafond de risque : tout est fermé si la perte flottante dépasse " + F1(PDbl(P_VAC_RISK)) + " % de la balance\n" +
-          "• Je te préviens uniquement en cas d'alerte critique (ou pour les messages importants hors plage silencieuse)";
+          "• Plafond de risque : tout est fermé si la perte flottante dépasse " + F1(PDbl(P_VAC_RISK)) + " % de la balance";
    }
    else
       s = "🏠 MODE VACANCES DÉSACTIVÉ\n━━━━━━━━━━━━━━━━━━\nLe robot reprend son fonctionnement normal.";
-   TgQueue(s, TgMainMenuMarkup(), edit);
+   TgQueue(s);
 }
 
 void VacationTick()
@@ -248,7 +159,7 @@ void WatchdogTick()
    }
    else
    {
-      if(g_wdAtSent && at) TgQueueP("✅ AutoTrading de nouveau actif.", "", 1);
+      if(g_wdAtSent && at) TgQueueP("✅ AutoTrading de nouveau actif.", 1);
       g_wdAtSince = 0;
       g_wdAtSent = false;
    }
@@ -260,9 +171,9 @@ void WatchdogTick()
       if(gap > 180000 && !g_wdTickSent)
       {
          g_wdTickSent = true;
-         TgQueueP("⚠️ AUCUN TICK DEPUIS " + FmtDur((double)gap / 1000.0) + "\n━━━━━━━━━━━━━━━━━━\nLe marché est censé être ouvert : flux de prix gelé ou symbole sans cotation ?", "", 1);
+         TgQueueP("⚠️ AUCUN TICK DEPUIS " + FmtDur((double)gap / 1000.0) + "\n━━━━━━━━━━━━━━━━━━\nLe marché est censé être ouvert : flux de prix gelé ou symbole sans cotation ?", 1);
       }
-      if(gap < 20000 && g_wdTickSent) { g_wdTickSent = false; TgQueueP("✅ Les ticks reprennent.", "", 0); }
+      if(gap < 20000 && g_wdTickSent) { g_wdTickSent = false; TgQueueP("✅ Les ticks reprennent.", 0); }
    }
    else if(conn && g_wdTickSent) g_wdTickSent = false;
 
@@ -404,11 +315,11 @@ string NewsWindowText()
 
 string NewsText()
 {
-   string s = "📰 NEWS & PAUSE AUTO\n━━━━━━━━━━━━━━━━━━" +
+   string s = "📰 FILTRE NEWS\n━━━━━━━━━━━━━━━━━━" +
               "\nSource : calendrier économique de MetaTrader 5, devises du symbole (" + _Symbol + ")." +
-              "\n🛡️ Pause auto : " + (PBool(P_NEWS_BLOCK) ? "✅ " + NewsWindowText() : "❌ désactivée") +
+              "\n🛡️ Filtre : " + (PBool(P_NEWS_BLOCK) ? "✅ actif : pas de nouvelle entrée " + NewsWindowText() : "⚪ désactivé : le robot trade pendant les news") +
               "\n🎚 Importance : " + string(PInt(P_NEWS_IMP) == 0 ? "haute" : "moyenne + haute");
-   if(g_newsBlock) s += "\n⛔ Pause en cours : " + g_newsWhy;
+   s += g_newsBlock ? "\n⛔ TRADING BLOQUÉ PAR LA NEWS : " + g_newsWhy : (PBool(P_NEWS_BLOCK) ? "\n✅ Aucune news en cours : trading autorisé." : "");
    s += "\n\n📅 PROCHAINES ANNONCES (24 h)";
    if(!g_nwOK && g_nwN == 0) return s + "\nCalendrier économique indisponible sur ce terminal.";
    datetime now = TimeTradeServer();
@@ -426,9 +337,46 @@ string NewsText()
    return s;
 }
 
+// Prochaine annonce non terminée (fenêtre du filtre comprise) : index dans g_nw*, -1 si aucune
+int NewsNextIdx(int from = 0)
+{
+   datetime srv = TimeTradeServer();
+   int after = PInt(P_NEWS_AFTER) * 60;
+   for(int i = from; i < g_nwN; i++)
+      if(g_nwT[i] >= srv - after) return i;
+   return -1;
+}
+
+string NewsNextText()
+{
+   int i = NewsNextIdx();
+   if(i < 0) return "";
+   int dm = (int)((g_nwT[i] - TimeTradeServer()) / 60);
+   return Hh(NewsLocal(g_nwT[i])) + " " + g_nwCur[i] + " " + g_nwName[i] + (dm >= 0 ? " (dans " + FmtDur(dm * 60.0) + ")" : " (en cours)");
+}
+
+// Prochaines annonces pour le statut du bot (heure du fuseau choisi)
+string NewsJson(int maxN)
+{
+   string j = "[";
+   int n = 0;
+   datetime srv = TimeTradeServer();
+   for(int i = NewsNextIdx(); i >= 0 && i < g_nwN && n < maxN; i++)
+   {
+      if(n > 0) j += ",";
+      j += "{\"heure\":\"" + TimeToString(NewsLocal(g_nwT[i]), TIME_DATE | TIME_MINUTES) + "\"" +
+           ",\"dans_min\":" + IntegerToString((int)((g_nwT[i] - srv) / 60)) +
+           ",\"devise\":\"" + JsonEsc(g_nwCur[i]) + "\"" +
+           ",\"nom\":\"" + JsonEsc(g_nwName[i]) + "\"" +
+           ",\"haute\":" + BoolS(g_nwImp[i] >= (int)CALENDAR_IMPORTANCE_HIGH) + "}";
+      n++;
+   }
+   return j + "]";
+}
+
+// Le calendrier est toujours lu (prochaines annonces affichées dans le bot) ; le filtre News ne bloque que s'il est actif.
 void NewsTick()
 {
-   if(!PBool(P_N_NEWS) && !PBool(P_NEWS_BLOCK)) { g_newsBlock = false; return; }
    ulong now = GetTickCount64();
    if(g_nwScanMs == 0 || now - g_nwScanMs > 300000) NewsScan();
    datetime srv = TimeTradeServer();
@@ -443,10 +391,9 @@ void NewsTick()
          NewsMarkSeen(g_nwId[i]);
          string s = "📰 NEWS DANS " + FmtDur((double)dt) + "\n━━━━━━━━━━━━━━━━━━\n" + string(g_nwImp[i] >= (int)CALENDAR_IMPORTANCE_HIGH ? "🔴" : "🟠") + " " + g_nwCur[i] + " · " + g_nwName[i] +
                     "\n🕐 " + Hh(NewsLocal(g_nwT[i])) + " (" + TzLabel() + ")\n⚠️ Volatilité attendue, spreads élargis possibles.";
-         if(PBool(P_NEWS_BLOCK)) s += "\n🛡️ Nouvelles séries bloquées " + NewsWindowText() + ".";
-         string rows = "";
-         AddRow(rows, KRow(Btn("📰 News", "nw"), Btn("🏠 Menu", "m")));
-         TgQueueP(s, KB(rows), 1);
+         s += PBool(P_NEWS_BLOCK) ? "\n⛔ Filtre News actif : pas de nouvelle entrée " + NewsWindowText() + "."
+                                  : "\n⚪ Filtre News désactivé : le robot continue de trader pendant l'annonce.";
+         TgQueueP(s, 1);
       }
       if(PBool(P_NEWS_BLOCK) && dt <= before && dt >= -after && !blk)
       {
@@ -512,5 +459,4 @@ void SmartTick1Hz()
    WatchdogTick();
    MarketAlertTick();
    NewsTick();
-   DigestTick();
 }
