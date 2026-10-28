@@ -18,8 +18,8 @@
 //|   SX_Panel.mqh     panneau d'informations dynamique              |
 //+------------------------------------------------------------------+
 #property copyright   "ScalpX"
-#property version     "5.03"
-#property description "ScalpX v5.3.1 — EMA 10/20 + grille ATR + TP commun + filtres multi-timeframe, pilotage par bot central (fichiers)"
+#property version     "5.04"
+#property description "ScalpX v5.4.0 — EMA 10/20 + grille ATR + TP commun + filtres multi-timeframe, pilotage par bot central (fichiers)"
 
 // [SEUIL500] début : TEST UNIQUEMENT (test B-3 de la checklist). Décommenter pour simuler un glissement de 2.0 (devise du compte)
 // sur le solde final de la clôture à 500 → événement CLOTURE_500_SOUS_SEUIL. Laisser commenté en production.
@@ -119,7 +119,7 @@ input int    DailyReportHour = 22;                    // Heure du rapport (fusea
 input group "══ Graphique ══"
 input bool   ChartModernStyle = true;                 // Thème moderne (sans grille ni volumes)
 input bool   ChartShowEMA = true;                     // Tracer les EMA
-input bool   ChartShowATR = true;                     // ATR en sous-fenêtre
+input bool   ChartShowATR = false;                    // [ARCHI] ATR en sous-fenêtre : plus affiché (5.4.0)
 input bool   ChartShowLevels = true;                  // Lignes prix moyen / TP / grille
 input bool   ChartShowPanel = true;                   // Panneau d'informations
 

@@ -129,7 +129,9 @@ def make_ctx(cfg: Config) -> "Ctx":
     common.mkdir(parents=True, exist_ok=True)
     status = StatusReader(common)
     cmdq = CommandQueue(common)
-    mgr = InstanceManager(cfg, db, PsutilProcesses(), status, cmdq)
+    from mt5.window import WindowOptions, default_api
+    wopts = WindowOptions(minimize=cfg.mt5.minimize, hide_panels=cfg.mt5.hide_panels, maximize_chart=cfg.mt5.maximize_chart)
+    mgr = InstanceManager(cfg, db, PsutilProcesses(wopts, default_api()), status, cmdq)
     creator = InstanceCreator(cfg, db, mgr, status)
     deploy = DeployManager(cfg, db, mgr, status, cmdq)
     watchdog = Watchdog(cfg, db, mgr, status, _noop_alert)          # remplacé par le routeur au démarrage

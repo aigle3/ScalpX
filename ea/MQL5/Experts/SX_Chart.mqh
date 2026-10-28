@@ -201,6 +201,17 @@ void ChartRemoveATR()
 
 void ChartEnsureATR()
 {
+   // [ARCHI] début : sous-fenêtre ATR supprimée (affichage seulement ; l'ATR reste calculé pour la grille).
+   // Retire aussi une sous-fenêtre ATR restée sur le graphique d'une version précédente.
+   ChartRemoveATR();
+   for(int w = (int)ChartGetInteger(0, CHART_WINDOWS_TOTAL) - 1; w >= 1; w--)
+      for(int k = ChartIndicatorsTotal(0, w) - 1; k >= 0; k--)
+      {
+         string nm = ChartIndicatorName(0, w, k);
+         if(StringFind(nm, "ATR") == 0) ChartIndicatorDelete(0, w, nm);
+      }
+   return;
+   // [ARCHI] fin
    if(!PBool(P_CH_ATR) || ChartPeriod(0) != g_sigTF || g_hATR == INVALID_HANDLE) { ChartRemoveATR(); return; }
    if(g_atrIndName != "") return;
    int sub = (int)ChartGetInteger(0, CHART_WINDOWS_TOTAL);

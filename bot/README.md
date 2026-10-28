@@ -72,6 +72,13 @@ d'abord, une sélection ou plus tard. Compte par compte : maintenance → attent
 Changer à la main `BASE\version.txt` déclenche aussi une compilation (version écrite dans les sources), sauf si les sources
 sont plus récentes.
 
+## Fenêtre MT5
+
+À chaque ouverture d'un terminal (création, relance, redémarrage, déploiement), le bot masque la boîte à outils,
+le navigateur et l'observation du marché, agrandit le graphique dans la fenêtre puis **réduit la fenêtre** (moins de
+CPU et de mémoire ; l'EA trade normalement). Réglable dans `config.toml` (`[mt5] minimize`, `hide_panels`,
+`maximize_chart`). 🛠 Système → **🪟 Réduire les terminaux** refait le rangement de tous les terminaux ouverts.
+
 ## Profil MT5
 
 Avant chaque lancement, le bot vide le profil `Default` du terminal de l'instance (jamais BASE) : un seul graphique

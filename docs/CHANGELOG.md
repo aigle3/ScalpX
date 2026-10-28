@@ -6,6 +6,7 @@ Les numéros de ligne sont ceux des fichiers v5.
 ## Versions
 | Version | Date | Changement |
 |---|---|---|
+| 5.4.0 | 2026-10-28 | Sous-fenêtre ATR retirée du graphique (et supprimée si une version précédente l'avait ajoutée) ; l'ATR reste calculé pour la grille. Affichage seulement. |
 | 5.3.1 | 2026-10-28 | Liste PRESETS : noms des presets ajoutés au texte (« • nom »), pour les boutons du bot. Affichage seulement, aucun changement de trading. |
 | 5.3.0 | 2026-10-28 | Volume et pause news activés par défaut (`NewsPauseEnabledAtStart`), versions à 3 niveaux. |
 

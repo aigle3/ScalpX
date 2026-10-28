@@ -30,9 +30,11 @@ class PsutilProcesses:
 
     CACHE_S = 2.0                     # le tableau de bord interroge chaque compte : un seul parcours des processus
 
-    def __init__(self) -> None:
+    def __init__(self, window_opts=None, win_api=None) -> None:
         self._running: set[str] = set()
         self._running_at = 0.0
+        self.window_opts = window_opts                # mt5.window.WindowOptions : rangement de la fenêtre à l'ouverture
+        self.win_api = win_api
 
     def _running_exes(self) -> set[str]:
         now = time.monotonic()
@@ -79,7 +81,18 @@ class PsutilProcesses:
                                 close_fds=True)
         log.info("terminal lancé : %s (pid %s)%s", Path(exe).parent.name, proc.pid, " avec /config" if ini else "")
         self._invalidate()
+        self.rearrange(exe, extra_pid=proc.pid)
         return proc.pid
+
+    def rearrange(self, exe: Path, extra_pid: int | None = None, settle: bool = True) -> None:
+        """Panneaux masqués, graphique agrandi, fenêtre réduite (en arrière-plan ; Windows seulement)."""
+        if self.window_opts is None or self.win_api is None:
+            return
+        from dataclasses import replace
+        from .window import arrange_in_background
+        opts = self.window_opts if settle else replace(self.window_opts, settle_s=0, timeout_s=5)
+        pids = lambda: {p.pid for p in self.find(exe)} | ({extra_pid} if extra_pid else set())   # noqa: E731
+        arrange_in_background(self.win_api, pids, opts, Path(exe).parent.name)
 
     def kill(self, exe: Path) -> int:
         """Termine tous les processus de CET exécutable ; renvoie le nombre tué."""

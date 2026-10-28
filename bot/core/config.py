@@ -33,6 +33,9 @@ class MT5(BaseModel):
     symbol: str = "XAUUSD"
     period: str = "M5"
     profile: str = "Default"               # profil de graphiques MT5 que le bot VIDE dans chaque terminal avant le lancement (évite EURUSD, GBPUSD…)
+    minimize: bool = True                  # fenêtre MT5 réduite après chaque ouverture (moins de CPU/RAM)
+    hide_panels: bool = True               # boîte à outils, navigateur et observation du marché masqués
+    maximize_chart: bool = True            # graphique agrandi dans la fenêtre MT5
     default_server: str = ""
     servers: list[str] = Field(default_factory=list)
 

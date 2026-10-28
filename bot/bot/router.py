@@ -123,6 +123,13 @@ class Router:
         elif sub == "upd":
             self._bg(self.check_updates_now())
             return "Vérification…"
+        elif sub == "win":
+            procs = self.ctx.mgr.procs
+            insts = [i for i in self.ctx.db.list() if self.ctx.mgr.is_running(i)]
+            if hasattr(procs, "rearrange"):
+                for i in insts:
+                    procs.rearrange(self.ctx.mgr.exe(i), settle=False)
+            self.dash.flash(f"🪟 {len(insts)} terminal(aux) : panneaux masqués, graphique agrandi, fenêtre réduite.")
         elif sub == "rst":
             return await self._ask("🔄 <b>Redémarrer le bot ?</b>\nEnviron 30 s sans bot. Les terminaux MT5 et l'EA continuent de trader.",
                                    self.restart_bot, ("sys",), "🔄 Redémarrer")

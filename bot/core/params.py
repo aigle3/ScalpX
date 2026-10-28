@@ -85,7 +85,6 @@ PARAMS = [
     ("reporthour", "Heure du rapport", 9, "int", 0.0, 23.0, 1.0, " h", []),
     ("ch_style", "Style moderne du graphique", 10, "bool", 0.0, 1.0, 1.0, "", []),
     ("ch_ema", "Afficher les EMA", 10, "bool", 0.0, 1.0, 1.0, "", []),
-    ("ch_atr", "Afficher l'ATR", 10, "bool", 0.0, 1.0, 1.0, "", []),
     ("ch_levels", "Afficher TP / prix moyen / grille", 10, "bool", 0.0, 1.0, 1.0, "", []),
     ("ch_panel", "Afficher le panneau", 10, "bool", 0.0, 1.0, 1.0, "", []),
     ("n_quiet", "Mode silencieux (plage horaire)", 11, "bool", 0.0, 1.0, 1.0, "", []),
