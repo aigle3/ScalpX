@@ -352,7 +352,8 @@ async def post_init(app: Application) -> None:
 def build_application(cfg: Config, ctx_factory) -> Application:
     """ctx_factory() → Ctx. Crée l'application, les services et enregistre handlers et tâches."""
     tz = ZoneInfo(cfg.reports.timezone)
-    app = ApplicationBuilder().token(cfg.token).defaults(Defaults(tzinfo=tz)).post_init(post_init).build()
+    app = (ApplicationBuilder().token(cfg.token).defaults(Defaults(tzinfo=tz)).post_init(post_init)
+           .connect_timeout(20).read_timeout(30).write_timeout(30).build())     # réseau du VPS parfois lent
     ctx: Ctx = ctx_factory()
     app.bot_data["svc"] = Services(cfg, ctx, app.bot)
     app.bot_data["allowed"] = set(cfg.allowed_chats)

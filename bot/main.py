@@ -198,7 +198,8 @@ def main() -> int:
 
     app.job_queue.run_repeating(j_quit, interval=1, first=1)
     log.info("ScalpX central démarré (%d chat autorisé)", len(cfg.allowed_chats))
-    app.run_polling(allowed_updates=["message", "callback_query"], drop_pending_updates=False)
+    app.run_polling(allowed_updates=["message", "callback_query"], drop_pending_updates=False,
+                    bootstrap_retries=-1)          # Telegram injoignable au démarrage : on réessaie au lieu de s'arrêter
     lock.close()
     return 0
 

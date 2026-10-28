@@ -29,4 +29,7 @@ class ApplicationBuilder:
     def token(self, t): self._t = t; return self
     def defaults(self, d): return self
     def post_init(self, f): return self
+    def connect_timeout(self, t): return self
+    def read_timeout(self, t): return self
+    def write_timeout(self, t): return self
     def build(self): return Application()
