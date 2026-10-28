@@ -106,7 +106,8 @@ def http_get(url: str, headers: dict) -> tuple[int, bytes]:
 def fetch(cfg: Config, http: Http | None = None) -> FetchResult:
     """Met à jour la copie locale du paquet si la branche a un nouveau commit."""
     get = http or http_get
-    repo, branch = cfg.update.github.strip(), cfg.update.branch or "main"
+    repo = cfg.update.github.strip()
+    branch = "stable" if cfg.update.validated_only else (cfg.update.branch or "main")
     if not repo:
         return FetchResult(False, error="aucun dépôt GitHub configuré")
     dest = Path(cfg.update.source)

@@ -106,7 +106,7 @@ def test_github_telecharge_le_paquet_une_fois_par_commit(tmp_path, cfg):
 
     def http(url, headers):
         assert headers["Authorization"] == "Bearer github_pat_x"
-        if url.endswith("/repos/aigle3/scalpx/commits/main"):
+        if url.endswith("/repos/aigle3/scalpx/commits/stable"):           # seulement les publications validées
             return 200, json.dumps({"sha": state["sha"], "commit": {"message": "Ajout pause news\n\ndétails", "committer": {"date": "2026-10-28"}}}).encode()
         if "/zipball/" in url:
             state["zips"] += 1

@@ -79,6 +79,7 @@ class Runtime(BaseModel):
 class Update(BaseModel):
     github: str = ""                       # dépôt « propriétaire/nom » (ex. aigle3/scalpx) ; jeton GITHUB_TOKEN dans .env
     branch: str = "main"
+    validated_only: bool = True            # ne télécharger que la branche « stable » (avancée par GitHub quand les tests passent)
     source: str = r"C:\ScalpX\release"    # copie locale du paquet (téléchargée depuis GitHub)
     check_s: int = 60                      # vérification toutes les N secondes
     enabled: bool = True
