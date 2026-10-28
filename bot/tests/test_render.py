@@ -71,7 +71,12 @@ def test_accueil_commence_par_le_trading():
 
 def test_objectif_en_cours():
     txt = block(view(1, objectif_depart=200.0, objectif_cible=210.0, objectif_progression=66.4), view(2, objectif_actif=False))
-    assert "🎯 <b>Objectif en cours</b> : +10.00 EUR (cible 210.00 EUR) ▰▰▰▱▱ 66 % · 1/2 comptes" in txt
+    assert "🎯 <b>Objectif en cours sur 1/2 comptes</b> : +10.00 EUR au total" in txt
+    assert "   1 : +10.00 EUR (cible 210.00 EUR) ▰▰▰▱▱ 66 %" in txt and "⚪ Sans objectif : 2" in txt
+    txt = block(view(1, objectif_depart=206.70, objectif_cible=208.77), view(2, objectif_depart=125.0, objectif_cible=126.25))
+    assert "sur 2/2 comptes</b> : +3.32 EUR au total" in txt
+    assert "   1 : +2.07 EUR (cible 208.77 EUR)" in txt and "   2 : +1.25 EUR (cible 126.25 EUR)" in txt
+    assert "🎯 <b>Objectif en cours</b> : +2.00 EUR" in block(view(1, objectif_depart=100.0, objectif_cible=102.0))
     txt = block(view(1, objectif_actif=False, ea_demarre=False, prochain_creneau=time.strftime("%Y.%m.%d") + " 09:00"))
     assert "🎯 Aucun objectif en cours · prochain créneau 09:00" in txt
 

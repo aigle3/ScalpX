@@ -76,17 +76,27 @@ def trading_ref(views: list[AccountView], now: float):
     return max(fresh, key=lambda s: s.ts) if fresh else None
 
 
-def goal_line(sts: list, st) -> str:
-    """🎯 Objectif en cours (montant, cible, progression ; nombre de comptes concernés) ou prochain créneau."""
-    on = [s for s in sts if s.objectif_actif]
+def goal_line(views: list[AccountView], st, now: float) -> str:
+    """🎯 Objectif en cours : un compte = une ligne ; plusieurs comptes = le total puis le détail de chacun."""
+    fresh = [v for v in views if v.st is not None and v.st.age_s(now) < 120]
+    on = [v for v in fresh if v.st.objectif_actif]
     if not on:
         return "🎯 Aucun objectif en cours" + (f" · prochain créneau {_hhmm(st.prochain_creneau)}" if st.prochain_creneau else "")
-    ref = st if st.objectif_actif else on[0]
-    gain = ref.objectif_cible - ref.objectif_depart
-    pct = max(0.0, min(ref.objectif_progression, 100.0))
-    who = f" · {len(on)}/{len(sts)} comptes" if len(sts) > 1 else ""
-    return (f"🎯 <b>Objectif en cours</b> : {money(gain, ref.devise, True)} (cible {money(ref.objectif_cible, ref.devise)}) "
-            f"{bar(pct / 100)} {pct:.0f} %{who}")
+
+    def detail(s) -> str:
+        pct = max(0.0, min(s.objectif_progression, 100.0))
+        return (f"{money(s.objectif_cible - s.objectif_depart, s.devise, True)} (cible {money(s.objectif_cible, s.devise)}) "
+                f"{bar(pct / 100)} {pct:.0f} %")
+
+    if len(fresh) == 1:
+        return f"🎯 <b>Objectif en cours</b> : {detail(on[0].st)}"
+    total = sum(v.st.objectif_cible - v.st.objectif_depart for v in on)
+    lines = [f"🎯 <b>Objectif en cours sur {len(on)}/{len(fresh)} comptes</b> : {money(total, on[0].st.devise, True)} au total"]
+    lines += [f"   {esc(v.inst.label)} : {detail(v.st)}" for v in sorted(on, key=lambda v: v.inst.label.lower())]
+    off = [v.inst.label for v in fresh if not v.st.objectif_actif]
+    if off:
+        lines.append("   ⚪ Sans objectif : " + esc(", ".join(off)))
+    return "\n".join(lines)
 
 
 def trading_block(views: list[AccountView], now: float) -> list[str]:
@@ -114,7 +124,7 @@ def trading_block(views: list[AccountView], now: float) -> list[str]:
     else:
         stopped = False
         head = "🟢 <b>EN TRAIN DE TRADER</b> : série en cours" if npos else "🟡 <b>EN ATTENTE</b> : aucune position"
-    lines = [head, goal_line(sts, st), pos_line]
+    lines = [head, goal_line(views, st, now), pos_line]
     if not stopped:
         blocked = st.trading_autorise is False or (st.trading_autorise is None and bool(st.raison_blocage))
         if blocked:
