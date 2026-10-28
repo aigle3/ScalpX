@@ -14,9 +14,9 @@ import time
 from core.summary import FILTERS, FILTER_LABELS, SORTS, SORT_LABELS, apply_filter, apply_sort, totals
 from mt5.procs import vps_load
 from . import render
-from .actions import CARD_CMDS, Ctx
+from .actions import CARD_CMDS, Ctx, target as act_target
 from .params_ui import ParamsUI
-from .ui import Confirmations, EditResult, Keyboard, Sender, confirm_kb, short
+from .ui import ALL_ID, Confirmations, EditResult, Keyboard, Sender, confirm_kb, short
 
 log = logging.getLogger(__name__)
 
@@ -104,7 +104,7 @@ class Dashboard:
             return ((f"{fl}\n\n" if fl else "") + system_text(self.ctx, self.vps(self.ctx.cfg.paths.data)),
                     system_kb(bool(self.ctx.db.meta_get("update_pending")), upd.backup_version(BOT_ROOT)))
         if kind in ("prm", "prg", "prp"):
-            inst = self.ctx.db.get(self.screen[1])
+            inst = act_target(self.ctx, self.screen[1])
             if inst is not None:
                 return self.params.render(self.screen, inst.label, self._flash_text())
             self.screen = ("dash",)
@@ -113,6 +113,13 @@ class Dashboard:
             if r:
                 return r
             self.screen = ("dash",)
+        if kind == "obj":
+            r = self._render_goal(self.screen[1])
+            if r:
+                return r
+            self.screen = ("dash",)
+        if kind == "gcmd":
+            return self._render_cmds(ALL_ID)
         if kind == "lst":
             return self._render_list(now)
         if kind == "act":
@@ -162,10 +169,13 @@ class Dashboard:
 
     def _render_actions(self) -> tuple[str, Keyboard]:
         silent = self.silent
-        text = ("⚡ <b>Actions</b>\n\n"
-                "Sur tous les comptes, avec confirmation.\nPour un seul compte : 👥 Comptes → le compte.")
+        text = ("⚡ <b>Actions sur tous les comptes</b> (terminaux lancés)\n\n"
+                "Objectif, réglages et commandes partent vers chaque compte, avec confirmation.\n"
+                "Pour un seul compte : 👥 Comptes → le compte.")
         kb: Keyboard = [
             [("⏸ Tout en pause", "d:pall"), ("▶ Tout reprendre", "d:rall")],
+            [("🎯 Objectif (tous)", "g:all"), ("⚙️ Paramètres (tous)", "p:all")],
+            [("🧰 Commandes (tous)", "d:gcmd")],
             [("🚀 Déployer l'EA", "d:dep"), ("➕ Nouveau compte", "n")],
             [(("🔔 Rétablir le son" if silent else "🔕 Mode silencieux"), "d:sil")],
             [("⬅ Accueil", "d:home")],
@@ -215,32 +225,53 @@ class Dashboard:
         c = short(iid)
         kb: Keyboard = [
             [("⏸ Pause", f"a:{c}:pause"), ("▶️ Reprise", f"a:{c}:resume")],
-            [("⚙️ Paramètres", f"p:{c}"), ("🧰 Commandes EA", f"a:{c}:cmds")],
-            [("🖥 Terminal", f"a:{c}:term"), ("📈 Graphique", f"a:{c}:chart")],
+            [("🎯 Objectif", f"g:{c}"), ("⚙️ Paramètres", f"p:{c}")],
+            [("🧰 Commandes EA", f"a:{c}:cmds"), ("🖥 Terminal", f"a:{c}:term")],
+            [("📈 Graphique", f"a:{c}:chart")],
             [("⬅ Comptes", "d:lst"), ("🔃", f"a:{c}:refresh")],
         ]
         return text, kb
 
     def _render_cmds(self, iid: str) -> tuple[str, Keyboard]:
-        inst = self.ctx.db.get(iid)
+        inst = act_target(self.ctx, iid)
         c = short(iid)
+        group = iid == ALL_ID
         kb: Keyboard = []
-        for i in range(0, len(CARD_CMDS), 3):
-            kb.append([(lbl, f"c:{c}:{i + j}") for j, (lbl, _) in enumerate(CARD_CMDS[i:i + 3])])
+        if not group:                                       # consultations (une réponse par compte : fiche seulement)
+            for i in range(0, len(CARD_CMDS), 3):
+                kb.append([(lbl, f"c:{c}:{i + j}") for j, (lbl, _) in enumerate(CARD_CMDS[i:i + 3])])
         kb.append([("🏖 Vacances : activer", f"e:{c}:von"), ("🏠 Vacances : quitter", f"e:{c}:voff")])
         kb.append([("💾 Presets", f"e:{c}:ps"), ("✅ Valider les réglages", f"e:{c}:val")])
         kb.append([("🎯 Annuler l'objectif", f"e:{c}:gx"), ("🛑 Tout fermer", f"e:{c}:fx")])
-        kb.append([("⬅ Fiche", f"a:{c}")])
+        kb.append([("⬅ Actions", "d:act")] if group else [("⬅ Fiche", f"a:{c}")])
         fl = self._flash_text()
         return (f"🧰 <b>Commandes EA — {render.esc(inst.label if inst else iid)}</b>" + (f"\n\n{fl}" if fl else "")), kb
 
+    def _render_goal(self, iid: str) -> tuple[str, Keyboard] | None:
+        inst = act_target(self.ctx, iid)
+        if inst is None:
+            return None
+        c = short(iid)
+        kb: Keyboard = [
+            [(f"+{x} %", f"g:{c}:p:{x}") for x in ("0.5", "1", "2")],
+            [(f"+{x} %", f"g:{c}:p:{x}") for x in ("3", "5", "10")],
+            [("✏️ Autre (montant, %, cible)", f"g:{c}:w")],
+            [("🎯 Annuler l'objectif", f"e:{c}:gx")],
+            [("⬅ Actions", "d:act")] if iid == ALL_ID else [("⬅ Fiche", f"a:{c}")],
+        ]
+        text = (f"🎯 <b>Objectif — {render.esc(inst.label)}</b>\n\n"
+                "Lance un objectif <b>tout de suite</b>, sans attendre les créneaux horaires.\n"
+                "Le robot démarre et s'arrête quand l'objectif est atteint (sur chaque compte).\n"
+                "<i>✏️ Autre : 10 = +10 € · +3% · =1250 = solde cible</i>")
+        return self._with_flash(text), kb
+
     def _render_presets(self, iid: str) -> tuple[str, Keyboard]:
-        inst = self.ctx.db.get(iid)
+        inst = act_target(self.ctx, iid)
         c = short(iid)
         names = self.presets.get(iid)
         kb: Keyboard = [[(f"📥 {n}", f"e:{c}:pl:{i}"), ("🗑", f"e:{c}:pd:{i}")] for i, n in enumerate(names or [])]
         kb.append([("💾 Enregistrer sous…", f"e:{c}:pn"), ("♻️ Valeurs par défaut", f"e:{c}:rs")])
-        kb.append([("🔃 Relire", f"e:{c}:ps"), ("⬅ Commandes", f"a:{c}:cmds")])
+        kb.append([("🔃 Relire", f"e:{c}:ps"), ("⬅ Commandes", "d:gcmd" if iid == ALL_ID else f"a:{c}:cmds")])
         body = ("<i>lecture…</i>" if names is None else
                 "Aucun preset enregistré." if not names else
                 "📥 charge les réglages enregistrés (à valider ensuite) · 🗑 supprime.")

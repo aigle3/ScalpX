@@ -5,6 +5,7 @@ Sans dépendance Telegram : renvoie (texte HTML, clavier).
 """
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 from decimal import Decimal, ROUND_HALF_UP
@@ -83,7 +84,7 @@ class ParamsUI:
     async def fetch(self, inst) -> bool:
         """Lit les valeurs via PARAMS. Le drapeau ok de l'accusé n'est PAS fiable ici : l'EA marque en échec
         tout texte contenant « ❌ », or chaque option désactivée s'affiche « ❌ ». Seul le contenu compte."""
-        r = await send_cmd(self.ctx, inst, "PARAMS", [])
+        r = await send_cmd(self.ctx, getattr(inst, "ref", inst), "PARAMS", [])     # groupe : valeurs du 1er compte
         d = parse_params_text(r.message)
         if not d:
             self.last_error = "EA injoignable (terminal arrêté ?)" if r.timeout else "réponse inattendue de l'EA"
@@ -94,6 +95,14 @@ class ParamsUI:
 
     async def set_value(self, inst, idx: int, value: str) -> str:
         key = cat.PARAMS[idx][0]
+        members = getattr(inst, "members", None)
+        if members is not None:                                  # tous les comptes : même réglage partout
+            res = await asyncio.gather(*[send_cmd(self.ctx, m, "SET", [key, value]) for m in members])
+            await self.fetch(inst)
+            bad = [m.label for m, r in zip(members, res) if "Appliqué" not in (r.message or "")]
+            head = f"{esc(cat.PARAMS[idx][1])} = {esc(value)}"
+            return (f"✅ {head} sur les {len(members)} comptes" if not bad else
+                    f"⚠️ {head} : {len(members) - len(bad)}/{len(members)} ; échec : {esc(', '.join(bad[:5]))}")
         r = await send_cmd(self.ctx, inst, "SET", [key, value])
         await self.fetch(inst)                                   # relit les valeurs réelles (l'EA peut avoir borné)
         msg = r.message or ""
@@ -117,6 +126,7 @@ class ParamsUI:
     def render(self, screen: tuple, label: str, flash: str = "") -> tuple[str, Keyboard]:
         kind, iid = screen[0], screen[1]
         c = short(iid)
+        back = ("⬅ Actions", "d:act") if c == "all" else ("⬅ Fiche", f"a:{c}")
         head = f"⚙️ <b>Paramètres — {esc(label)}</b>"
         fl = f"\n\n{flash}" if flash else ""
         vals = self.cached(iid)
@@ -130,7 +140,7 @@ class ParamsUI:
                     row = []
             if row:
                 kb.append(row)
-            kb.append([("🔃 Relire", f"p:{c}:r"), ("⬅ Fiche", f"a:{c}")])
+            kb.append([("🔃 Relire", f"p:{c}:r"), back])
             note = "" if vals else "\n\n<i>Valeurs en cours de lecture…</i>"
             return head + "\nChoisis une catégorie." + note + fl, kb
         if kind == "prg":
@@ -142,7 +152,7 @@ class ParamsUI:
                 v = vals.get(p[0], "?")
                 shown = "✅" if p[3] == "bool" and "✅" in v else ("❌" if p[3] == "bool" and "❌" in v else v)
                 kb.append([(f"{p[1][:30]} · {shown}"[:60], f"p:{c}:{'t' if p[3] == 'bool' else 'k'}{i}")])
-            kb.append([("⬅ Catégories", f"p:{c}"), ("⬅ Fiche", f"a:{c}")])
+            kb.append([("⬅ Catégories", f"p:{c}"), back])
             return f"{head}\n<b>{esc(cat.GROUPS[gi])}</b> — touche un paramètre pour le changer." + fl, kb
         # prp : un paramètre
         idx = int(screen[2])
@@ -166,5 +176,5 @@ class ParamsUI:
         else:
             kb.append([("−10", f"p:{c}:s{idx}:-10"), ("−1", f"p:{c}:s{idx}:-1"), ("+1", f"p:{c}:s{idx}:1"), ("+10", f"p:{c}:s{idx}:10")])
             kb.append([("✏️ Saisir une valeur", f"p:{c}:w{idx}")])
-        kb.append([("⬅ " + cat.GROUPS[gi][:24], f"p:{c}:g{gi}"), ("⬅ Fiche", f"a:{c}")])
+        kb.append([("⬅ " + cat.GROUPS[gi][:24], f"p:{c}:g{gi}"), back])
         return text + fl, kb

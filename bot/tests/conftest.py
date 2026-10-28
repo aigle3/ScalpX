@@ -49,6 +49,9 @@ class FakeProcs:
         return int(was)
 
 
+DEFAULT_PARAMS = {"lot": "0.01 lot", "f_vol": "❌", "news_block": "✅", "tz": "France (Paris)", "fast": "10"}
+
+
 class FakeEA:
     """Fait vivre les fichiers de l'EA : heartbeat, commandes → ack, événements."""
 
@@ -117,12 +120,12 @@ class FakeEA:
         if cmd == "PING":
             return True, "pong"
         if cmd == "PARAMS":
-            pv = acc.setdefault("params", {"lot": "0.01 lot", "f_vol": "❌", "news_block": "✅", "tz": "France (Paris)", "fast": "10"})
+            pv = acc.setdefault("params", dict(DEFAULT_PARAMS))
             return True, "📋 LISTE DES PARAMÈTRES\n(modifie-les depuis le bot : ⚙️ Paramètres)\n\n📐 Signal\n" + "\n".join(f"• {k} = {v}" for k, v in pv.items())
         if cmd == "SET":
             args = self._args
             key, val = args[0], args[1]
-            pv = acc.setdefault("params", {})
+            pv = acc.setdefault("params", dict(DEFAULT_PARAMS))
             old = pv.get(key, "")
             pv[key] = ("✅" if val == "1" else "❌") if old in ("✅", "❌") else (val + (" lot" if key == "lot" else ""))
             return True, f"⚙️ {key}\nValeur : {pv[key]}\n\n✅ Appliqué : {pv[key]}"

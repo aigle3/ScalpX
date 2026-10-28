@@ -33,21 +33,23 @@ Voir `LISEZMOI.txt` à la racine du dépôt : `INSTALL.bat` installe tout (BASE 
 
 ## Utilisation (tout par boutons, aucune commande « / »)
 
-- **Tableau de bord** : un message édité en place ; le bouton **📊 Tableau de bord** (ou tout message) le ramène en bas.
-  En-tête (comptes par état, soldes, montant à retirer, CPU/RAM/disque), liste filtrable et triable.
-- **➕ Nouveau compte** : numéro → mot de passe (message supprimé aussitôt, jamais stocké : MT5 le mémorise) → serveur
-  (boutons des serveurs connus, ou saisie, mémorisée) → alias → confirmation. Échec : dossier archivé, aucun fantôme.
-- **Fiche compte** : pause, reprise, redémarrer, arrêter, lancer, reconnecter, mettre à jour l'EA, supprimer,
-  **⚙️ Paramètres** (les 83 paramètres de l'EA par boutons), **🧰 Commandes EA**, graphique 7 jours.
-- **🛠 Système** : versions bot/EA, VPS, état de BASE, de GitHub (et expiration du jeton), surveillance externe,
-  dernière sauvegarde, journaux (bot, compilation, plantages), **🔨 Compiler l'EA**, **🔄 Redémarrer le bot**,
-  **⏪ Revenir au bot x.y.z** (version précédente, gardée à chaque mise à jour).
-- **⏸ Tout en pause / ▶ Tout reprendre** (avec confirmation) ; fiche **🧰** : vacances, presets (charger, enregistrer,
-  supprimer, valeurs par défaut), valider les réglages, annuler l'objectif, **🛑 Tout fermer**.
+- **Accueil** (un message édité en place ; **📊 Tableau de bord** ou tout message le ramène en bas) : l'état de l'ensemble
+  (comptes 🟢/🟠/🔴, solde, jour, à retirer, alertes, VPS, versions, 🔔 mise à jour) puis une ligne par compte,
+  et 4 menus : **👥 Comptes**, **⚡ Actions**, **📈 Rapports**, **🛠 Système**.
+- **👥 Comptes** : liste détaillée, un bouton par compte, 🔎 filtre et ↕ tri (un bouton chacun, qui fait défiler les choix).
+- **Fiche compte** : ⏸ Pause, ▶️ Reprise, **🎯 Objectif**, **⚙️ Paramètres** (83 réglages par boutons), **🧰 Commandes EA**
+  (consultations, vacances, presets, valider, annuler l'objectif, 🛑 tout fermer), **🖥 Terminal** (redémarrer, lancer,
+  arrêter, reconnecter, mettre à jour l'EA, supprimer), 📈 graphique.
+- **⚡ Actions — tous les comptes lancés à la fois** : ⏸ tout en pause, ▶ tout reprendre, **🎯 Objectif (tous)**,
+  **⚙️ Paramètres (tous)** (lecture sur le 1er compte, réglage envoyé à chacun), **🧰 Commandes (tous)**,
+  🚀 déployer l'EA, ➕ nouveau compte, 🔕 mode silencieux. Toujours avec confirmation et un résumé par compte.
+- **🎯 Objectif immédiat** (hors créneaux horaires) : +0,5 / 1 / 2 / 3 / 5 / 10 %, ou ✏️ 10 (€), +3%, =1250 (solde cible) ;
+  le bot envoie `OBJECTIF` puis `DEMARRER` : la série démarre tout de suite et s'arrête à l'objectif.
+- **📈 Rapports** : rapport des 24 h (aussi chaque soir), courbe des soldes, export CSV.
+- **🛠 Système** : versions bot/EA, VPS, BASE, GitHub (et expiration du jeton), surveillance externe, dernière sauvegarde,
+  ⬆ mises à jour, 🔨 compiler l'EA, 📜 journaux, 🔄 redémarrer le bot, ⏪ revenir à la version précédente.
 - **Surveillance externe** : `HEALTHCHECK_URL` (.env, ex. healthchecks.io) reçoit un ping par minute ; s'il cesse, le service prévient.
 - **Sauvegarde** de l'historique (`scalpx.db`) chaque nuit dans `%OneDrive%\ScalpX\sauvegardes` (14 conservées).
-- **⬆ Mises à jour** (🔔 si une mise à jour attend) : vérifie GitHub et propose **Installer** ; « Plus tard » la garde en attente.
-- **🚀 Déployer l'EA**, **📝 Rapport** (aussi chaque jour à 22 h), **📤 Export** CSV, **🔕 Silencieux**, **🏓 Ping**.
 - **Watchdog** : relance les terminaux DEMARRE disparus (3 fois par heure max, puis alerte) ; un arrêt volontaire n'est jamais relancé.
 
 ## Mises à jour

@@ -781,3 +781,49 @@ async def test_actions_groupees_et_actions_ea(svc):
         assert "Nom invalide" in dash.render()[0]
     finally:
         await ea.stop()
+
+
+@pytest.mark.asyncio
+async def test_tous_les_comptes_parametre_commande_et_objectif(svc):
+    from bot import params_ui as pu
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    st = ctx_stack(svc)
+    a = seed(st, 91, "Demo-Server 1")
+    b = seed(st, 92, "Demo-Server 1")
+    ea.start()
+    await asyncio.sleep(0.3)
+    try:
+        dash.goto("act")
+        datas = [d for row in dash.render()[1] for _, d in row]
+        assert {"g:all", "p:all", "d:gcmd"} <= set(datas)
+        # ⚙️ paramètre sur tous les comptes : valeurs lues sur le 1er, SET envoyé à chacun
+        await router.on_callback("p:all")
+        assert await _until(lambda: dash.params.cached("*").get("f_vol") == "❌")
+        assert "Tous les comptes (2)" in dash.render()[0]
+        i_vol = pu.find("f_vol")
+        await router.on_callback(f"p:all:t{i_vol}")
+        assert await _until(lambda: ea.accounts[a.id]["params"]["f_vol"] == "✅" and ea.accounts[b.id]["params"]["f_vol"] == "✅")
+        assert await _until(lambda: "sur les 2 comptes" in dash.render()[0])
+        # 🧰 commande sur tous : vacances
+        await router.on_callback("d:gcmd")
+        await router.on_callback("e:all:von")
+        await _confirm(router, dash)
+        assert await _until(lambda: ea.accounts[a.id].get("vacances") and ea.accounts[b.id].get("vacances"))
+        # 🎯 objectif immédiat sur tous (bouton +1 %), puis sur un compte (saisie libre)
+        sent = []
+        orig = ea._exec
+        ea._exec = lambda iid, acc, cmd, exe: (sent.append((iid, cmd, list(ea._args))), orig(iid, acc, cmd, exe))[1]
+        await router.on_callback("g:all:p:1")
+        assert "objectif +1%" in await _confirm(router, dash)
+        assert await _until(lambda: sum(1 for x in sent if x[1] == "DEMARRER") == 2)
+        assert (a.id, "OBJECTIF", ["+1%"]) in sent and (b.id, "OBJECTIF", ["+1%"]) in sent
+        assert await _until(lambda: any("2/2 lancé" in m[1] for m in sender.sent))
+        await router.on_callback(f"g:{short(a.id)}:w")
+        await router.on_text("=250,5")
+        assert "solde cible 250.5" in await _confirm(router, dash)
+        assert await _until(lambda: (a.id, "OBJECTIF", ["=250.5"]) in sent)
+        await router.on_callback(f"g:{short(a.id)}:w")
+        await router.on_text("beaucoup")
+        assert "non reconnu" in dash.render()[0]
+    finally:
+        await ea.stop()

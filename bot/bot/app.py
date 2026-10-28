@@ -410,7 +410,7 @@ def build_application(cfg: Config, ctx_factory) -> Application:
         conversation_timeout=300, allow_reentry=True,
     )
     app.add_handler(conv)
-    app.add_handler(CallbackQueryHandler(h_cb, pattern=r"^(d|a|c|ok|no|dep|x|p|upd|e):"))
+    app.add_handler(CallbackQueryHandler(h_cb, pattern=r"^(d|a|c|ok|no|dep|x|p|upd|e|g)(:|$)"))
     app.add_handler(MessageHandler(filters.TEXT, h_text))
     app.add_error_handler(h_error)
 

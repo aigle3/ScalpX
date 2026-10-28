@@ -16,9 +16,27 @@ from storage.db import Database, Instance
 Keyboard = list[list[tuple[str, str]]]            # lignes de (libellé, callback_data)
 
 
+ALL_ID = "*"                                       # « tous les comptes » (lancés) dans les écrans partagés
+
+
 def short(iid: str) -> str:
-    """Code court (8 hex) d'un identifiant : sûr à placer dans un callback_data."""
-    return hashlib.sha1(iid.encode()).hexdigest()[:8]
+    """Code court (8 hex) d'un identifiant : sûr à placer dans un callback_data. « all » pour tous les comptes."""
+    return "all" if iid == ALL_ID else hashlib.sha1(iid.encode()).hexdigest()[:8]
+
+
+@dataclass
+class Group:
+    """Cible « tous les comptes » : les commandes partent vers chaque membre ; les lectures se font sur le premier."""
+    members: list[Instance]
+    id: str = ALL_ID
+
+    @property
+    def label(self) -> str:
+        return f"Tous les comptes ({len(self.members)})"
+
+    @property
+    def ref(self) -> Instance:
+        return self.members[0]
 
 
 def resolve(db: Database, code: str) -> Instance | None:

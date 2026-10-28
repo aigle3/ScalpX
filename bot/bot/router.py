@@ -19,7 +19,7 @@ from .notify import Notifier
 from .render import esc
 from .reports import build_report
 from . import params_ui as pu
-from .ui import Confirmations, Keyboard, Pending, Sender, resolve, short
+from .ui import ALL_ID, Confirmations, Keyboard, Pending, Sender, resolve, short
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +34,7 @@ class Router:
         self._dep_msg: int | None = None
         self.building = False
         self.awaiting_preset: str | None = None             # compte dont on attend le nom de preset (message texte)
+        self.awaiting_goal: str | None = None               # compte (ou ALL_ID) dont on attend l'objectif (message texte)
         self._dep_sel: set[str] = set()
 
     def _bg(self, coro) -> None:
@@ -73,6 +74,8 @@ class Router:
                 return await self._upd_cb(parts)
             if head == "e":
                 return await self._ea_cb(parts)
+            if head == "g":
+                return await self._goal_cb(parts)
         except Exception:
             log.exception("callback en erreur : %s", head)
             return "Erreur"
@@ -88,6 +91,11 @@ class Router:
             self.dash.set_page(int(p[2]))
         elif sub == "home":
             self.dash.goto("dash")
+        elif sub == "gcmd":
+            if act.target(self.ctx, ALL_ID) is None:
+                self.dash.flash("Aucun terminal lancé.")
+            else:
+                self.dash.goto("gcmd")
         elif sub in ("lst", "act", "rpt", "logs"):
             self.dash.goto(sub)
             self.dash.silent = self.notifier.silent_mode
@@ -165,9 +173,14 @@ class Router:
         return ""
 
     # ------------------------------------------------------------------ paramètres de l'EA (boutons)
+    def _target(self, code: str):
+        """Code court d'un compte, ou « all » : tous les comptes dont le terminal est lancé."""
+        return act.target(self.ctx, ALL_ID) if code == "all" else resolve(self.ctx.db, code)
+
     async def _prm_cb(self, p: list[str]) -> str:
-        inst = resolve(self.ctx.db, p[1]) if len(p) > 1 else None
+        inst = self._target(p[1]) if len(p) > 1 else None
         if inst is None:
+            self.dash.flash("Aucun terminal lancé." if len(p) > 1 and p[1] == "all" else "Compte introuvable.")
             self.dash.goto("dash")
             await self.dash.refresh(force=True)
             return "Compte introuvable"
@@ -225,9 +238,19 @@ class Router:
 
     async def on_text(self, text: str) -> None:
         """Message texte libre : valeur attendue d'un paramètre, sinon le tableau de bord revient en bas."""
+        if self.awaiting_goal:
+            iid, self.awaiting_goal = self.awaiting_goal, None
+            inst = act.target(self.ctx, iid)
+            v = text.strip().replace(" ", "")
+            if inst is None or not self.GOAL_RE.match(v):
+                self.dash.flash("❌ Objectif non reconnu : 10, +3% ou =1250.")
+                await self.dash.refresh(force=True)
+                return
+            await self._goal_confirm(inst, v.replace(",", "."))
+            return
         if self.awaiting_preset:
             iid, self.awaiting_preset = self.awaiting_preset, None
-            inst = self.ctx.db.get(iid)
+            inst = act.target(self.ctx, iid)
             name = text.strip()
             if inst is None or not re.fullmatch(r"[A-Za-z0-9_-]{1,30}", name):
                 self.dash.flash("❌ Nom invalide : lettres, chiffres, - et _ (30 max).")
@@ -238,7 +261,7 @@ class Router:
         if self.awaiting:
             iid, idx = self.awaiting
             self.awaiting = None
-            inst = self.ctx.db.get(iid)
+            inst = act.target(self.ctx, iid)
             prm = pu.cat.PARAMS[idx]
             num = pu.num_of(text)
             if inst is None or num is None or prm[3] not in ("int", "dbl"):
@@ -345,11 +368,14 @@ class Router:
 
     async def _ea_cb(self, p: list[str]) -> str:
         """Actions EA de la fiche (🧰) : vacances, presets, valider, annuler l'objectif, tout fermer."""
-        inst = resolve(self.ctx.db, p[1]) if len(p) > 1 else None
+        inst = self._target(p[1]) if len(p) > 1 else None
         if inst is None or len(p) < 3:
+            self.dash.flash("Aucun terminal lancé." if len(p) > 1 and p[1] == "all" else "Compte introuvable.")
+            await self.dash.refresh(force=True)
             return "Compte introuvable"
         sub, lab = p[2], esc(inst.label)
-        back_c, back_p = ("cmds", inst.id), ("pst", inst.id)
+        back_c = ("gcmd",) if inst.id == ALL_ID else ("cmds", inst.id)
+        back_p = ("pst", inst.id)
         names = self.dash.presets.get(inst.id) or []
         idx = int(p[3]) if len(p) > 3 and p[3].isdigit() else -1
         name = names[idx] if 0 <= idx < len(names) else ""
@@ -387,10 +413,55 @@ class Router:
         await self.dash.refresh(force=True)
         return ""
 
+    GOAL_RE = re.compile(r"^(\+?\d+(?:[.,]\d+)?\s*%|=\s*\d+(?:[.,]\d+)?|\d+(?:[.,]\d+)?)$")
+
+    async def _goal_cb(self, p: list[str]) -> str:
+        """🎯 Objectif immédiat (hors créneaux) : OBJECTIF <valeur> puis DEMARRER, sur un compte ou sur tous."""
+        inst = self._target(p[1]) if len(p) > 1 else None
+        if inst is None:
+            self.dash.flash("Aucun terminal lancé." if len(p) > 1 and p[1] == "all" else "Compte introuvable.")
+            await self.dash.refresh(force=True)
+            return ""
+        sub = p[2] if len(p) > 2 else ""
+        if sub == "p" and len(p) > 3 and re.fullmatch(r"\d+(\.\d+)?", p[3]):
+            return await self._goal_confirm(inst, f"+{p[3]}%")
+        if sub == "w":
+            self.awaiting_goal = inst.id
+            self.dash.flash("✏️ Envoie l'objectif : 10 (= +10 €), +3% ou =1250 (solde cible).")
+        self.dash.goto("obj", inst.id)
+        await self.dash.refresh(force=True)
+        return ""
+
+    async def _goal_confirm(self, inst, value: str) -> str:
+        what = (f"solde cible {value[1:]}" if value.startswith("=") else value if "%" in value else f"+{value} €")
+        return await self._ask(f"🎯 <b>Lancer maintenant un objectif {esc(what)} sur {esc(inst.label)} ?</b>\n"
+                               "Hors créneau horaire : le robot démarre tout de suite et s'arrête à l'objectif.",
+                               lambda: self._goal_run(inst, value), ("obj", inst.id), "🎯 Lancer")
+
+    async def _goal_run(self, inst, value: str) -> None:
+        members = getattr(inst, "members", None) or [inst]
+        self.dash.flash(f"⏳ Objectif {value} envoyé à {len(members)} compte(s)…")
+        await self.dash.refresh(force=True)
+
+        async def one(m):
+            r = await act.send_cmd(self.ctx, m, "OBJECTIF", [value])
+            if not r.ok:
+                return m, r
+            return m, await act.send_cmd(self.ctx, m, "DEMARRER")
+
+        res = await asyncio.gather(*[one(m) for m in members])
+        lines = [f"{'✅' if r.ok else '❌'} <b>{esc(m.label)}</b> : {esc((r.message or '').strip().splitlines()[0][:150] if r.message else '')}"
+                 for m, r in res]
+        ok = sum(1 for _, r in res if r.ok)
+        await self.sender.send(self.chat_id, f"🎯 <b>Objectif {esc(value)}</b> : {ok}/{len(members)} lancé(s)\n" + "\n".join(lines),
+                               [[("✖ Fermer", "d:close")]], True)
+        self.dash.flash(f"🎯 Objectif lancé sur {ok}/{len(members)} compte(s)")
+        await self.dash.refresh(force=True)
+
     async def _presets_fetch(self, inst) -> None:
         self.dash.presets.pop(inst.id, None)
         await self.dash.refresh(force=True)
-        r = await act.send_cmd(self.ctx, inst, "PRESETS")
+        r = await act.send_cmd(self.ctx, getattr(inst, "ref", inst), "PRESETS")         # groupe : presets du 1er compte
         if r.timeout:
             self.dash.flash("❌ EA injoignable (terminal arrêté ?).")
             self.dash.presets[inst.id] = []
@@ -401,9 +472,16 @@ class Router:
     async def _ea_run(self, inst, cmd: str, args: list[str], then_presets: bool = False) -> None:
         self.dash.flash(f"⏳ {cmd} envoyé…")
         await self.dash.refresh(force=True)
-        r = await act.send_cmd(self.ctx, inst, cmd, args)
-        first = (r.message or "").strip().splitlines()[0][:200] if r.message else ""
-        self.dash.flash(("✅ " if r.ok else "❌ ") + esc(first or cmd))
+        members = getattr(inst, "members", None)
+        if members is not None:                                         # tous les comptes : un résumé
+            res = await asyncio.gather(*[act.send_cmd(self.ctx, m, cmd, args) for m in members])
+            bad = [m.label for m, r in zip(members, res) if not r.ok]
+            self.dash.flash(f"✅ {cmd} : {len(members)} compte(s)" if not bad else
+                            f"⚠️ {cmd} : {len(members) - len(bad)}/{len(members)} ; échec : {esc(', '.join(bad[:5]))}")
+        else:
+            r = await act.send_cmd(self.ctx, inst, cmd, args)
+            first = (r.message or "").strip().splitlines()[0][:200] if r.message else ""
+            self.dash.flash(("✅ " if r.ok else "❌ ") + esc(first or cmd))
         if then_presets:
             await self._presets_fetch(inst)
         else:

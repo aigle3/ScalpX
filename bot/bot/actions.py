@@ -40,6 +40,15 @@ class Ctx:
         return next((v for v in self.views() if v.inst.id == iid), None)
 
 
+def target(ctx: "Ctx", iid: str):
+    """Compte du registre, ou groupe « tous les comptes » (terminaux lancés) pour ALL_ID ; None si introuvable/vide."""
+    from .ui import ALL_ID, Group
+    if iid == ALL_ID:
+        members = [i for i in ctx.db.list() if ctx.mgr.is_running(i)]
+        return Group(members) if members else None
+    return ctx.db.get(iid)
+
+
 async def send_cmd(ctx: Ctx, inst: Instance, cmd: str, args: list[str] | None = None) -> CmdResult:
     """Envoie une commande à l'EA et attend l'ack (⏳ → ✅/❌)."""
     return await ctx.cmdq.send_and_wait(inst.id, cmd, args or [], timeout=ctx.cfg.timing.ack_timeout_s)
