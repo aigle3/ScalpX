@@ -195,3 +195,16 @@ def test_sauvegarde_quotidienne_de_l_historique(tmp_path, cfg):
     assert cx.execute("SELECT value FROM meta WHERE key='cle'").fetchone()[0] == "valeur"
     cx.close()
     db.close()
+
+
+def test_expiration_du_jeton_github(tmp_path, cfg):
+    import json
+    from core import github as gh
+    cfg.update.github, cfg.update.source = "aigle3/scalpx", str(tmp_path / "release")
+    hdr = {"github-authentication-token-expiration": "2027-10-28 12:00:00 UTC"}
+    http = lambda url, h: (200, json.dumps({"sha": "", "commit": {"message": ""}}).encode(), hdr) if "/commits/" in url else (404, b"", {})
+    r = gh.fetch(cfg, http)
+    assert r.token_expires == "2027-10-28"
+    import datetime as dt
+    now = dt.datetime(2027, 10, 18, 12).timestamp()
+    assert gh.days_left("2027-10-28", now) == 10 and gh.days_left("n/a") is None

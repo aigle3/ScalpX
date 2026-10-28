@@ -69,6 +69,11 @@ def system_text(ctx: Ctx, vps: dict[str, float]) -> str:
         lines.append(f"⬆ GitHub {esc(cfg.update.github)} : " + ("✅ joignable" if not err else "❌ " + esc(err)))
         if not cfg.github_token:
             lines.append("⚠️ GITHUB_TOKEN absent de .env : pas de mises à jour")
+        exp = db.meta_get("gh_token_exp")
+        if exp:
+            from core.github import days_left
+            left = days_left(exp)
+            lines.append(f"🔑 Jeton GitHub valable jusqu'au {esc(exp)}" + (f" (⚠️ {left} j)" if left is not None and left <= 15 else ""))
         if info:
             msg = (info.get("message") or "").splitlines()[0][:80] if info.get("message") else ""
             lines.append(f"   dernière publication : <code>{esc(info.get('sha', '')[:7])}</code> {esc(msg)}")

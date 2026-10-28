@@ -5,6 +5,7 @@ import asyncio
 import io
 import logging
 import os
+import time
 from datetime import time as dtime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -308,6 +309,15 @@ async def j_update(context: ContextTypes.DEFAULT_TYPE) -> None:
     loop = asyncio.get_running_loop()
     if cfg.update.github:
         res = await loop.run_in_executor(None, gh.fetch, cfg)
+        if res.token_expires:
+            s.ctx.db.meta_set("gh_token_exp", res.token_expires)
+            left = gh.days_left(res.token_expires)
+            today = time.strftime("%Y-%m-%d")
+            if left is not None and left <= 15 and s.ctx.db.meta_get("gh_exp_alert") != today:
+                s.ctx.db.meta_set("gh_exp_alert", today)                # une alerte par jour
+                await s.sender.send(s.chat_id, f"🔑 Le jeton GitHub expire dans <b>{max(left, 0)} jour(s)</b> ({res.token_expires}).\n"
+                                    "Crée-en un nouveau (lecture seule sur ScalpX), remplace GITHUB_TOKEN dans "
+                                    "C:\\ScalpX\\bot\\.env puis 🛠 Système → 🔄 Redémarrer le bot.", None, True)
         err = "" if res.ok else res.error
         if err != s.ctx.db.meta_get("gh_err"):                    # une alerte par problème, et une à la résolution
             s.ctx.db.meta_set("gh_err", err)

@@ -32,6 +32,7 @@ class FetchResult:
     sha: str = ""
     message: str = ""
     error: str = ""
+    token_expires: str = ""                     # date d'expiration du jeton (AAAA-MM-JJ), si GitHub l'indique
 
 
 def _headers(cfg: Config) -> dict[str, str]:
@@ -46,6 +47,22 @@ def local_sha(dest: Path) -> str:
         return json.loads((dest / ".commit.json").read_text(encoding="utf-8")).get("sha", "")
     except (OSError, ValueError):
         return ""
+
+
+def token_expiry(headers: dict) -> str:
+    """En-tête « github-authentication-token-expiration: 2027-10-28 12:00:00 UTC » → « 2027-10-28 »."""
+    v = (headers or {}).get("github-authentication-token-expiration", "")
+    return v[:10] if len(v) >= 10 and v[4] == "-" else ""
+
+
+def days_left(expires: str, now: float | None = None) -> int | None:
+    import datetime as dt
+    try:
+        d = dt.date.fromisoformat(expires)
+    except ValueError:
+        return None
+    today = dt.date.fromtimestamp(now or time.time())
+    return (d - today).days
 
 
 def _explain(code: int) -> str:
@@ -80,7 +97,7 @@ def extract_zip(data: bytes, dest: Path, info: dict) -> None:
     shutil.rmtree(old, ignore_errors=True)
 
 
-Http = Callable[[str, dict], tuple[int, bytes]]
+Http = Callable[[str, dict], tuple]           # (code, contenu) ou (code, contenu, en-têtes)
 
 
 def _ssl_context():
@@ -98,9 +115,9 @@ def http_get(url: str, headers: dict) -> tuple[int, bytes]:
     req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=60, context=_ssl_context()) as r:
-            return r.status, r.read()
+            return r.status, r.read(), {k.lower(): v for k, v in r.headers.items()}
     except urllib.error.HTTPError as e:
-        return e.code, b""
+        return e.code, b"", {k.lower(): v for k, v in (e.headers or {}).items()}
 
 
 def fetch(cfg: Config, http: Http | None = None) -> FetchResult:
@@ -112,21 +129,24 @@ def fetch(cfg: Config, http: Http | None = None) -> FetchResult:
         return FetchResult(False, error="aucun dépôt GitHub configuré")
     dest = Path(cfg.update.source)
     try:
-        code, body = get(f"{API}/repos/{repo}/commits/{branch}", _headers(cfg))
+        res = get(f"{API}/repos/{repo}/commits/{branch}", _headers(cfg))
+        code, body = res[0], res[1]
+        expires = token_expiry(res[2] if len(res) > 2 else {})
         if code != 200:
-            return FetchResult(False, error=_explain(code))
+            return FetchResult(False, error=_explain(code), token_expires=expires)
         j = json.loads(body.decode("utf-8"))
         sha = j.get("sha", "")
         msg = (j.get("commit", {}).get("message") or "").strip()
         if sha and sha == local_sha(dest):
-            return FetchResult(True, False, sha, msg)
-        code, data = get(f"{API}/repos/{repo}/zipball/{sha}", _headers(cfg))
+            return FetchResult(True, False, sha, msg, token_expires=expires)
+        res = get(f"{API}/repos/{repo}/zipball/{sha}", _headers(cfg))
+        code, data = res[0], res[1]
         if code != 200:
-            return FetchResult(False, error=_explain(code))
+            return FetchResult(False, error=_explain(code), token_expires=expires)
         info = {"sha": sha, "message": msg, "date": j.get("commit", {}).get("committer", {}).get("date", ""),
                 "fetched": int(time.time())}
         extract_zip(data, dest, info)
         log.info("paquet GitHub %s@%s téléchargé : %s", repo, sha[:7], msg.splitlines()[0] if msg else "")
-        return FetchResult(True, True, sha, msg)
+        return FetchResult(True, True, sha, msg, token_expires=expires)
     except (urllib.error.URLError, OSError, zipfile.BadZipFile, ValueError) as exc:
         return FetchResult(False, error=f"GitHub injoignable : {exc}")

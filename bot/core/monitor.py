@@ -16,7 +16,7 @@ def ping(cfg: Config, http: Http | None = None, fail: bool = False) -> bool:
     if not url.startswith("https://"):
         return False
     try:
-        code, _ = (http or http_get)(url.rstrip("/") + ("/fail" if fail else ""), {"User-Agent": "scalpx-bot"})
+        code = (http or http_get)(url.rstrip("/") + ("/fail" if fail else ""), {"User-Agent": "scalpx-bot"})[0]
         return 200 <= code < 300
     except OSError as exc:
         log.debug("ping de surveillance impossible : %s", exc)
