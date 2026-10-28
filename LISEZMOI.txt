@@ -20,4 +20,6 @@ MISES A JOUR : RIEN A COPIER
 
 IMPORTANT
 - Un compte MT5 ne doit tourner que sur UNE machine. Un token Telegram = un seul bot en marche.
-- Garde la session Windows du VPS ouverte (les terminaux MT5 ont besoin du bureau).
+- L'installeur peut ouvrir la session Windows automatiquement au demarrage du VPS (conseille).
+  Quitte le bureau a distance avec la croix, jamais "Se deconnecter" (cela arrete le bot et MT5).
+- Relancer l'installeur plus tard : C:\ScalpX\release\INSTALL.bat (toujours la derniere version validee).

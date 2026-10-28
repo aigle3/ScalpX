@@ -228,6 +228,30 @@ $t = $t.TrimEnd() + "`r`n`r`n[update]`r`ngithub  = `"$repo`"            # mises 
 [System.IO.File]::WriteAllText($cfgFile, $t, $Utf8)
 Ok "Mises à jour automatiques depuis GitHub : $repo"
 
+# ---- ouverture de session automatique : après un redémarrage du VPS, la session s'ouvre seule (bot + terminaux relancés)
+$wl = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -ErrorAction SilentlyContinue
+if ($wl -and $wl.AutoAdminLogon -eq '1' -and $wl.DefaultUserName -eq $env:USERNAME) {
+    Ok "Ouverture de session automatique déjà active pour $env:USERNAME."
+} elseif ((Ask "Ouvrir automatiquement la session de $env:USERNAME au démarrage du VPS (conseillé) ? (o/n)" 'o') -match '^[oOyY]') {
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $tmp = Join-Path $env:TEMP 'scalpx_autologon'
+        New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+        Invoke-WebRequest -UseBasicParsing 'https://download.sysinternals.com/files/AutoLogon.zip' -OutFile (Join-Path $tmp 'AutoLogon.zip')
+        Expand-Archive -Force (Join-Path $tmp 'AutoLogon.zip') $tmp
+        $sec = Read-Host "  Mot de passe Windows de $env:USERNAME (chiffré par Windows, jamais écrit en clair)" -AsSecureString
+        $pw = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
+        $p = Start-Process -FilePath (Join-Path $tmp 'Autologon64.exe') -ArgumentList @(('"' + $env:USERNAME + '"'), ('"' + $env:USERDOMAIN + '"'), ('"' + $pw + '"'), '/accepteula') -Wait -PassThru -Verb RunAs
+        $pw = $null
+        Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+        if ($p.ExitCode -eq 0) { Ok 'Ouverture de session automatique activée (Sysinternals Autologon).' }
+        else { Warn "Autologon a renvoyé le code $($p.ExitCode) : vérifie le mot de passe puis relance INSTALL.bat." }
+        Warn 'Pour quitter le bureau à distance : ferme la fenêtre (croix), ne choisis JAMAIS « Se déconnecter » (cela arrête le bot et MT5).'
+    } catch {
+        Warn "Ouverture de session automatique non configurée : $($_.Exception.Message)"
+    }
+}
+
 # ---------------------------------------------------------------- 6. Vérification + démarrage auto
 Step '6/6  Vérification et démarrage automatique'
 New-Item -ItemType Directory -Force -Path (Join-Path $env:APPDATA 'MetaQuotes\Terminal\Common\Files') | Out-Null
