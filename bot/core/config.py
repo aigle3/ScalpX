@@ -64,7 +64,9 @@ class Alerts(BaseModel):
 
 
 class Dashboard(BaseModel):
-    interval_s: int = 12                   # 10 à 15 s minimum entre deux éditions
+    interval_s: int = 12                   # (ancien réglage, remplacé par refresh_s)
+    refresh_s: int = 10                    # mise à jour du tableau de bord quand il est le dernier message
+    repost_s: int = 300                    # recouvert par d'autres messages depuis 5 min : republié en bas (silencieux)
     page_size: int = 8
 
 

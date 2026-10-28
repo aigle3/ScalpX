@@ -39,7 +39,8 @@ silent_mode       = false
 batch_window_s    = 4
 
 [dashboard]
-interval_s = 12              # tableau de bord : 10 à 15 s minimum entre deux éditions
+refresh_s = 10               # tableau de bord : mis à jour toutes les 10 s quand il est le dernier message
+repost_s = 300               # recouvert depuis 5 min : republié en bas (silencieux)
 page_size  = 8
 
 [reports]

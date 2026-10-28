@@ -43,6 +43,16 @@ class TelegramSender:
     def __init__(self, bot) -> None:
         self.bot = bot
         self.last_retry_after = 0.0
+        self.on_sent = None                 # rappel(message_id) après chaque message envoyé (tableau de bord recouvert ?)
+
+    def _sent(self, m) -> int:
+        mid = getattr(m, "message_id", 0) or 0
+        if self.on_sent and mid:
+            try:
+                self.on_sent(mid)
+            except Exception:
+                log.exception("on_sent")
+        return mid
 
     @staticmethod
     def markup(kb: Keyboard | None) -> InlineKeyboardMarkup | None:
@@ -63,7 +73,7 @@ class TelegramSender:
     async def send(self, chat_id: int, text: str, kb: Keyboard | None = None, silent: bool = False) -> int:
         m = await self._retrying(self.bot.send_message, chat_id=chat_id, text=text, parse_mode=ParseMode.HTML,
                                  reply_markup=self.markup(kb), disable_notification=silent)
-        return m.message_id
+        return self._sent(m)
 
     async def edit(self, chat_id: int, message_id: int, text: str, kb: Keyboard | None = None) -> str:
         try:
@@ -98,7 +108,7 @@ class TelegramSender:
         kbd = ReplyKeyboardMarkup([[KeyboardButton(MENU_BUTTON)]], resize_keyboard=True, is_persistent=True)
         m = await self._retrying(self.bot.send_message, chat_id=chat_id, text=text, parse_mode=ParseMode.HTML,
                                  reply_markup=kbd, disable_notification=True)
-        return m.message_id
+        return self._sent(m)
 
     async def photo(self, chat_id: int, data: bytes | str, caption: str = "", silent: bool = False) -> None:
         if isinstance(data, str):
@@ -106,12 +116,12 @@ class TelegramSender:
                 payload = f.read()
         else:
             payload = data
-        await self._retrying(self.bot.send_photo, chat_id=chat_id, photo=io.BytesIO(payload), caption=caption[:1000],
-                             disable_notification=silent)
+        self._sent(await self._retrying(self.bot.send_photo, chat_id=chat_id, photo=io.BytesIO(payload), caption=caption[:1000],
+                                        disable_notification=silent))
 
     async def document(self, chat_id: int, data: bytes, filename: str, caption: str = "") -> None:
-        await self._retrying(self.bot.send_document, chat_id=chat_id, document=io.BytesIO(data), filename=filename,
-                             caption=caption[:1000])
+        self._sent(await self._retrying(self.bot.send_document, chat_id=chat_id, document=io.BytesIO(data), filename=filename,
+                                        caption=caption[:1000]))
 
 
 # --------------------------------------------------------------------------- services
@@ -122,6 +132,7 @@ class Services:
         self.sender = TelegramSender(bot)
         self.conf = Confirmations()
         self.dash = Dashboard(ctx, self.sender, self.chat_id, self.conf)
+        self.sender.on_sent = self.dash.note_message
         self.notifier = Notifier(self.sender, self.chat_id, cfg.alerts.silent_mode)
         self.router = Router(ctx, self.sender, self.chat_id, self.dash, self.conf, self.notifier)
         ctx.watchdog.alert = self.router.alert
@@ -153,6 +164,10 @@ async def h_guard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Ne répond qu'aux chat_id autorisés ; tout le reste est ignoré et journalisé."""
     chat = update.effective_chat
     allowed = context.application.bot_data["allowed"]
+    msg = getattr(update, "message", None)
+    s = context.application.bot_data.get("svc")
+    if chat is not None and chat.id in allowed and msg is not None and s is not None:   # message de l'utilisateur
+        s.dash.note_message(msg.message_id)
     if chat is None or chat.id not in allowed:
         log.warning("message ignoré d'un chat non autorisé : chat_id=%s user_id=%s",
                     getattr(chat, "id", None), getattr(update.effective_user, "id", None))
@@ -422,7 +437,7 @@ def build_application(cfg: Config, ctx_factory) -> Application:
     jq.run_repeating(j_events, interval=t.events_interval_s, first=3)
     jq.run_repeating(j_clean, interval=60, first=30)
     jq.run_repeating(j_flush, interval=max(1, cfg.alerts.batch_window_s), first=4)
-    jq.run_repeating(j_dash, interval=max(3, cfg.dashboard.interval_s // 3), first=5)   # refresh() applique l'intervalle min
+    jq.run_repeating(j_dash, interval=2, first=5)        # refresh() : toutes les refresh_s, republication après repost_s
     jq.run_repeating(j_watchdog, interval=t.watchdog_interval_s, first=20)
     jq.run_repeating(j_build, interval=20, first=40)
     jq.run_repeating(j_update, interval=max(20, cfg.update.check_s), first=60)

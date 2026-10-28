@@ -33,7 +33,8 @@ Voir `LISEZMOI.txt` à la racine du dépôt : `INSTALL.bat` installe tout (BASE 
 
 ## Utilisation (tout par boutons, aucune commande « / »)
 
-- **Accueil** (un message édité en place ; **📊 Tableau de bord** ou tout message le ramène en bas). **En tout premier,
+- **Accueil** (un message édité en place ; **📊 Tableau de bord** ou tout message le ramène en bas). Mis à jour toutes
+  les 10 s tant qu'il est le dernier message ; recouvert par d'autres messages, il est republié en bas, en silence, après 5 min. **En tout premier,
   l'état du trading** (lu sur le robot le plus récent : tous ont les mêmes réglages) : 🟢 trading autorisé / ⛔ entrées
   bloquées (raison) / ⏸ pause (jusqu'à…) / ⚪ sans objectif / 🏖 vacances, l'objectif en cours (gain visé, cible,
   progression) ou le prochain créneau, les positions en cours, le **filtre News**

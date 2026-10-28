@@ -1,6 +1,7 @@
 """Tableau de bord VIVANT : un seul message (non épinglé), ÉDITÉ en place (accueil, liste, fiche compte, confirmations).
 
-Édition au plus toutes les `interval_s` secondes (10 à 15 s) et seulement si le contenu a changé ; gère RetryAfter,
+Mis à jour toutes les `refresh_s` secondes (10 s) tant qu'il est le dernier message, seulement si le contenu a changé ;
+recouvert par d'autres messages depuis `repost_s` (5 min) : republié en bas, en silence. Gère RetryAfter,
 « message is not modified » et la suppression manuelle du message (recréé). L'identifiant du message est conservé
 en SQLite.
 """
@@ -40,6 +41,7 @@ class Dashboard:
         self._last_sig = ""
         self._last_edit = 0.0
         self._retry_until = 0.0
+        self._covered_at: float | None = None               # depuis quand un autre message est sous le tableau de bord
         self._load_state()
 
     # ---- état persistant (filtre / tri / page)
@@ -362,15 +364,27 @@ class Dashboard:
 
     async def _create(self) -> int:
         text, kb = self.render()
-        mid = await self.sender.send(self.chat_id, text, kb, True)
+        mid = await self.sender.send(self.chat_id, text, kb, True)          # toujours silencieux
         self.ctx.db.meta_set("dash_msg_id", str(mid))
         self._last_sig, self._last_edit = self._sig(text, kb), time.time()
+        self._covered_at = None
         return mid
 
-    async def bring_down(self) -> int:
-        """Remet le tableau de bord EN BAS de la conversation : ancien message supprimé, nouveau envoyé."""
+    def note_message(self, message_id: int) -> None:
+        """Un message (du bot ou de l'utilisateur) arrive : s'il est sous le tableau de bord, celui-ci n'est plus le dernier."""
+        mid = int(self.ctx.db.meta_get("dash_msg_id", "0") or 0)
+        if mid and message_id > mid and self._covered_at is None:
+            self._covered_at = time.time()
+
+    @property
+    def is_last(self) -> bool:
+        return self._covered_at is None
+
+    async def bring_down(self, home: bool = True) -> int:
+        """Remet le tableau de bord EN BAS de la conversation : ancien message supprimé, nouveau envoyé (silencieux)."""
         old = int(self.ctx.db.meta_get("dash_msg_id", "0") or 0)
-        self.screen = ("dash",)
+        if home:
+            self.screen = ("dash",)
         self.ctx.db.meta_set("dash_msg_id", "0")
         mid = await self._create()
         if old:
@@ -389,7 +403,13 @@ class Dashboard:
         if not mid:
             await self._create()
             return "recreated"
-        if not force and now - self._last_edit < self.ctx.cfg.dashboard.interval_s:
+        cfg = self.ctx.cfg.dashboard
+        if not force and self._covered_at is not None:
+            if now - self._covered_at >= cfg.repost_s:                      # recouvert depuis 5 min : republié en bas
+                await self.bring_down(home=False)
+                return "recreated"
+            return "skip"                                                   # recouvert : plus d'éditions automatiques
+        if not force and now - self._last_edit < cfg.refresh_s:
             return "skip"
         text, kb = self.render(now)
         sig = self._sig(text, kb)

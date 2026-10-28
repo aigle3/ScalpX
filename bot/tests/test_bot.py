@@ -896,3 +896,29 @@ async def test_filtres_et_positions_de_tous_les_robots(svc):
         assert sum(1 for m in sender.sent if "📋 <b>Positions</b>" in m[1]) == 1
     finally:
         await ea.stop()
+
+
+@pytest.mark.asyncio
+async def test_tableau_de_bord_10s_si_dernier_puis_republie_apres_5_min(svc):
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    seed(ctx_stack(svc), 601, "Demo-Server 1", running=False)
+    mid = await dash.ensure()
+    assert dash.is_last
+    dash._last_edit = time.time() - 11                         # 10 s écoulées : mise à jour (si le contenu a changé)
+    dash.flash("changement")
+    assert await dash.refresh() == "edit"
+    dash.flash("encore")
+    assert await dash.refresh() == "skip"                      # moins de 10 s
+    dash.goto("rpt")
+    dash.note_message(mid + 5)                                 # un message arrive sous le tableau de bord
+    assert not dash.is_last
+    dash._last_edit = time.time() - 60
+    assert await dash.refresh() == "skip"                      # recouvert : on attend
+    dash._covered_at = time.time() - 301                       # 5 min plus tard : republié en bas, en silence
+    n = len(sender.sent)
+    assert await dash.refresh() == "recreated"
+    new = int(ctx.db.meta_get("dash_msg_id"))
+    assert new != mid and mid in sender.deleted and sender.sent[n][3] is True
+    assert dash.screen == ("rpt",) and dash.is_last            # même écran, de nouveau dernier message
+    dash.note_message(new - 1)                                 # un message plus ancien ne compte pas
+    assert dash.is_last
