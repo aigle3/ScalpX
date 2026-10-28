@@ -672,3 +672,48 @@ async def test_aucun_serveur_connu_saisie_directe(svc):
     await w.on_login(1, "123456")
     assert await w.on_password(1, "secret", None) == SERVER_TEXT
     assert "nom exact du serveur" in sender.sent[-1][1]
+
+
+@pytest.mark.asyncio
+async def test_sans_compte_boutons_systeme_et_journaux(svc):
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    text, kb = dash.render()
+    datas = [d for row in kb for _, d in row]
+    assert "n" in datas and "d:sys" in datas and "d:upd" in datas and "d:png" in datas
+    await router.on_callback("d:sys")
+    text, kb = dash.render()
+    assert "Système" in text and "BASE" in text and "Comptes : 0" in text
+    assert "d:log" in [d for row in kb for _, d in row]
+    logs = ctx.cfg.paths.data / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    (logs / "bot.log").write_text("ligne 1\nligne <2>\n", encoding="utf-8")
+    await router.on_callback("d:log")
+    assert "ligne &lt;2&gt;" in sender.sent[-1][1]
+    mid = sender.sent[-1][0]
+    await router.on_callback("d:close", mid)
+    assert mid in sender.deleted
+
+
+@pytest.mark.asyncio
+async def test_mise_a_jour_reportee_puis_installee_depuis_le_bouton(svc, tmp_path, monkeypatch):
+    from core import update as u
+    from tests.test_update import make_pkg
+    import bot.router as r
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    bot_root = tmp_path / "botinst"
+    make_pkg(tmp_path, ctx.cfg, bot_root)
+    monkeypatch.setattr(r, "__file__", str(bot_root / "bot" / "router.py"))
+    monkeypatch.setattr(u, "restart_bot", lambda root: "process")
+    plan = u.plan_update(ctx.cfg, bot_root)
+    ctx.db.meta_set("update_offered", plan.stamp)
+    await router.on_update_available(plan)
+    await router.on_callback("upd:later")
+    assert "reportée" in sender.msgs[router._upd_msg][0]
+    # plus tard : le bouton ⬆ Mises à jour la repropose sans attendre un nouveau changement
+    await router.check_updates_now()
+    assert "Mise à jour ScalpX disponible" in sender.sent[-1][1] and ctx.db.meta_get("update_pending") == plan.stamp
+    text, kb = dash.render()
+    assert any("🔔" in t for row in kb for t, _ in row)
+    await router.on_callback(f"upd:go:{plan.stamp}")
+    assert (bot_root / "bot" / "x.py").read_text() == "X = 2" and ctx.db.meta_get("update_pending") == ""
+    u.STOP.clear()

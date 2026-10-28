@@ -54,7 +54,7 @@ class Router:
             if head == "sk" and len(parts) > 2:
                 return await self.on_standalone_confirm(parts[1], parts[2], message_id)
             if head == "d":
-                return await self._dash_cb(parts)
+                return await self._dash_cb(parts, message_id)
             if head == "p":
                 return await self._prm_cb(parts)
             if head == "x" and len(parts) > 1:
@@ -75,7 +75,7 @@ class Router:
             return "Erreur"
         return ""
 
-    async def _dash_cb(self, p: list[str]) -> str:
+    async def _dash_cb(self, p: list[str], message_id: int | None = None) -> str:
         sub = p[1] if len(p) > 1 else "r"
         if sub == "f" and len(p) > 2:
             self.dash.set_filter(p[2])
@@ -85,6 +85,26 @@ class Router:
             self.dash.set_page(int(p[2]))
         elif sub == "home":
             self.dash.goto("dash")
+        elif sub == "sys":
+            self.dash.goto("sys")
+        elif sub in ("log", "clog", "crash"):
+            from .system import log_path, tail
+            name = {"log": "bot.log", "clog": "compile.log", "crash": "crash.log"}[sub]
+            txt = tail(log_path(self.ctx, name), 40 if sub == "clog" else 25)
+            await self.sender.send(self.chat_id, f"📜 <b>{name}</b>\n" + (f"<pre>{esc(txt)}</pre>" if txt else "<i>vide ou absent</i>"),
+                                   [[("✖ Fermer", "d:close")]], True)
+            return ""
+        elif sub == "close" and message_id:
+            await self.sender.delete(self.chat_id, message_id)
+            return ""
+        elif sub == "upd":
+            self._bg(self.check_updates_now())
+            return "Vérification…"
+        elif sub == "bld":
+            if self.building or self.ctx.deploy.running:
+                return "Compilation ou déploiement déjà en cours"
+            self._bg(self.run_manual_build())
+            return "Compilation lancée"
         elif sub == "dep":
             await self.cmd_deployer()
             return ""
@@ -408,7 +428,9 @@ class Router:
         mid = getattr(self, "_upd_msg", None)
         if sub == "later":
             if mid:
-                await self.sender.edit(self.chat_id, mid, "⏰ Mise à jour reportée : elle sera reproposée à la prochaine modification du paquet.", None)
+                await self.sender.edit(self.chat_id, mid, "⏰ Mise à jour reportée. Pour l'installer plus tard : "
+                                       "tableau de bord → <b>🔔 ⬆ Mises à jour</b>.", None)
+            await self.dash.refresh(force=True)
             return ""
         if sub != "go":
             return ""
@@ -438,6 +460,11 @@ class Router:
                 await self.sender.edit(self.chat_id, mid, "\n".join(out), None)
             return ""
         self.ctx.db.meta_set("update_offered", plan.stamp)
+        self.ctx.db.meta_set("update_pending", "")
+        info = upd.commit_info(plan.source)
+        if info.get("sha"):
+            msg = (info.get("message") or "").splitlines()[0][:60] if info.get("message") else ""
+            self.ctx.db.meta_set("installed_commit", f"{info['sha'][:7]} {msg}".strip())
         if mid:
             await self.sender.edit(self.chat_id, mid, "✅ <b>Mise à jour installée</b>\n" + "\n".join(out), None)
         if plan.bot_files:
@@ -445,6 +472,51 @@ class Router:
             log.warning("mise à jour du bot installée : redémarrage (%s)", how)
             upd.STOP.set()
         return ""
+
+    async def check_updates_now(self) -> None:
+        """Bouton ⬆ Mises à jour : vérifie GitHub tout de suite et propose l'installation, même si elle a été reportée."""
+        from core import github as gh, update as upd
+        from pathlib import Path as _P
+        cfg = self.ctx.cfg
+        loop = asyncio.get_running_loop()
+        if cfg.update.github:
+            res = await loop.run_in_executor(None, gh.fetch, cfg)
+            if not res.ok:
+                await self.sender.send(self.chat_id, f"⚠️ Mises à jour : {esc(res.error)}", [[("✖ Fermer", "d:close")]], True)
+                return
+        plan = await loop.run_in_executor(None, upd.plan_update, cfg, _P(__file__).resolve().parent.parent, 0.0)
+        if plan is None:
+            await self.sender.send(self.chat_id, "⚠️ Aucun paquet de mise à jour trouvé (GitHub non configuré ?).", [[("✖ Fermer", "d:close")]], True)
+            return
+        if plan.empty:
+            self.ctx.db.meta_set("update_pending", "")
+            info = upd.commit_info(plan.source)
+            note = (info.get("message") or "").splitlines()[0][:80] if info.get("message") else ""
+            await self.sender.send(self.chat_id, f"✅ <b>Tout est à jour</b>" + (f"\nDernière publication : {esc(note)}" if note else ""),
+                                   [[("✖ Fermer", "d:close")]], True)
+            await self.dash.refresh(force=True)
+            return
+        self.ctx.db.meta_set("update_pending", plan.stamp)
+        await self.on_update_available(plan)
+
+    async def run_manual_build(self) -> None:
+        """Bouton 🔨 Compiler l'EA : compile BASE tel quel, puis propose le déploiement si le .ex5 a changé."""
+        from mt5 import build as buildmod
+        from mt5.deploy import detect_new_build
+        self.building = True
+        try:
+            mid = await self.sender.send(self.chat_id, "🔨 Compilation de l'EA dans BASE…", None, True)
+            res = await buildmod.compile_ea(self.ctx.cfg)
+            text = (f"✅ <b>EA v{esc(res.version)} compilé</b> ({res.warnings} avertissement(s))." if res.ok else
+                    f"❌ <b>Compilation échouée</b>" + (f" ({res.errors} erreur(s))" if res.errors > 0 else "") + f"\n{esc(res.detail)}")
+            if mid:
+                await self.sender.edit(self.chat_id, mid, text, [[("✖ Fermer", "d:close")]])
+            if res.ok:
+                nb = detect_new_build(self.ctx.cfg, self.ctx.db, settle_s=0)
+                if nb is not None:
+                    await self.on_new_build(nb)
+        finally:
+            self.building = False
 
     async def run_auto_build(self, req) -> None:
         """version.txt modifié : version écrite dans les sources, compilation dans BASE, puis proposition de déploiement."""

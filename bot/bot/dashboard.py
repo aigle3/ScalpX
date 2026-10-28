@@ -93,6 +93,11 @@ class Dashboard:
             self.screen = ("dash",)
         if kind == "cmds":
             return self._render_cmds(self.screen[1])
+        if kind == "sys":
+            from .system import system_kb, system_text
+            fl = self._flash_text()
+            return ((f"{fl}\n\n" if fl else "") + system_text(self.ctx, self.vps(self.ctx.cfg.paths.data)),
+                    system_kb(bool(self.ctx.db.meta_get("update_pending"))))
         if kind in ("prm", "prg", "prp"):
             inst = self.ctx.db.get(self.screen[1])
             if inst is not None:
@@ -102,9 +107,12 @@ class Dashboard:
 
     def _render_dash(self, now: float) -> tuple[str, Keyboard]:
         views = self.ctx.views()
-        kb_new: Keyboard = [[("➕ Nouveau compte", "n")]]
+        pending = bool(self.ctx.db.meta_get("update_pending"))
+        tools: Keyboard = [[("🛠 Système", "d:sys"), (("🔔 " if pending else "") + "⬆ Mises à jour", "d:upd")]]
         if not views:
-            return render.welcome_empty(), kb_new
+            fl = self._flash_text()
+            kb_new: Keyboard = [[("➕ Nouveau compte", "n")]] + tools + [[("📝 Rapport", "d:rep"), ("🏓 Ping", "d:png")]]
+            return (f"{fl}\n\n" if fl else "") + render.welcome_empty(), kb_new
         t = totals(views)
         filtered = apply_sort(apply_filter(views, self.flt), self.sort)
         page_views, self.page, pages = render.paginate(filtered, self.page, self.ctx.cfg.dashboard.page_size)
@@ -134,6 +142,7 @@ class Dashboard:
             nav = [("◀", f"d:p:{self.page - 1}"), (f"{self.page + 1}/{pages}", "d:r"), ("▶", f"d:p:{self.page + 1}")]
         kb.append(nav + [("🔃", "d:r")] if nav else [("🔃 Actualiser", "d:r")])
         kb.append([("➕ Nouveau compte", "n")])
+        kb.extend(tools)
         kb.append([("🚀 Déployer l'EA", "d:dep"), ("📝 Rapport", "d:rep")])
         kb.append([("📤 Export", "d:exp"), ("🔕 Silencieux", "d:sil"), ("🏓 Ping", "d:png")])
         return text, kb

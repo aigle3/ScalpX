@@ -319,7 +319,13 @@ async def j_update(context: ContextTypes.DEFAULT_TYPE) -> None:
         if not res.ok:
             return
     plan = await loop.run_in_executor(None, upd.plan_update, cfg, Path(__file__).resolve().parent.parent)
-    if plan is None or plan.empty or s.ctx.db.meta_get("update_offered") == plan.stamp:
+    if plan is None:
+        return
+    pending = "" if plan.empty else plan.stamp
+    if pending != s.ctx.db.meta_get("update_pending"):          # 🔔 sur le bouton « Mises à jour » du tableau de bord
+        s.ctx.db.meta_set("update_pending", pending)
+        await s.dash.refresh(force=True)
+    if plan.empty or s.ctx.db.meta_get("update_offered") == plan.stamp:
         return
     s.ctx.db.meta_set("update_offered", plan.stamp)
     await s.router.on_update_available(plan)
