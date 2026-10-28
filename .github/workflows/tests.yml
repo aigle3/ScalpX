@@ -1,0 +1,31 @@
+# Tests automatiques à chaque publication sur main.
+# Si tout passe, la branche « stable » avance sur ce commit : le bot du VPS ne télécharge QUE « stable ».
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tests
+  cancel-in-progress: false
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Dépendances (python-telegram-bot remplacé par le stub des tests)
+        run: pip install pydantic psutil matplotlib tzdata pytest
+      - name: Tests du bot
+        working-directory: bot
+        run: python -m pytest -q
+      - name: Valider la publication (branche stable)
+        run: git push origin HEAD:refs/heads/stable --force
