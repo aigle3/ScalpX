@@ -717,3 +717,23 @@ async def test_mise_a_jour_reportee_puis_installee_depuis_le_bouton(svc, tmp_pat
     await router.on_callback(f"upd:go:{plan.stamp}")
     assert (bot_root / "bot" / "x.py").read_text() == "X = 2" and ctx.db.meta_get("update_pending") == ""
     u.STOP.clear()
+
+
+@pytest.mark.asyncio
+async def test_redemarrage_du_bot_depuis_telegram(svc, monkeypatch):
+    from core import update as u
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    calls = []
+    monkeypatch.setattr(u, "restart_bot", lambda root: calls.append(root) or "task")
+    await router.on_callback("d:sys")
+    await router.on_callback("d:rst")
+    text, kb = dash.render()
+    assert "Redémarrer le bot" in text and not calls                     # confirmation d'abord
+    tok = [d for row in kb for _, d in row if d.startswith("ok:")][0]
+    await router.on_callback(tok)
+    for _ in range(20):
+        await asyncio.sleep(0.05)
+        if calls:
+            break
+    assert calls and u.STOP.is_set()
+    u.STOP.clear()

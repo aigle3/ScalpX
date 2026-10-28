@@ -77,6 +77,7 @@ def system_kb(pending: bool) -> Keyboard:
         [(("🔔 " if pending else "") + "⬆ Mises à jour", "d:upd"), ("🔨 Compiler l'EA", "d:bld")],
         [("📜 Journal du bot", "d:log"), ("🧾 Journal compilation", "d:clog")],
         [("💥 Plantages", "d:crash"), ("🏓 Ping", "d:png")],
+        [("🔄 Redémarrer le bot", "d:rst")],
         [("🔃 Actualiser", "d:sys"), ("⬅ Retour", "d:home")],
     ]
 

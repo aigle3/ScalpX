@@ -100,6 +100,9 @@ class Router:
         elif sub == "upd":
             self._bg(self.check_updates_now())
             return "Vérification…"
+        elif sub == "rst":
+            return await self._ask("🔄 <b>Redémarrer le bot ?</b>\nEnviron 30 s sans bot. Les terminaux MT5 et l'EA continuent de trader.",
+                                   self.restart_bot, ("sys",), "🔄 Redémarrer")
         elif sub == "bld":
             if self.building or self.ctx.deploy.running:
                 return "Compilation ou déploiement déjà en cours"
@@ -505,6 +508,18 @@ class Router:
             return
         self.ctx.db.meta_set("update_pending", plan.stamp)
         await self.on_update_available(plan)
+
+    async def restart_bot(self) -> None:
+        """Relance le bot (même mécanisme qu'après une mise à jour) : terminaux et EA non touchés."""
+        from core import update as upd
+        from pathlib import Path as _P
+        if self.ctx.deploy.running or self.building:
+            await self.sender.send(self.chat_id, "⏳ Déploiement ou compilation en cours : redémarre après.", [[("✖ Fermer", "d:close")]], True)
+            return
+        await self.sender.send(self.chat_id, "🔄 Redémarrage du bot… il revient dans environ 30 s.", None, True)
+        how = upd.restart_bot(_P(__file__).resolve().parent.parent)
+        log.warning("redémarrage demandé depuis Telegram (%s)", how)
+        upd.STOP.set()
 
     async def run_manual_build(self) -> None:
         """Bouton 🔨 Compiler l'EA : compile BASE tel quel, puis propose le déploiement si le .ex5 a changé."""
