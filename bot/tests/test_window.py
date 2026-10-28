@@ -6,17 +6,18 @@ class FakeWin:
     def __init__(self, appears_after=0):
         self.calls, self.n = [], 0
         self.appears_after = appears_after
-        self.menu = [("ctrl+t", 101, True), ("ctrl+n", 102, False), ("ctrl+m", 103, True), ("f9", 104, False)]
+        self.panel_list = [(11, 101, "Market Watch"), (12, 102, "Navigator"), (13, 103, "Toolbox")]
 
     def main_window(self, pids):
         self.n += 1
         return 555 if 42 in pids and self.n > self.appears_after else None
 
-    def menu_items(self, hwnd):
-        return self.menu
+    def panels(self, hwnd):
+        return self.panel_list
 
-    def command(self, hwnd, cmd_id):
-        self.calls.append(("cmd", cmd_id))
+    def hide_panel(self, hwnd, panel, ctrl_id):
+        self.calls.append(("hide", ctrl_id))
+        return ctrl_id != 102                                   # le navigateur résiste (non compté)
 
     def maximize_chart(self, hwnd):
         self.calls.append(("max",))
@@ -29,8 +30,8 @@ class FakeWin:
 def test_panneaux_masques_graphique_agrandi_puis_reduit():
     api, slept = FakeWin(appears_after=2), []
     res = arrange(api, lambda: {42}, WindowOptions(settle_s=10), sleep=slept.append)
-    assert res == {"window": True, "hidden": ["ctrl+t", "ctrl+m"], "chart": True, "minimized": True}
-    assert api.calls == [("cmd", 101), ("cmd", 103), ("max",), ("min",)]      # navigateur déjà masqué : pas touché
+    assert res == {"window": True, "hidden": ["Market Watch", "Toolbox"], "chart": True, "minimized": True}
+    assert api.calls == [("hide", 101), ("hide", 102), ("hide", 103), ("max",), ("min",)]
     assert slept == [2.0, 2.0, 10]                                            # attend la fenêtre, puis le graphique
 
 

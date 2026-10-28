@@ -122,9 +122,24 @@ class Router:
             return ""
         elif sub == "sys":
             self.dash.goto("sys")
-        elif sub in ("log", "clog", "crash"):
+        elif sub == "crash":
+            from .system import crash_report
+            text, has = crash_report(self.ctx)
+            kb = [[("🗑 Effacer l'historique", "d:crashclr"), ("✖ Fermer", "d:close")]] if has else [[("✖ Fermer", "d:close")]]
+            await self.sender.send(self.chat_id, text, kb, True)
+            return ""
+        elif sub == "crashclr":
+            from .system import log_path
+            try:
+                log_path(self.ctx, "crash.log").unlink()
+            except OSError:
+                pass
+            if message_id:
+                await self.sender.edit(self.chat_id, message_id, "💥 Historique des plantages effacé.", [[("✖ Fermer", "d:close")]])
+            return ""
+        elif sub in ("log", "clog"):
             from .system import log_path, tail
-            name = {"log": "bot.log", "clog": "compile.log", "crash": "crash.log"}[sub]
+            name = {"log": "bot.log", "clog": "compile.log"}[sub]
             txt = tail(log_path(self.ctx, name), 40 if sub == "clog" else 25)
             await self.sender.send(self.chat_id, f"📜 <b>{name}</b>\n" + (f"<pre>{esc(txt)}</pre>" if txt else "<i>vide ou absent</i>"),
                                    [[("✖ Fermer", "d:close")]], True)

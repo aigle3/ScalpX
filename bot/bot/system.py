@@ -53,6 +53,14 @@ def system_text(ctx: Ctx, vps: dict[str, float]) -> str:
     views = ctx.views()
     running = sum(1 for v in views if ctx.mgr.is_running(v.inst))
     lines.append(f"👥 Comptes : {len(views)} · terminaux lancés : {running}")
+    from mt5 import window as winmod
+    for name, (ts, res) in sorted(winmod.LAST.items(), key=lambda x: -x[1][0])[:3]:
+        if not res.get("window"):
+            state = "❌ fenêtre introuvable"
+        else:
+            state = ("réduite" if res.get("minimized") else "non réduite") + (
+                f", masqué : {esc(', '.join(res['hidden']))}" if res.get("hidden") else ", aucun panneau masqué")
+        lines.append(f"🪟 {esc(name)} ({_fmt_ts(ts)}) : {state}")
     # BASE / EA
     probs = basemod.check_base(cfg)
     ex5 = cfg.paths.base / "MQL5" / "Experts" / cfg.mt5.ea_file
@@ -93,6 +101,32 @@ def system_kb(pending: bool, previous: str = "") -> Keyboard:
         [("🔄 Redémarrer le bot", "d:rst"), ("🔃", "d:sys")],
         [("⬅ Accueil", "d:home")],
     ]
+
+
+def crash_report(ctx: Ctx, now: float | None = None) -> tuple[str, bool]:
+    """Plantages datés, du plus récent au plus ancien (3 max). (texte, il y a des plantages)."""
+    import re
+    try:
+        raw = log_path(ctx, "crash.log").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        raw = ""
+    parts = re.split(r"(?m)^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)$", raw)
+    entries = [(parts[i], parts[i + 1].strip()) for i in range(1, len(parts) - 1, 2)]
+    if not entries:
+        return "💥 <b>Plantages</b>\n\n✅ Aucun plantage enregistré.", False
+    now = now or time.time()
+    lines = [f"💥 <b>Plantages</b> · {len(entries)} enregistré(s)"]
+    for ts, tb in reversed(entries[-3:]):
+        try:
+            age = render.ago(now - time.mktime(time.strptime(ts, "%Y-%m-%d %H:%M:%S")))
+        except ValueError:
+            age = "?"
+        last = [l for l in tb.splitlines() if l.strip()][-1:] or [""]
+        lines.append(f"\n<b>{esc(ts)}</b> (il y a {age})\n<code>{esc(last[0][:200])}</code>")
+    started = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ctx.started_at))
+    if entries[-1][0] < started:
+        lines.append(f"\n✅ Aucun plantage depuis le démarrage du bot ({started[5:16]}).")
+    return "\n".join(lines), True
 
 
 def log_path(ctx: Ctx, name: str) -> Path:

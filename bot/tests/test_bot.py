@@ -843,3 +843,21 @@ async def test_terminaux_de_tous_les_comptes(svc):
     assert "1 terminal" in await _confirm(router, dash)
     assert await _until(lambda: ctx.mgr.is_running(b))
     assert await _until(lambda: any("Lancement" in m[1] for m in sender.sent))
+
+
+@pytest.mark.asyncio
+async def test_plantages_dates_et_effacement(svc):
+    import time as _t
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    logs = ctx.cfg.paths.data / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    (logs / "crash.log").write_text("2026-10-28 15:46:00\nTraceback (most recent call last):\n  x\nRuntimeError: Event loop stopped\n\n",
+                                    encoding="utf-8")
+    ctx.started_at = _t.mktime(_t.strptime("2026-10-28 17:00:00", "%Y-%m-%d %H:%M:%S"))
+    await router.on_callback("d:crash")
+    mid, text, kb = sender.sent[-1][:3]
+    assert "2026-10-28 15:46:00" in text and "Event loop stopped" in text and "Aucun plantage depuis le démarrage" in text
+    await router.on_callback("d:crashclr", mid)
+    assert not (logs / "crash.log").exists() and "effacé" in sender.msgs[mid][0]
+    await router.on_callback("d:crash")
+    assert "Aucun plantage enregistré" in sender.sent[-1][1]

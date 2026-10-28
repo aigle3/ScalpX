@@ -1,9 +1,10 @@
 """Fenêtre des terminaux MT5 : à chaque ouverture, panneaux masqués, graphique agrandi, puis fenêtre réduite.
 
 Réduire MT5 évite le dessin des graphiques (CPU, mémoire graphique) ; l'EA continue de trader normalement.
-Les panneaux (boîte à outils Ctrl+T, navigateur Ctrl+N, observation du marché Ctrl+M) sont masqués par la commande
-de menu correspondante, retrouvée par son raccourci (indépendant de la langue) et seulement si elle est cochée.
-Tout est fait par l'API Windows (ctypes) ; sur un autre système, rien n'est fait.
+Panneaux (observation du marché, navigateur, boîte à outils, fenêtre de données…) : MT5 est une application MFC ;
+ses panneaux sont des barres ancrées à gauche, à droite ou en bas de la fenêtre (identifiants MFC standard des zones
+d'ancrage). Chacun est masqué par sa commande (WM_COMMAND avec l'identifiant du panneau), sinon masqué directement.
+MT5 retient l'état à sa fermeture. Tout passe par l'API Windows (ctypes) ; sur un autre système, rien n'est fait.
 """
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ from typing import Callable, Protocol
 
 log = logging.getLogger(__name__)
 
-PANEL_HOTKEYS = ("ctrl+t", "ctrl+n", "ctrl+m")       # boîte à outils, navigateur, observation du marché
+LAST: dict[str, tuple[float, dict]] = {}              # dernier rangement par terminal (affiché dans 🛠 Système)
 
 
 @dataclass
@@ -30,8 +31,8 @@ class WindowOptions:
 
 class WinAPI(Protocol):
     def main_window(self, pids: set[int]) -> int | None: ...
-    def menu_items(self, hwnd: int) -> list[tuple[str, int, bool]]: ...      # (raccourci en minuscules, id, coché)
-    def command(self, hwnd: int, cmd_id: int) -> None: ...
+    def panels(self, hwnd: int) -> list[tuple[int, int, str]]: ...           # panneaux visibles : (fenêtre, id, titre)
+    def hide_panel(self, hwnd: int, panel: int, ctrl_id: int) -> bool: ...
     def maximize_chart(self, hwnd: int) -> bool: ...
     def minimize(self, hwnd: int) -> None: ...
 
@@ -51,10 +52,9 @@ def arrange(api: WinAPI, pids: Callable[[], set[int]], opts: WindowOptions,
     if wait_window and opts.settle_s:
         sleep(opts.settle_s)
     if opts.hide_panels:
-        for hotkey, cmd_id, checked in api.menu_items(hwnd):
-            if hotkey in PANEL_HOTKEYS and checked:
-                api.command(hwnd, cmd_id)
-                done["hidden"].append(hotkey)
+        for panel, ctrl_id, title in api.panels(hwnd):
+            if api.hide_panel(hwnd, panel, ctrl_id):
+                done["hidden"].append(title or str(ctrl_id))
     if opts.maximize_chart:
         done["chart"] = api.maximize_chart(hwnd)
     if opts.minimize:
@@ -71,6 +71,7 @@ def arrange_in_background(api: WinAPI | None, pids: Callable[[], set[int]], opts
     def run() -> None:
         try:
             res = arrange(api, pids, opts)
+            LAST[name] = (time.time(), res)
             log.info("fenêtre %s : %s", name, res)
         except Exception as exc:                                   # jamais bloquant pour le bot
             log.warning("fenêtre %s : rangement impossible (%s)", name, exc)
@@ -82,7 +83,6 @@ class Win32(WinAPI):
     """Implémentation Windows (user32 via ctypes)."""
 
     WM_COMMAND, WM_MDIGETACTIVE, WM_MDIMAXIMIZE = 0x0111, 0x0229, 0x0225
-    MF_BYPOSITION, MF_CHECKED, MF_POPUP = 0x400, 0x8, 0x10
     SW_SHOWMINNOACTIVE = 7
 
     def __init__(self) -> None:
@@ -100,21 +100,14 @@ class Win32(WinAPI):
         u.GetWindowRect.argtypes = [w.HWND, ctypes.POINTER(w.RECT)]
         u.GetParent.argtypes = [w.HWND]
         u.GetParent.restype = w.HWND
-        u.GetMenu.argtypes = [w.HWND]
-        u.GetMenu.restype = w.HMENU
-        u.GetMenuItemCount.argtypes = [w.HMENU]
-        u.GetSubMenu.argtypes = [w.HMENU, ctypes.c_int]
-        u.GetSubMenu.restype = w.HMENU
-        u.GetMenuItemID.argtypes = [w.HMENU, ctypes.c_int]
-        u.GetMenuItemID.restype = w.UINT
-        u.GetMenuState.argtypes = [w.HMENU, w.UINT, w.UINT]
-        u.GetMenuState.restype = w.UINT
-        u.GetMenuStringW.argtypes = [w.HMENU, w.UINT, w.LPWSTR, ctypes.c_int, w.UINT]
         u.GetClassNameW.argtypes = [w.HWND, w.LPWSTR, ctypes.c_int]
         u.PostMessageW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM]
         u.SendMessageW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM]
         u.SendMessageW.restype = ctypes.c_ssize_t
         u.ShowWindow.argtypes = [w.HWND, ctypes.c_int]
+        u.GetDlgCtrlID.argtypes = [w.HWND]
+        u.GetWindowTextW.argtypes = [w.HWND, w.LPWSTR, ctypes.c_int]
+        u.GetClientRect.argtypes = [w.HWND, ctypes.POINTER(w.RECT)]
 
     def main_window(self, pids: set[int]) -> int | None:
         best: list = [None, 0]
@@ -127,6 +120,10 @@ class Win32(WinAPI):
                 r = w.RECT()
                 u.GetWindowRect(hwnd, c.byref(r))
                 area = max(0, r.right - r.left) * max(0, r.bottom - r.top)
+                buf = c.create_unicode_buffer(64)
+                u.GetClassNameW(hwnd, buf, 64)
+                if buf.value.startswith("MetaQuotes::MetaTrader"):            # fenêtre principale de MT5 (pas un dialogue)
+                    area += 10 ** 9
                 if area > best[1]:
                     best[0], best[1] = hwnd, area
             return True
@@ -134,34 +131,44 @@ class Win32(WinAPI):
         u.EnumWindows(self.EnumProc(cb), 0)
         return best[0]
 
-    def menu_items(self, hwnd: int) -> list[tuple[str, int, bool]]:
-        out: list[tuple[str, int, bool]] = []
-        u, c = self.u, self.c
-        top = u.GetMenu(hwnd)
-        if not top:
-            return out
+    DOCK_IDS = (0xE81C, 0xE81D, 0xE81E)               # AFX_IDW_DOCKBAR_LEFT / RIGHT / BOTTOM (panneaux, pas les barres d'outils)
 
-        def walk(menu, depth: int) -> None:
-            for pos in range(max(0, u.GetMenuItemCount(menu))):
-                sub = u.GetSubMenu(menu, pos)
-                if sub and depth < 3:
-                    walk(sub, depth + 1)
-                    continue
-                buf = c.create_unicode_buffer(256)
-                u.GetMenuStringW(menu, pos, buf, 256, self.MF_BYPOSITION)
-                text = buf.value
-                if "\t" not in text:
-                    continue
-                hotkey = text.split("\t", 1)[1].strip().lower().replace(" ", "")
-                state = u.GetMenuState(menu, pos, self.MF_BYPOSITION)
-                out.append((hotkey, int(u.GetMenuItemID(menu, pos)), bool(state & self.MF_CHECKED)))
+    def _children(self, hwnd: int) -> list[int]:
+        out: list[int] = []
 
-        walk(top, 0)
+        def cb(h, _):
+            out.append(h)
+            return True
+
+        self.u.EnumChildWindows(hwnd, self.EnumProc(cb), 0)
         return out
 
-    def command(self, hwnd: int, cmd_id: int) -> None:
-        self.u.PostMessageW(hwnd, self.WM_COMMAND, cmd_id, 0)
-        time.sleep(0.5)
+    def _text(self, h: int) -> str:
+        buf = self.c.create_unicode_buffer(128)
+        self.u.GetWindowTextW(h, buf, 128)
+        return buf.value
+
+    def panels(self, hwnd: int) -> list[tuple[int, int, str]]:
+        u = self.u
+        out = []
+        for h in self._children(hwnd):
+            parent = u.GetParent(h)
+            if parent and u.GetDlgCtrlID(parent) in self.DOCK_IDS and u.IsWindowVisible(h):
+                out.append((h, int(u.GetDlgCtrlID(h)), self._text(h).split(":")[0].strip()))
+        return out
+
+    def hide_panel(self, hwnd: int, panel: int, ctrl_id: int) -> bool:
+        u = self.u
+        if ctrl_id:
+            u.PostMessageW(hwnd, self.WM_COMMAND, ctrl_id, 0)          # commande du panneau (comme le menu Affichage)
+            time.sleep(0.8)
+        if u.IsWindowVisible(panel):                                    # sinon : masqué directement, mise en page refaite
+            u.ShowWindow(panel, 0)
+            r = self.w.RECT()
+            u.GetClientRect(hwnd, self.c.byref(r))
+            u.SendMessageW(hwnd, 0x0005, 0, ((r.bottom & 0xFFFF) << 16) | (r.right & 0xFFFF))   # WM_SIZE → MFC RecalcLayout
+            time.sleep(0.3)
+        return not u.IsWindowVisible(panel)
 
     def maximize_chart(self, hwnd: int) -> bool:
         u, c = self.u, self.c
