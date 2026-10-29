@@ -318,3 +318,13 @@ def test_capital_insuffisant_notifie_une_fois_avec_son(cfg, db, tmp_path):
     mon.poll_status(now)
     asyncio.run(mon.poll_events())
     assert len(sent) == 2 and "CAPITAL SUFFISANT" in sent[1].text
+
+
+def test_env_example_healthcheck_en_commentaire():
+    """.env.example propose HEALTHCHECK_URL en commentaire : ignoré tant qu'on n'a pas retiré le #, lu ensuite."""
+    from pathlib import Path
+    txt = (Path(__file__).resolve().parent.parent / ".env.example").read_text(encoding="utf-8")
+    assert "# HEALTHCHECK_URL=https://" in txt
+    assert "HEALTHCHECK_URL" not in parse_env(txt)
+    actif = txt.replace("# HEALTHCHECK_URL=", "HEALTHCHECK_URL=")
+    assert parse_env(actif)["HEALTHCHECK_URL"].startswith("https://")

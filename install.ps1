@@ -216,10 +216,22 @@ $envTxt = [System.IO.File]::ReadAllText($envFile)
 if ($envTxt -notmatch '(?m)^HEALTHCHECK_URL=\S+') {
     Write-Host '  FACULTATIF - surveillance : crée un check gratuit sur healthchecks.io (période 1 min, délai de grâce 5 min)'
     Write-Host '  et colle son URL de ping (https://hc-ping.com/...). Tu seras prévenu si le VPS ou le bot s''arrête.'
-    $hc = Ask 'HEALTHCHECK_URL (Entrée = passer)'
+    $hc = ''
+    for ($i = 0; $i -lt 3; $i++) {
+        $hc = Ask 'HEALTHCHECK_URL (Entrée = passer)'
+        if (-not $hc -or $hc -match '^https://\S+$') { break }
+        Warn 'Format inattendu (attendu : https://hc-ping.com/...).'
+    }
     if ($hc -match '^https://\S+$') {
+        $envTxt = [regex]::Replace($envTxt, '(?m)^#\s*HEALTHCHECK_URL=[^\r\n]*(\r?\n)?', '')      # remplace la ligne en commentaire éventuelle
         [System.IO.File]::WriteAllText($envFile, $envTxt.TrimEnd() + "`r`nHEALTHCHECK_URL=$hc`r`n", $Utf8)
         Ok 'Surveillance externe enregistrée dans .env.'
+    } else {
+        if ($envTxt -notmatch '(?m)^#\s*HEALTHCHECK_URL=') {                                       # ligne prête à remplir à la main
+            $hint = "`r`n# Surveillance externe (facultatif) : retire le # devant la ligne suivante, colle l'URL de ping healthchecks.io, puis redémarre le bot.`r`n# HEALTHCHECK_URL=https://hc-ping.com/ton-identifiant`r`n"
+            [System.IO.File]::WriteAllText($envFile, $envTxt.TrimEnd() + "`r`n" + $hint, $Utf8)
+        }
+        Warn 'Surveillance externe non configurée : ligne HEALTHCHECK_URL laissée en commentaire dans C:\ScalpX\bot\.env (retire le # et colle l''URL, puis redémarre le bot).'
     }
 }
 $t = [System.IO.File]::ReadAllText($cfgFile)
