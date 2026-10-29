@@ -37,6 +37,8 @@ class Router:
         self._dep_msg: int | None = None
         self.building = False
         self.installing = False                 # installation d'une mise à jour en cours (copie des fichiers hors de la boucle)
+        self.build_pct = 0                      # avancement estimé de la compilation en cours
+        self._upd_after = ""                    # « Installer » touché pendant une compilation / un déploiement : installé ensuite
         self.awaiting_preset: tuple[str, str] | None = None   # (compte modèle, preset remplacé) : nom attendu (texte)
         self.awaiting_goal: str | None = None               # compte (ou ALL_ID) dont on attend l'objectif (message texte)
         self._dep_sel: set[str] = set()
@@ -954,8 +956,15 @@ class Router:
             return ""
         if sub not in ("go", "all"):
             return ""
-        if self.ctx.deploy.running or self.building:
-            return "Déploiement ou compilation en cours : réessaie après."
+        if self.ctx.deploy.running or self.building:   # mise en file : installée toute seule à la fin, l'utilisateur le voit
+            self._upd_after = sub
+            what = (f"une compilation de l'EA est en cours (≈ {self.build_pct} %)" if self.building
+                    else "un déploiement de l'EA est en cours")
+            log.info("mise à jour en file d'attente : %s", what)
+            if mid:
+                await self.sender.edit(self.chat_id, mid, f"⏳ <b>Mise à jour en file d'attente</b> : {what}.\n"
+                                       "Elle s'installera toute seule dès la fin ; la suite s'affichera ici.", None)
+            return ""
         if self.installing:                     # double appui sur « Installer » : une seule installation
             return "Installation déjà en cours…"
         self.installing = True
@@ -975,12 +984,26 @@ class Router:
         finally:
             self.installing = False
 
+    async def _upd_resume(self) -> None:
+        """Fin d'une compilation ou d'un déploiement : installe la mise à jour mise en file d'attente."""
+        if not self._upd_after or self.building or self.ctx.deploy.running:
+            return
+        sub, self._upd_after = self._upd_after, ""
+        log.info("installation de la mise à jour mise en file d'attente")
+        await self._upd_cb(["upd", sub])
+
+    async def _upd_step(self, mid, text: str) -> None:
+        log.info("mise à jour : %s", text)
+        if mid:
+            await self.sender.edit(self.chat_id, mid, text, None)
+
     async def _upd_install(self, mid) -> str:
         """Installe la mise à jour proposée. Copies et relance hors de la boucle du bot : le tableau de bord et les autres
         tâches continuent pendant l'installation (mêmes étapes, même ordre qu'avant)."""
         from core import update as upd
         from pathlib import Path as _P
         bot_root = _P(__file__).resolve().parent.parent
+        await self._upd_step(mid, "⏳ <b>Installation</b> : vérification du paquet…")
         plan = await asyncio.to_thread(upd.plan_update, self.ctx.cfg, bot_root)
         if plan is None or plan.empty:
             if mid:
@@ -991,14 +1014,18 @@ class Router:
                  len(plan.bot_files) + len(plan.bot_remove), len(plan.ea_files))
         try:
             if plan.ea_files:
+                await self._upd_step(mid, f"⏳ <b>Installation</b> : copie de l'EA dans BASE ({len(plan.ea_files)} fichier(s))…")
                 ver = await asyncio.to_thread(upd.install_ea, self.ctx.cfg, plan)
                 out.append(f"📈 EA copié dans BASE" + (f" — compilation v{esc(ver)} dans quelques secondes" if ver else " (.set seulement)"))
             if plan.bot_files or plan.bot_remove:
+                await self._upd_step(mid, "⏳ <b>Installation</b> : " + ("\n".join(out) + "\n" if out else "")
+                                     + f"copie du bot ({len(plan.bot_files) + len(plan.bot_remove)} fichier(s))…")
                 await asyncio.to_thread(upd.install_bot, plan, bot_root)
                 if plan.requirements_changed:
+                    await self._upd_step(mid, "⏳ <b>Installation</b> : bibliothèques Python (1 à 3 min)…")
                     ok, err = await asyncio.get_running_loop().run_in_executor(None, upd.pip_install, bot_root)
                     out.append("📦 Bibliothèques " + ("installées" if ok else "NON installées : " + esc(err)))
-                out.append("🤖 Bot mis à jour : redémarrage…")
+                out.append("🤖 Bot mis à jour : redémarrage, il revient dans ≈ 30 s (message « 🤖 Bot … démarré »).")
         except Exception as exc:
             log.exception("mise à jour")
             out.append(f"❌ Erreur : {esc(str(exc))}")
@@ -1092,6 +1119,7 @@ class Router:
             late = el > expected * 1.15
             if mid and (reached > shown or (late and not slow)):
                 shown, slow = reached, late
+                self.build_pct = reached
                 note = f" · plus long que d'habitude ({int(el)} s)" if late else f" · {int(el)} s sur ≈ {int(expected)} s"
                 log.info("compilation : ≈ %d %% (%d s)", reached, el)
                 await self.sender.edit(self.chat_id, mid, f"{head}\n{render.bar(reached / 100, 10)} ≈ {reached} %{note}", None)
@@ -1101,6 +1129,10 @@ class Router:
             self.ctx.db.meta_set("compile_s", f"{(expected + dt) / 2 if self.ctx.db.meta_get('compile_s') else dt:.0f}")
         log.info("compilation terminée en %d s", dt)
         return res, dt
+
+    async def _after_busy(self) -> None:
+        if self._upd_after:
+            self._bg(self._upd_resume())
 
     async def run_manual_build(self) -> None:
         """Bouton 🔨 Compiler l'EA : compile BASE tel quel, puis propose le déploiement si le .ex5 a changé."""
@@ -1121,6 +1153,8 @@ class Router:
                     await self.on_new_build(nb)
         finally:
             self.building = False
+            self.build_pct = 0
+            await self._after_busy()
 
     async def run_auto_build(self, req) -> None:
         """version.txt modifié : version écrite dans les sources, compilation dans BASE, puis proposition de déploiement."""
@@ -1145,6 +1179,8 @@ class Router:
                     await self.on_new_build(nb)
         finally:
             self.building = False
+            self.build_pct = 0
+            await self._after_busy()
 
     async def on_new_build(self, nb) -> None:
         """Nouvelle compilation détectée dans BASE : proposer de la déployer sur les comptes existants."""
@@ -1274,6 +1310,7 @@ class Router:
             text += "\n❌ Échec : ancien .ex5 restauré, déploiement stoppé."
         await self.sender.edit(self.chat_id, mid, text, None)
         detail = "\n".join(f"{view[o.iid][0]} {labels.get(o.iid, o.iid)} : {o.message or o.status}" for o in outcomes)
+        await self._after_busy()
         await self.notifier.emit(Notice("-", "Déploiement", "DEPLOIEMENT", f"🔄 Déploiement terminé : ✅ {ok} · ⏸ {len(wait)} · ❌ {len(bad)}"
                                         + (f"\n{detail}" if detail else ""), 2 if bad else 1))
 

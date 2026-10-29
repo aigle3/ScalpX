@@ -1262,3 +1262,22 @@ async def test_compilation_progression_estimee(svc):
     shown = [t for m, t in sender.edits if m == mid]
     assert res.ok and [x for x in ("≈ 25 %", "≈ 50 %", "≈ 75 %", "≈ 90 %") if any(x in t for t in shown)] == ["≈ 25 %", "≈ 50 %", "≈ 75 %", "≈ 90 %"]
     assert 9 <= dt < 12 and 9 <= float(ctx.db.meta_get("compile_s")) <= 11
+
+
+@pytest.mark.asyncio
+async def test_installer_pendant_une_compilation_mise_en_file(svc, monkeypatch):
+    """« Installer » pendant une compilation : message clair, puis installation automatique à la fin."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    router._upd_msg = await sender.send(1, "⬆ Mise à jour")
+    router.building, router.build_pct = True, 50
+    await router._upd_cb(["upd", "go", "x"])
+    assert "file d'attente" in sender.msgs[router._upd_msg][0] and "≈ 50 %" in sender.msgs[router._upd_msg][0]
+    done = []
+
+    async def fake_install(mid):
+        done.append(mid)
+        return ""
+    monkeypatch.setattr(router, "_upd_install", fake_install)
+    router.building = False
+    await router._after_busy()
+    assert await _until(lambda: done == [router._upd_msg]) and router._upd_after == ""
