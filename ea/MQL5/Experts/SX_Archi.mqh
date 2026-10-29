@@ -764,6 +764,7 @@ void StatutWrite()
    j += ",\"positions\":" + IntegerToString(st_posCount);
    j += ",\"ordres\":" + IntegerToString(st_pendCount);
    j += ",\"pl_jour\":" + NumS(dayPl);
+   j += ",\"pl_jour_realise\":" + NumS(g_dayStartBal > 0 ? bal - g_dayStartBal : 0.0);   // trades fermés du jour, sans le latent
    j += ",\"etat\":\"" + StateName(g_state) + "\"";
    j += ",\"phase_cloture500\":" + BoolS(g_phase500);
    j += ",\"maintenance\":" + BoolS(g_maint);

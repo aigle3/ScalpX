@@ -27,7 +27,7 @@ def build_report(ctx: Ctx, since: float, now: float | None = None, title: str = 
         first = rows[0]["balance"] if rows else v.st.solde
         delta = v.st.solde - first
         lines.append(f"{v.health.icon} {esc(v.inst.label)} : solde {money(v.st.solde, v.st.devise)} "
-                     f"({money(delta, '', True)}) · jour {money(v.st.pl_jour, '', True)} · cycle {v.st.cycle}")
+                     f"({money(delta, '', True)}) · jour {money(v.st.day_realized(), '', True)} · cycle {v.st.cycle}")
     cycles = db.cycles_since(since_i)
     wd = db.withdrawals_since(since_i)
     lines += ["", "<b>Cycles et retraits</b>",

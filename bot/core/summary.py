@@ -95,7 +95,7 @@ def totals(views: list[AccountView]) -> Totals:
             t.balance += v.st.solde
             t.equity += v.st.equity
             t.pl_latent += v.st.pl_latent
-            t.pl_jour += v.st.pl_jour
+            t.pl_jour += v.st.day_realized()            # « jour » = réalisé ; le latent a sa propre ligne
             t.to_withdraw += v.to_withdraw
             if v.st.devise:
                 curs.add(v.st.devise)

@@ -48,7 +48,8 @@ class Statut(BaseModel):
     flottant_ea: float = 0.0
     positions: int = 0
     ordres: int = 0
-    pl_jour: float = 0.0
+    pl_jour: float = 0.0                # equity − solde du début de journée (réalisé + latent)
+    pl_jour_realise: float | None = None   # réalisé du jour seul (EA 6.2.2+)
     etat: str = "ACTIF"                 # ACTIF | ARRET_500 | PAUSE
     phase_cloture500: bool = False
     maintenance: bool = False
@@ -86,6 +87,15 @@ class Statut(BaseModel):
     def age_s(self, now: float | None = None) -> float:
         """Âge du heartbeat (secondes) d'après son horodatage GMT."""
         return (now if now is not None else time.time()) - self.ts if self.ts else 1e9
+
+    def day_realized(self) -> float:
+        """Résultat du jour SANS le latent (trades fermés, hors dépôts/retraits). EA plus ancien : déduit de
+        pl_jour (equity − solde de départ) en retirant equity − solde."""
+        if self.pl_jour_realise is not None:
+            return self.pl_jour_realise
+        if not self.pl_jour:
+            return 0.0
+        return self.pl_jour - (self.equity - self.solde)
 
     def progress500(self) -> float:
         """Progression vers le seuil d'arrêt sur solde + flottant EA (0..1+)."""

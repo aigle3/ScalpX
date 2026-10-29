@@ -380,3 +380,11 @@ def test_filtre_des_secrets_dans_les_traces():
     out = logging.Formatter().format(rec)
     assert "ABCDEFGHIJ" not in out and "SECRET123" not in out and "uuid-1234" not in out and "abc" not in out.split("Password=")[1][:3]
     assert "<token>" in out and "Traceback" in out and "RuntimeError" in out
+
+
+def test_resultat_du_jour_sans_le_latent():
+    # EA 6.2.2+ : champ envoyé par l'EA
+    assert Statut(id="1_a", solde=500, equity=450, pl_latent=-50, pl_jour=-60, pl_jour_realise=-10).day_realized() == -10
+    # EA plus ancien : réalisé = (equity − départ) − (equity − solde)
+    assert Statut(id="1_a", solde=500, equity=450, pl_latent=-50, pl_jour=-60).day_realized() == pytest.approx(-10)
+    assert Statut(id="1_a", solde=500, equity=450, pl_jour=0).day_realized() == 0.0      # journée pas encore initialisée

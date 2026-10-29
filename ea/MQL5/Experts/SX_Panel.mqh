@@ -395,7 +395,7 @@ void PanelUpdate()
       //--- Compte
       double dd = CurrentDDPct();
       color ddc = (dd >= PDbl(P_DDTHR)) ? PC_RED : ((dd >= PDbl(P_DDTHR) * 0.7) ? PC_ORANGE : PC_TEXT);
-      double dayPl = (g_dayStartBal > 0) ? (eq - g_dayStartBal) : 0.0;
+      double dayPl = (g_dayStartBal > 0) ? (bal - g_dayStartBal) : 0.0;   // réalisé du jour : le flottant est sur la ligne au-dessus
       double ml = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
       PText("a_t", xl, y, "COMPTE", PC_DIM, 8);
       PText("a_tr", xr, y, g_aid, PC_DIM, 8, 1);

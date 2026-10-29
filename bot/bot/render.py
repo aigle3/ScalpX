@@ -231,7 +231,7 @@ def account_card(v: AccountView, withdrawn: float, closures: int, now: float | N
     cur = st.devise
     lines += [
         f"💰 Solde {money(st.solde, cur)} · Equity {money(st.equity, cur)}",
-        f"📊 Flottant EA {money(st.flottant_ea, cur, True)} · Jour {money(st.pl_jour, cur, True)}",
+        f"📊 Flottant EA {money(st.flottant_ea, cur, True)} · Jour {money(st.day_realized(), cur, True)}",
         f"🎯 Vers {st.seuil_arret:.0f} : {bar(st.progress500(), 10)} {st.progress500() * 100:.0f}% "
         f"(solde+flottant {money(st.solde_plus_flottant_ea, cur)})",
         f"📌 {st.positions} position(s) · {st.ordres} ordre(s) · cycle {st.cycle}",
