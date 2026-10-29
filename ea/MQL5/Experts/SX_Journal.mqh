@@ -404,7 +404,7 @@ string FilterJournalText()
 void DayDDTrack()
 {
    double eq = AccountInfoDouble(ACCOUNT_EQUITY);
-   if(g_dayPeakEq <= 0 || eq > g_dayPeakEq) g_dayPeakEq = eq;
+   if(g_dayPeakEq <= 0 || eq > g_dayPeakEq) PeakRaise(PK_DAY, g_dayPeakEq, eq);   // [ARCHI] voir PeakAfterFlow
    double dd = (g_dayPeakEq - eq) / g_dayPeakEq * 100.0;
    if(dd > g_dayMaxDD) g_dayMaxDD = dd;
 }

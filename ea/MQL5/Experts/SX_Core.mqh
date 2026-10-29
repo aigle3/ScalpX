@@ -3,7 +3,7 @@
 //| Noyau : variables globales, registre de paramètres (tous les     |
 //| réglages sont modifiables à chaud), persistance, presets.        |
 //+------------------------------------------------------------------+
-#define SX_VERSION   "5.6.1"
+#define SX_VERSION   "5.6.2"
 #define SX_PREFIX    "SX4_"
 #define SX_MAXQ      40
 
@@ -150,6 +150,36 @@ double   g_peakEq     = 0;
 double   g_dayPeakEq  = 0;           // plus haut d'equity DE LA JOURNÉE (drawdown du jour)
 double   g_dayStartBal = 0;          // solde au début de la journée (base du % du rapport journalier)
 bool     g_ddNotified = false;
+// [ARCHI] début : plus hauts d'equity et dépôts. Un dépôt fait monter l'equity (nouveau plus haut) AVANT que le deal
+// de dépôt ne soit traité ; sans correction, le dépôt était compté deux fois dans le plus haut (faux drawdown).
+#define PK_ALL  0      // g_peakEq (drawdown global)
+#define PK_DAY  1      // g_dayPeakEq (drawdown du jour)
+#define PK_GOAL 2      // g_goalPeak (drawdown de l'objectif)
+#define PK_WIN_MS 120000
+double   g_pkPrev[3] = { 0, 0, 0 };   // plus haut AVANT la première hausse de la fenêtre
+ulong    g_pkMs[3]   = { 0, 0, 0 };   // début de la fenêtre (ms)
+
+// Nouveau plus haut : mémorise la valeur d'avant (une fois par fenêtre de 2 min)
+void PeakRaise(int k, double &peak, double eq)
+{
+   if(eq <= peak && peak > 0) return;
+   ulong now = GetTickCount64();
+   if(g_pkMs[k] == 0 || now - g_pkMs[k] > PK_WIN_MS) { g_pkPrev[k] = peak; g_pkMs[k] = now; }
+   peak = eq;
+}
+
+// Plus haut après un dépôt / retrait : si l'equity a déjà fait monter le plus haut (dépôt vu avant son deal),
+// on repart de la valeur d'avant cette hausse ; sinon on décale simplement du montant.
+double PeakAfterFlow(int k, double peak, double amt)
+{
+   if(amt > 0 && g_pkMs[k] > 0 && GetTickCount64() - g_pkMs[k] <= PK_WIN_MS)
+   {
+      g_pkMs[k] = 0;
+      return MathMax(g_pkPrev[k] + amt, peak);
+   }
+   return peak + amt;
+}
+// [ARCHI] fin
 double   g_sesStartBal= 0;
 datetime g_sesStart   = 0;
 int      g_sesWins = 0, g_sesLosses = 0, g_sesGoals = 0;

@@ -234,7 +234,7 @@ void GoalTick()
    if(!g_goalActive || g_closing) return;
    double eq  = AccountInfoDouble(ACCOUNT_EQUITY);
    double bal = AccountInfoDouble(ACCOUNT_BALANCE);
-   if(eq > g_goalPeak) g_goalPeak = eq;
+   PeakRaise(PK_GOAL, g_goalPeak, eq);      // [ARCHI] voir PeakAfterFlow (dépôts)
    if(g_goalPeak > 0)
    {
       double dd = (g_goalPeak - eq) / g_goalPeak * 100.0;
@@ -282,7 +282,7 @@ void RiskTick()
    if(g_closing) return;
    double eq  = AccountInfoDouble(ACCOUNT_EQUITY);
    double bal = AccountInfoDouble(ACCOUNT_BALANCE);
-   if(eq > g_peakEq) { g_peakEq = eq; g_ddNotified = false; }
+   if(eq > g_peakEq) { PeakRaise(PK_ALL, g_peakEq, eq); g_ddNotified = false; }   // [ARCHI] voir PeakAfterFlow
 
    //--- Drawdown (equity)
    double thr = PDbl(P_DDTHR);
@@ -350,13 +350,13 @@ void RiskTick()
 //+------------------------------------------------------------------+
 void AdjustForCashFlow(double amt)
 {
-   g_peakEq += amt;
-   g_dayPeakEq += amt;
+   g_peakEq    = PeakAfterFlow(PK_ALL, g_peakEq, amt);       // [ARCHI] dépôt non compté deux fois
+   g_dayPeakEq = PeakAfterFlow(PK_DAY, g_dayPeakEq, amt);
    g_dayStartBal += amt;                 // un dépôt / retrait ne compte pas comme gain du jour
    g_sesStartBal += amt;
    if(g_goalActive)
    {
-      g_goalInit += amt; g_goalTarget += amt; g_goalPeak += amt;
+      g_goalInit += amt; g_goalTarget += amt; g_goalPeak = PeakAfterFlow(PK_GOAL, g_goalPeak, amt);
       GoalSave();
    }
    // [ARCHI] début : un seul événement, avec son (prio 1)
