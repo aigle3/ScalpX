@@ -41,3 +41,17 @@ def test_options_et_fenetre_introuvable():
     assert api.calls == [("min",)] and res["minimized"]
     res = arrange(FakeWin(), lambda: {7}, WindowOptions(timeout_s=0), sleep=lambda s: None)
     assert res == {"window": False, "hidden": [], "chart": False, "minimized": False}
+
+
+
+def test_menu_affichage_decoche_tout_sauf_le_graphique():
+    class MenuWin(FakeWin):
+        def view_hide(self, hwnd):
+            self.calls.append(("menu",))
+            return ["market watch", "navigator", "toolbox", "standard"]
+
+        def panels(self, hwnd):
+            return []
+    api = MenuWin()
+    res = arrange(api, lambda: {42}, WindowOptions(settle_s=0), sleep=lambda s: None)
+    assert res["hidden"] == ["market watch", "navigator", "toolbox", "standard"] and api.calls[0] == ("menu",)
