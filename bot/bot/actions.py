@@ -20,6 +20,11 @@ CARD_CMDS = [("📌 Positions", "POSITIONS"), ("⚙️ Params", "PARAMS"), ("�
              ("📰 News", "NEWS"), ("📒 Journal", "JOURNAL"), ("📝 Rapport", "RAPPORT"), ("🎯 Objectif", "OBJECTIF"),
              ("📸 Capture", "CAPTURE"), ("📈 Courbe", "COURBE"), ("📡 Statut", "STATUT"), ("🏓 Ping", "PING")]
 
+# Consultations : jamais écrites dans le journal des actions (qui ne garde que ce qui change quelque chose)
+READ_ONLY_CMDS = {"POSITIONS", "PARAMS", "FILTRES", "RISQUE", "NEWS", "JOURNAL", "RAPPORT", "CAPTURE", "COURBE", "STATUT",
+                  "PING", "PRESETS"}
+
+
 @dataclass
 class Ctx:
     cfg: Config
@@ -50,22 +55,38 @@ def target(ctx: "Ctx", iid: str):
 
 
 async def send_cmd(ctx: Ctx, inst: Instance, cmd: str, args: list[str] | None = None) -> CmdResult:
-    """Envoie une commande à l'EA et attend l'ack (⏳ → ✅/❌)."""
-    return await ctx.cmdq.send_and_wait(inst.id, cmd, args or [], timeout=ctx.cfg.timing.ack_timeout_s)
+    """Envoie une commande à l'EA et attend l'ack (⏳ → ✅/❌). Les commandes qui changent quelque chose sont
+    inscrites au journal des actions (🛠 Système)."""
+    r = await ctx.cmdq.send_and_wait(inst.id, cmd, args or [], timeout=ctx.cfg.timing.ack_timeout_s)
+    if cmd.upper() not in READ_ONLY_CMDS:
+        journal(ctx, inst, " ".join([cmd.upper(), *[str(a) for a in (args or [])]]), r.ok, r.message)
+    return r
+
+
+def journal(ctx: Ctx, inst: Instance, text: str, ok: bool, result: str = "") -> None:
+    """Inscrit une action demandée depuis Telegram (jamais bloquant : une erreur de base n'empêche pas l'action)."""
+    try:
+        ctx.db.add_action(inst.id, text, ok, " ".join(result.split()))
+    except Exception:                                   # noqa: BLE001
+        pass
 
 
 async def action_start(ctx: Ctx, inst: Instance) -> str:
     if not ctx.mgr.folder_ok(inst):
+        journal(ctx, inst, "TERMINAL lancer", False, "dossier introuvable")
         return "❌ Dossier de l'instance introuvable."
     if ctx.mgr.is_running(inst):
         ctx.db.set_desired(inst.id, DEMARRE)
         return "ℹ️ Déjà lancé."
     ctx.mgr.start(inst)
+    journal(ctx, inst, "TERMINAL lancer", True)
     return "🚀 Terminal lancé."
 
 
 async def action_stop(ctx: Ctx, inst: Instance, force: bool = False) -> str:
     r = await ctx.mgr.stop(inst, force=force)
+    if r != "deja_arrete":
+        journal(ctx, inst, "TERMINAL arrêter" + (" (forcé)" if force else ""), r != "attente_cloture", r)
     return {"propre": "🛑 Terminal fermé proprement (positions conservées chez le broker).",
             "kill": "🛑 Terminal arrêté (kill après délai).",
             "deja_arrete": "ℹ️ Déjà arrêté.",
@@ -74,6 +95,7 @@ async def action_stop(ctx: Ctx, inst: Instance, force: bool = False) -> str:
 
 async def action_restart(ctx: Ctx, inst: Instance, force: bool = False) -> str:
     r = await ctx.mgr.restart(inst, force=force)
+    journal(ctx, inst, "TERMINAL redémarrer" + (" (forcé)" if force else ""), r == "relance", r)
     return "🔄 Terminal relancé." if r == "relance" else "⏳ Clôture à 500 en cours : redémarrage reporté."
 
 
@@ -86,4 +108,5 @@ async def action_delete(ctx: Ctx, inst: Instance) -> str:
         return f"❌ Archivage impossible : {exc}"
     ctx.db.archive(inst.id)
     ctx.cmdq.purge(inst.id)
+    journal(ctx, inst, "COMPTE supprimé (archivé)", True)
     return f"🗑 Compte archivé{f' ({dst.name})' if dst else ''}."

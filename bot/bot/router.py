@@ -156,6 +156,10 @@ class Router:
             await self.sender.send(self.chat_id, f"📜 <b>{name}</b>\n" + (f"<pre>{esc(txt)}</pre>" if txt else "<i>vide ou absent</i>"),
                                    [[("✖ Fermer", "d:close")]], True)
             return ""
+        elif sub == "jra":                                  # journal des actions demandées depuis Telegram
+            from .system import actions_text
+            await self.sender.send(self.chat_id, actions_text(self.ctx), [[("✖ Fermer", "d:close")]], True)
+            return ""
         elif sub == "close" and message_id:
             await self.sender.delete(self.chat_id, message_id)
             return ""

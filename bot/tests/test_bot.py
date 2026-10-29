@@ -314,6 +314,45 @@ async def test_alerte_watchdog_enregistree_comme_incident(svc):
     assert "relancé" in sender.sent[-1][1]
 
 
+# ------------------------------------------------------------------ journal des actions
+@pytest.mark.asyncio
+async def test_journal_des_actions_commandes_et_regroupement(svc):
+    from bot import actions as act
+    from bot.system import actions_text
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    a = seed(ctx_stack(svc), 21, "Demo-Server 1")
+    b = seed(ctx_stack(svc), 22, "Demo-Server 1")
+    ea.start()
+    try:
+        await act.send_cmd(ctx, a, "PARAMS")                                      # consultation : pas dans le journal
+        assert ctx.db.actions_recent() == []
+        await act.send_cmd(ctx, a, "SET", ["lot", "0.02"])
+        await act.send_cmd(ctx, b, "SET", ["lot", "0.02"])                        # même action, autre compte : une seule ligne
+        await act.send_cmd(ctx, a, "PAUSE", ["2h"])
+    finally:
+        await ea.stop()
+    rows = ctx.db.actions_recent()
+    assert [r["text"] for r in rows] == ["PAUSE 2h", "SET lot 0.02", "SET lot 0.02"] and all(r["ok"] for r in rows)
+    txt = actions_text(ctx)
+    assert "SET lot 0.02 · 2 comptes" in txt and "PAUSE 2h" in txt and txt.count("SET lot") == 1
+    await act.action_restart(ctx, a)                                              # actions de terminal aussi
+    assert ctx.db.actions_recent(1)[0]["text"].startswith("TERMINAL redémarrer")
+    sender.sent.clear()
+    assert await router.on_callback("d:jra") == ""                                # bouton du menu Système
+    assert "Journal des actions" in sender.sent[-1][1] and "SET lot" in sender.sent[-1][1]
+
+
+def test_journal_des_actions_vide_et_purge(db):
+    from bot.system import actions_text
+    import types
+    ctx = types.SimpleNamespace(db=db)
+    assert "Aucune action" in actions_text(ctx)
+    db.add_action("1_x", "SET a 1", True)
+    db._exec("UPDATE actions SET ts=ts-40*86400")                                 # plus vieux que 30 jours
+    db.add_action("1_x", "SET b 2", False, "refusé")
+    assert [r["text"] for r in db.actions_recent()] == ["SET b 2"]
+
+
 # ------------------------------------------------------------------ assistant
 @pytest.mark.asyncio
 async def test_assistant_mot_de_passe_supprime_avant_tout_et_jamais_affiche(svc):

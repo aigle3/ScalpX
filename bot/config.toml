@@ -27,6 +27,7 @@ ack_timeout_s       = 20
 close500_wait_max_s = 300    # attente max d'une clôture à 500 avant un arrêt
 maintenance_wait_s  = 600    # déploiement : attente de 0 position
 restarts_per_hour   = 3      # watchdog : relances max par heure et par compte
+muet_restart_s      = 300    # terminal lancé mais EA muet depuis ce délai (s) : relance forcée (0 = jamais)
 watchdog_interval_s = 15
 events_interval_s   = 3
 status_interval_s   = 5

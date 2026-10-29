@@ -197,6 +197,38 @@ async def test_watchdog_terminal_muet_alerte(stack):
     assert any(k == "MUET" for _, k, _, _ in al.items)
 
 
+@pytest.mark.asyncio
+async def test_watchdog_muet_relance_forcee_puis_limite(stack):
+    cfg, db, procs, status, cmdq, mgr, ea = stack
+    inst = seed(stack)
+    al = Alerts()
+    wd = Watchdog(cfg, db, mgr, status, al)
+    wd._muet_since[inst.id] = time.time() - 100                       # muet depuis 100 s : alerte pas encore, relance non plus
+    await wd.tick()
+    assert procs.kills == 0 and not any(k in ("MUET", "RELANCE") for _, k, _, _ in al.items)
+    for n in range(1, 4):                                              # muet depuis 6 min : terminal tué puis relancé
+        wd._muet_since[inst.id] = time.time() - 360
+        await wd.tick()
+        assert procs.kills == n and mgr.is_running(inst)
+        assert db.get(inst.id).desired_state == DEMARRE
+    assert [k for _, k, _, _ in al.items].count("RELANCE") == 3
+    wd._muet_since[inst.id] = time.time() - 360
+    await wd.tick(); await wd.tick()                                   # 4e : limite de 3 relances par heure
+    assert procs.kills == 3
+    assert [k for _, k, _, _ in al.items].count("LIMITE") == 1         # signalée une seule fois
+
+
+@pytest.mark.asyncio
+async def test_watchdog_muet_relance_desactivable(stack):
+    cfg, db, procs, status, cmdq, mgr, ea = stack
+    cfg.timing.muet_restart_s = 0
+    inst = seed(stack)
+    wd = Watchdog(cfg, db, mgr, status, Alerts())
+    wd._muet_since[inst.id] = time.time() - 3600
+    await wd.tick()
+    assert procs.kills == 0 and mgr.is_running(inst)
+
+
 # ---------------------------------------------------------------- gestion des terminaux
 @pytest.mark.asyncio
 async def test_arret_propre_puis_kill(stack):

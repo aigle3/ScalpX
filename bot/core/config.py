@@ -50,6 +50,7 @@ class Timing(BaseModel):
     maintenance_wait_s: int = 600          # attente 0 position avant « en attente »
     deploy_retry_min: int = 15
     restarts_per_hour: int = 3
+    muet_restart_s: int = 300              # terminal lancé mais EA muet (aucun heartbeat) depuis ce délai : relance forcée (0 = jamais)
     watchdog_interval_s: int = 15
     events_interval_s: int = 3
     status_interval_s: int = 5

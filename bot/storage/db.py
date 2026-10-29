@@ -45,6 +45,9 @@ CREATE TABLE IF NOT EXISTS deployments(
   to_version TEXT, status TEXT, targets TEXT, report TEXT, pending TEXT);
 CREATE TABLE IF NOT EXISTS incidents(
   iid TEXT, ts INTEGER, kind TEXT, text TEXT);
+CREATE TABLE IF NOT EXISTS actions(
+  ts INTEGER, iid TEXT, ok INTEGER, text TEXT, result TEXT);
+CREATE INDEX IF NOT EXISTS ix_act ON actions(ts);
 """
 
 
@@ -223,6 +226,16 @@ class Database:
 
     def incidents_since(self, since: int) -> list[sqlite3.Row]:
         return self._all("SELECT * FROM incidents WHERE ts>=? ORDER BY ts", (since,))
+
+    # ---- journal des actions demandées depuis Telegram (30 jours conservés)
+    def add_action(self, iid: str, text: str, ok: bool, result: str = "") -> None:
+        now = int(time.time())
+        self._exec("INSERT INTO actions VALUES(?,?,?,?,?)", (now, iid, 1 if ok else 0, text[:120], result[:200]))
+        self._exec("DELETE FROM actions WHERE ts<?", (now - 30 * 86400,))
+
+    def actions_recent(self, limit: int = 100) -> list[sqlite3.Row]:
+        """Les plus récentes d'abord."""
+        return self._all("SELECT * FROM actions ORDER BY ts DESC, rowid DESC LIMIT ?", (limit,))
 
     # ---- déploiements
     def start_deployment(self, from_v: str, to_v: str, targets: list[str]) -> int:

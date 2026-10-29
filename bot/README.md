@@ -71,6 +71,8 @@ Voir `LISEZMOI.txt` à la racine du dépôt : `INSTALL.bat` installe tout (BASE 
 - **Surveillance externe** : `HEALTHCHECK_URL` (.env, ex. healthchecks.io) reçoit un ping par minute ; s'il cesse, le service prévient.
 - **Sauvegarde** de l'historique (`scalpx.db`) chaque nuit dans `%OneDrive%\ScalpX\sauvegardes` (14 conservées).
 - **Watchdog** : relance les terminaux DEMARRE disparus (3 fois par heure max, puis alerte) ; un arrêt volontaire n'est jamais relancé.
+  Terminal vivant mais **EA muet** (plus de heartbeat) depuis `muet_restart_s` (300 s par défaut, 0 = jamais) : arrêt forcé puis relance, avec la même limite de 3 relances par heure (puis alerte « je n'insiste plus »). Les positions restent chez le broker et l'EA reprend dès son retour.
+- **🧾 Journal des actions** (🛠 Système) : tout ce qui est demandé depuis Telegram et change quelque chose (réglages, pause, objectif, fermeture, lancer/arrêter/redémarrer/supprimer un terminal) avec l'heure, le compte et le résultat ; la même action sur plusieurs comptes tient sur une ligne ; 30 jours conservés. Les simples consultations n'y figurent pas.
 
 ## Mises à jour
 

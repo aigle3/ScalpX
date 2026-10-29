@@ -30,6 +30,34 @@ def tail(path: Path, n: int = 25, max_chars: int = 3500) -> str:
     return out[-max_chars:]
 
 
+def actions_text(ctx: Ctx, limit: int = 25) -> str:
+    """Journal des actions demandées depuis Telegram (30 jours conservés), les plus récentes d'abord.
+    La même action envoyée à plusieurs comptes à quelques secondes d'intervalle ne fait qu'une ligne."""
+    groups: list[dict] = []
+    for r in ctx.db.actions_recent(limit * 8):
+        inst = ctx.db.get(r["iid"])
+        who = inst.label if inst else str(r["iid"])
+        g = groups[-1] if groups else None
+        if g and g["text"] == r["text"] and abs(g["ts"] - r["ts"]) <= 15:
+            g["who"].append(who)
+            g["ok"] += 1 if r["ok"] else 0
+            continue
+        if len(groups) >= limit:
+            break
+        groups.append({"ts": r["ts"], "text": r["text"], "who": [who], "ok": 1 if r["ok"] else 0, "result": r["result"]})
+    if not groups:
+        return "🧾 <b>Journal des actions</b>\n\n<i>Aucune action enregistrée.</i>"
+    lines = []
+    for g in groups:
+        n = len(g["who"])
+        icon = "✅" if g["ok"] == n else ("⚠️" if g["ok"] else "❌")
+        target = g["who"][0] if n == 1 else f"{n} comptes"
+        extra = "" if g["ok"] == n or n == 1 else f" ({n - g['ok']} échec(s))"
+        tail_ = f" — {g['result'][:50]}" if n == 1 and not g["ok"] and g["result"] else ""
+        lines.append(f"{_fmt_ts(g['ts'])} {icon} {g['text']} · {target}{extra}{tail_}")
+    return "🧾 <b>Journal des actions</b> (30 jours)\n<pre>" + esc("\n".join(lines)) + "</pre>"
+
+
 def system_text(ctx: Ctx, vps: dict[str, float]) -> str:
     cfg, db = ctx.cfg, ctx.db
     now = time.time()
@@ -97,7 +125,7 @@ def system_kb(pending: bool, previous: str = "") -> Keyboard:
     return extra + [
         [(("🔔 " if pending else "") + "⬆ Mises à jour", "d:upd"), ("🔨 Compiler l'EA", "d:bld")],
         [("📜 Journaux", "d:logs"), ("🪟 Réduire les terminaux", "d:win")],
-        [("🏓 Ping", "d:png")],
+        [("🏓 Ping", "d:png"), ("🧾 Journal des actions", "d:jra")],
         [("🔄 Redémarrer le bot", "d:rst"), ("🔃", "d:sys")],
         [("⬅ Accueil", "d:home")],
     ]
