@@ -513,6 +513,24 @@ class Router:
     def _running(self) -> list:
         return [i for i in self.ctx.db.list() if self.ctx.mgr.is_running(i)]
 
+    async def filters_alerts_off(self) -> None:
+        """2.15.0, une seule fois par compte : coupe les alertes « filtres OK / séries suspendues » (n_filters), redondantes avec
+        le tableau de bord. Fait aussi dans le preset ⭐ actif. Réactivées ensuite à la main : respecté (jamais recoupées)."""
+        store = self.dash.store
+        if store.active and not self.ctx.db.meta_get("nfilters_off_preset"):
+            if store.presets[store.active].get("n_filters") not in (None, "0"):
+                store.set_value(store.active, "n_filters", "0")
+                self.sync_base_set()
+            self.ctx.db.meta_set("nfilters_off_preset", "1")
+        todo = [i for i in self._running() if not self.ctx.db.meta_get(f"nfilters_off_{i.id}")]
+        if not todo:
+            return
+        res = await asyncio.gather(*[act.send_cmd(self.ctx, i, "SET", ["n_filters", "0"]) for i in todo])
+        for i, r in zip(todo, res):
+            if "Appliqué" in (r.message or ""):
+                self.ctx.db.meta_set(f"nfilters_off_{i.id}", "1")
+                log.info("alertes des filtres coupées sur %s", i.label)
+
     async def _preset_cb(self, p: list[str]) -> str:
         """s:l liste · s:o:<P> preset · s:new[:<P>] modèle · s:src:<compte>[:<P>] · s:ap:<P> appliquer · s:del:<P> · s:chk."""
         store, dash = self.dash.store, self.dash
@@ -1169,8 +1187,9 @@ class Router:
         last = [0.0]
 
         async def cb(view):
-            if time.time() - last[0] < 1.5:                      # limite le rythme d'édition (le rapport final corrige tout)
-                return
+            wait = 1.5 - (time.time() - last[0])                # rythme d'édition limité, mais aucune étape n'est perdue
+            if wait > 0:
+                await asyncio.sleep(wait)
             last[0] = time.time()
             await self.sender.edit(self.chat_id, mid, render.deploy_view(view, labels), stop_kb)
 
@@ -1185,7 +1204,9 @@ class Router:
         if bad:
             text += "\n❌ Échec : ancien .ex5 restauré, déploiement stoppé."
         await self.sender.edit(self.chat_id, mid, text, None)
-        await self.notifier.emit(Notice("-", "Déploiement", "DEPLOIEMENT", f"🔄 Déploiement terminé : ✅ {ok} · ⏸ {len(wait)} · ❌ {len(bad)}", 2 if bad else 1))
+        detail = "\n".join(f"{view[o.iid][0]} {labels.get(o.iid, o.iid)} : {o.message or o.status}" for o in outcomes)
+        await self.notifier.emit(Notice("-", "Déploiement", "DEPLOIEMENT", f"🔄 Déploiement terminé : ✅ {ok} · ⏸ {len(wait)} · ❌ {len(bad)}"
+                                        + (f"\n{detail}" if detail else ""), 2 if bad else 1))
 
     # ------------------------------------------------------------------ alertes internes (watchdog, etc.)
     async def alert(self, iid: str, kind: str, text: str, prio: int) -> None:

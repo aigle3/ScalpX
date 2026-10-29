@@ -298,6 +298,14 @@ async def test_deploiement_un_compte_etat_cycle_conserves(stack):
     assert not ea.accounts[inst.id]["maintenance"]
     assert any(v[inst.id][0] == "⏳" for v in steps) and steps[-1][inst.id][0] == "✅"
     assert db.deployments(1)[0]["status"] == "OK"
+    # chaque étape est visible en direct, le résultat dit quand le compte est revenu ; trace dans le journal des actions
+    texts = [v[inst.id][1] for v in steps]
+    for key in ("maintenance", "sauvegardé", "arrêt du terminal", "terminal fermé", "copié", "terminal relancé"):
+        assert any(key in t for t in texts), (key, texts)
+    assert "en ligne, connecté" in out[0].message and "terminal revenu en" in out[0].message
+    assert "en ligne" in steps[-1][inst.id][1]
+    acts = db.actions_recent(5)
+    assert acts and acts[0]["text"] == "DÉPLOIEMENT EA v5.1" and acts[0]["ok"] == 1
 
 
 @pytest.mark.asyncio

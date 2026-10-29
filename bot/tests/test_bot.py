@@ -1184,3 +1184,24 @@ async def test_rappel_ea_a_deployer_avec_cloche(svc):
     dash.goto("dash")
     text, kb = dash.render()
     assert "à déployer" not in text and "⚡ Actions" in [t for row in kb for t, _ in row]
+
+
+@pytest.mark.asyncio
+async def test_alertes_des_filtres_coupees_une_fois(svc):
+    """n_filters coupé une seule fois par compte lancé (et dans le preset actif) ; réactivé ensuite : respecté."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    st = ctx_stack(svc)
+    a = seed(st, 51, "Demo-Server 1")
+    ea.start()
+    await asyncio.sleep(0.3)
+    try:
+        ea.accounts.setdefault(a.id, {})["params"] = {**DEFAULT_PARAMS_T, "n_filters": "✅"}
+        dash.store.put("base", {"n_filters": "1", "lot": "0.01"})
+        dash.store.set_active("base")
+        await router.filters_alerts_off()
+        assert ea.accounts[a.id]["params"]["n_filters"] == "❌" and dash.store.presets["base"]["n_filters"] == "0"
+        ea.accounts[a.id]["params"]["n_filters"] = "✅"                    # réactivé à la main
+        await router.filters_alerts_off()
+        assert ea.accounts[a.id]["params"]["n_filters"] == "✅"
+    finally:
+        await ea.stop()

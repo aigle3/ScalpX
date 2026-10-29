@@ -104,7 +104,7 @@ input int    MaxRetries = 2;                          // Nouvelles tentatives su
 input long   MagicNumber = 123456;                    // Magic Number
 
 input group "══ Notifications (v5 : envoyées au bot central) ══"
-input bool   NotifyFilters = true;                    // Alertes de filtres
+input bool   NotifyFilters = false;                   // Alertes de filtres
 input bool   NotifyProgress = true;                   // Alertes de progression (25/50/75 %)
 input bool   NotifyErrors = true;                     // Alertes d'erreurs d'ordres
 

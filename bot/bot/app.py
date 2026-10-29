@@ -309,6 +309,7 @@ def timed(fn):
 JOB_KW_DAILY = {**JOB_KW, "misfire_grace_time": 300}        # tâches quotidiennes : jamais ratées pour quelques secondes de retard
 
 async def j_presets(context: ContextTypes.DEFAULT_TYPE) -> None:
+    await svc(context).router.filters_alerts_off()      # une fois par compte (voir la fonction)
     await svc(context).router.check_presets()
 
 

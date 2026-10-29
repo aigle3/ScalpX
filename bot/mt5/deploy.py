@@ -139,13 +139,33 @@ class DeployManager:
         os.replace(tmp, dst)
 
     # ---- attentes
+    async def _step(self, inst: Instance, text: str, log_it: bool = True) -> None:
+        """Étape du déploiement : écrite dans bot.log et affichée en direct dans le message de progression."""
+        if log_it:
+            log.info("déploiement %s : %s", inst.label, text)
+        cb = getattr(self, "_on_step", None)
+        if cb is not None:
+            try:
+                await cb(inst.id, text)
+            except Exception:
+                log.exception("affichage de la progression")
+
     async def _wait_flat(self, inst: Instance) -> bool:
         """Attend 0 position de l'EA et aucune clôture 500 en cours (délai configurable)."""
-        end = time.monotonic() + self.cfg.timing.maintenance_wait_s
+        t0 = time.monotonic()
+        end = t0 + self.cfg.timing.maintenance_wait_s
+        shown = -1.0
         while time.monotonic() < end:
             st = self.status.read(inst.id)
             if st is not None and st.positions == 0 and not st.phase_cloture500:
                 return True
+            if time.monotonic() - shown >= 10:                       # où en est l'attente (toutes les 10 s)
+                shown = time.monotonic()
+                why = ("clôture 500 en cours" if st is not None and st.phase_cloture500 else
+                       f"{st.positions} position(s) ouverte(s)" if st is not None else "statut illisible")
+                left = int(end - time.monotonic())
+                await self._step(inst, f"⏳ attente de la fin de la série : {why} (encore {left // 60} min {left % 60:02d} s au plus)",
+                                 log_it=shown - t0 < 1 or int(shown - t0) % 60 < 10)
             await asyncio.sleep(2.0)
         return False
 
@@ -154,7 +174,11 @@ class DeployManager:
         La version affichée n'est pas exigée : une recompilation sans changement de version doit aussi passer."""
         end = time.monotonic() + self.cfg.timing.verify_deploy_s
         last = "aucun heartbeat"
+        t0, shown = time.monotonic(), time.monotonic()
         while time.monotonic() < end:
+            if time.monotonic() - shown >= 10:
+                shown = time.monotonic()
+                await self._step(inst, f"📡 attente du nouvel EA : {int(shown - t0)} s (dernier signe : {last})", log_it=False)
             st = self.status.read(inst.id)
             if st is not None and st.ts > getattr(self, "_old_ts", 0) and st.ts >= since - 2:
                 last = f"version {st.version or '?'}"
@@ -163,16 +187,37 @@ class DeployManager:
                         self.last_version = st.version or version
                         return True, ""
                     return False, f"état/cycle modifiés ({pre_etat}/{pre_cycle} → {st.etat}/{st.cycle})"
+                last += ", terminal pas encore connecté au serveur"
             await asyncio.sleep(1.0)
         return False, f"heartbeat du nouvel EA non reçu ({last})"
 
     # ---- une instance
     async def deploy_one(self, inst: Instance, version: str) -> DeployOutcome:
+        t_start = time.monotonic()
+        out = await self._deploy_one(inst, version)
+        dt = int(time.monotonic() - t_start)
+        if out.status == "ok":
+            out.message = f"v{self.last_version or version} en ligne, connecté · terminé en {dt // 60} min {dt % 60:02d} s" + \
+                          (f" (terminal revenu en {self._back_s} s)" if getattr(self, "_back_s", None) is not None else "")
+            log.info("déploiement %s : ✅ %s", inst.label, out.message)
+        else:
+            log.warning("déploiement %s : %s %s (%d s)", inst.label, "⏸" if out.status == "waiting" else "❌", out.message, dt)
+        try:
+            self.db.add_action(inst.id, f"DÉPLOIEMENT EA v{version}", out.status == "ok", out.message or out.status)
+        except Exception:
+            log.exception("journal des actions")
+        return out
+
+    async def _deploy_one(self, inst: Instance, version: str) -> DeployOutcome:
+        self._back_s = None
         pre = self.status.read(inst.id)
         pre_etat = pre.etat if pre else None            # None : état inconnu avant le déploiement → pas de comparaison
         pre_cycle = pre.cycle if pre else None
         was_running = self.mgr.is_running(inst)
         self.db.set_desired(inst.id, MAINTENANCE)                         # 1) le watchdog ignore
+        await self._step(inst, f"🔧 maintenance : plus de nouvelle position (version actuelle {pre.version if pre and pre.version else '?'}"
+                               f", état {pre_etat or '?'}, cycle {pre_cycle if pre_cycle is not None else '?'})"
+                               + ("" if was_running else " — terminal arrêté"))
         if was_running:
             r = await self.cmdq.send_and_wait(inst.id, "MAINTENANCE_ON", timeout=self.cfg.timing.ack_timeout_s)   # 2)
             if not r.ok:
@@ -183,19 +228,30 @@ class DeployManager:
                 self.db.set_desired(inst.id, DEMARRE)
                 return DeployOutcome(inst.id, "waiting", "positions ouvertes ou clôture 500 en cours")
         backup = self.backup_ex5(inst)                                    # 4)
+        await self._step(inst, "💾 ancien EA sauvegardé" + (f" ({backup.name})" if backup else " (aucun .ex5 à sauvegarder)"))
+        await self._step(inst, "🔌 arrêt du terminal (fermeture propre, forcée au bout de "
+                               f"{self.cfg.timing.stop_wait_s} s)…")
+        t_stop = time.monotonic()
         stop = await self.mgr.stop(inst, force=False, set_desired=None)  # 5) FERMER_TERMINAL puis kill après 30 s
+        await self._step(inst, {"propre": "🔌 terminal fermé proprement", "kill": "🔌 terminal arrêté de force (pas fermé à temps)",
+                                "deja_arrete": "🔌 terminal déjà arrêté"}.get(stop, f"🔌 arrêt : {stop}")
+                               + f" en {int(time.monotonic() - t_stop)} s")
         if stop == "attente_cloture":
             await self.cmdq.send_and_wait(inst.id, "MAINTENANCE_OFF", timeout=self.cfg.timing.ack_timeout_s)
             self.db.set_desired(inst.id, DEMARRE)
             return DeployOutcome(inst.id, "waiting", "clôture 500 en cours")
         try:
             self.install_ex5(inst, self._base_ex5())                      # 6) uniquement le .ex5
+            await self._step(inst, f"📦 nouvel EA v{version} copié")
             t0 = time.time()
             self.last_version = ""
             old = self.status.read(inst.id)
             self._old_ts = old.ts if old is not None else 0          # dernier heartbeat de l'ancien EA (ne doit pas compter)
             self.mgr.launch(inst)                                         # 7) sans /config (maintenance non persistée)
+            await self._step(inst, f"🚀 terminal relancé : attente du nouvel EA (au plus {self.cfg.timing.verify_deploy_s} s)")
             ok, why = await self._wait_new_version(inst, version, pre_etat, pre_cycle, t0)   # 8)
+            if ok:
+                self._back_s = int(time.time() - t0)
         except Exception as exc:
             ok, why = False, f"erreur : {exc}"
         if ok:
@@ -204,6 +260,7 @@ class DeployManager:
             self.db.set_version(inst.id, self.last_version or version, "déploiement")
             return DeployOutcome(inst.id, "ok")
         # 9) échec : restauration de l'ancien .ex5, relance, alerte
+        await self._step(inst, f"❌ {why} : restauration de l'ancien EA…")
         await self.mgr.stop(inst, force=True, set_desired=None)
         if backup and backup.is_file():
             try:
@@ -211,6 +268,7 @@ class DeployManager:
             except Exception as exc:
                 log.error("restauration impossible pour %s : %s", inst.id, exc)
         self.mgr.launch(inst)
+        await self._step(inst, "↩️ ancien EA restauré, terminal relancé")
         self.db.set_desired(inst.id, DEMARRE)
         return DeployOutcome(inst.id, "failed", why + " — ancien .ex5 restauré")
 
@@ -225,6 +283,13 @@ class DeployManager:
         if dep_id is None:
             dep_id = self.db.start_deployment(",".join(sorted({i.ea_version or "?" for i in insts})), version, [i.id for i in insts])
         pending = [i.id for i in insts]
+
+        async def on_step(iid: str, text: str) -> None:
+            view[iid] = (RUNNING, text)
+            if progress:
+                await progress(view)
+        self._on_step = on_step
+        log.info("déploiement de l'EA v%s : %d compte(s) (%s)", version, len(insts), ", ".join(i.label for i in insts))
         try:
             for inst in insts:
                 if self._cancel:
@@ -236,7 +301,7 @@ class DeployManager:
                 out = await self.deploy_one(inst, version)
                 outcomes.append(out)
                 if out.status == "ok":
-                    view[inst.id] = (OK, f"v{self.db.get(inst.id).ea_version or version}")
+                    view[inst.id] = (OK, out.message or f"v{self.db.get(inst.id).ea_version or version}")
                     pending.remove(inst.id)
                 elif out.status == "waiting":
                     view[inst.id] = (WAITING, out.message)
@@ -261,6 +326,8 @@ class DeployManager:
             self.db.update_deployment(dep_id, ended_ts=int(time.time()), status=status, report=report,
                                       pending=",".join(waiting))
             self.running = False
+            self._on_step = None
+            log.info("déploiement de l'EA v%s terminé : %s", version, status)
         return outcomes
 
     # ---- reprise / annulation après interruption (redémarrage du VPS en plein déploiement)
