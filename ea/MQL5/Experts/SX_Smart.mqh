@@ -111,7 +111,9 @@ void VacationTick()
       g_pauseUntil = 0;
       int n = CloseAllFast("mode vacances : plafond de risque");
       TgCrit("🚨 MODE VACANCES — PLAFOND DE RISQUE ATTEINT\n━━━━━━━━━━━━━━━━━━\n📉 Flottant : " + Sgn(fl) + " " + Cur() + " (limite " + F1(lim) + " %)\n🔒 " + IntegerToString(n) +
-             " élément(s) fermé(s)\n⏸ Robot en pause.");
+             " élément(s) fermé(s)" +
+             (g_closeBlocked ? "\n⏳ Fermeture bloquée (" + g_closeBlockWhy + ") : nouvelles tentatives automatiques." : "") +   // [ARCHI]
+             "\n⏸ Robot en pause.");
    }
 }
 

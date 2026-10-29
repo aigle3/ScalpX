@@ -193,7 +193,13 @@ string ActCloseAll()
    int n = CloseAllFast("fermeture manuelle (bot)");
    RefreshState();
    string s = "🛑 FERMETURE EFFECTUÉE\n━━━━━━━━━━━━━━━━━━\n🔒 " + IntegerToString(n) + " élément(s) fermé(s)";
-   if(st_posCount + st_pendCount > 0) s += "\n⚠️ Il reste " + IntegerToString(st_posCount + st_pendCount) + " élément(s) : vérifie dans MT5.";
+   if(st_posCount + st_pendCount > 0)
+   {
+      s += "\n⚠️ Il reste " + IntegerToString(st_posCount + st_pendCount) + " élément(s) : vérifie dans MT5.";
+      // [ARCHI] début
+      if(g_closeBlocked) s += "\n⏳ Fermeture bloquée (" + g_closeBlockWhy + ") : nouvelles tentatives automatiques pendant 30 min.";
+      // [ARCHI] fin
+   }
    s += "\n⏸ Robot en pause.\n💼 Balance : " + F2(AccountInfoDouble(ACCOUNT_BALANCE)) + " " + Cur();
    return s;
 }

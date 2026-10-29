@@ -246,6 +246,7 @@ void RegisterTradeSuccess()
    if(g_failCount > 0) Log("Ordre exécuté — compteur d'échecs remis à zéro");
    g_failCount = 0;
    g_nextTradeMs = 0;
+   BrokerBlockClear();   // [ARCHI] fin d'un éventuel blocage « marché fermé / trading désactivé »
 }
 
 void RegisterTradeFailure(string what, uint rc)
@@ -335,6 +336,13 @@ bool SendMarketEntry(ENUM_ORDER_TYPE type)
       if(IsRetryable(lastRc)) { Sleep(150); continue; }
       break;
    }
+   // [ARCHI] début : marché fermé / trading désactivé = pas un échec d'ordre, nouvelles tentatives espacées
+   if(IsBlockingRc(lastRc))
+   {
+      RegisterBrokerBlock(type == ORDER_TYPE_BUY ? "ouverture ACHAT" : "ouverture VENTE", lastRc);
+      return false;
+   }
+   // [ARCHI] fin
    RegisterTradeFailure(type == ORDER_TYPE_BUY ? "ouverture ACHAT" : "ouverture VENTE", lastRc);
    return false;
 }
@@ -344,6 +352,168 @@ bool SendMarketEntry(ENUM_ORDER_TYPE type)
 //| (OrderSendAsync) au lieu d'un ordre par seconde.                 |
 //+------------------------------------------------------------------+
 ulong g_nextGridMs = 0;
+
+// [ARCHI] début : marché fermé / trading désactivé — gestion propre, nouvelles tentatives automatiques.
+// Réponse du broker « marché fermé » ou « trading désactivé » : ce n'est pas un échec d'ordre (pas de compteur d'échecs,
+// pas de rafale de messages). Entrées : nouvel essai espacé ; un message par épisode (rappel toutes les 30 min) puis
+// un message de rétablissement. Fermetures (CloseAllFast) : essais espacés (5 s → 60 s), sans limite, jusqu'à réussite.
+uint    g_blkRc              = 0;       // dernier code bloquant du broker (0 = aucun)
+int     g_blkCount           = 0;       // refus consécutifs
+ulong   g_blkLastMs          = 0;       // dernière fois qu'un code bloquant a été vu
+ulong   g_blkNotifyMs        = 0;       // dernier message de l'épisode (0 = aucun envoyé)
+bool    g_closeBlocked       = false;   // une fermeture est impossible en ce moment
+int     g_closeBlockCount    = 0;
+ulong   g_closeBlockUntilMs  = 0;       // CloseAllFast suspendu jusqu'à (tant que la cause persiste)
+ulong   g_closeBlockNotifyMs = 0;
+string  g_closeBlockWhy      = "";
+string  g_closeRetryReason   = "";      // fermeture voulue (manuelle / stop loss d'urgence / vacances) à refaire tant qu'elle est bloquée
+ulong   g_closeRetryUntilMs  = 0;       // abandon des essais automatiques au-delà (30 min)
+
+bool IsBlockingRc(uint rc)
+{
+   return (rc == TRADE_RETCODE_MARKET_CLOSED || rc == TRADE_RETCODE_TRADE_DISABLED);
+}
+
+void NoteBrokerBlockRc(uint rc)
+{
+   g_blkRc     = rc;
+   g_blkLastMs = GetTickCount64();
+}
+
+string BrokerBlockText()
+{
+   if(g_blkRc == TRADE_RETCODE_MARKET_CLOSED)  return "marché fermé (réponse du broker)";
+   if(g_blkRc == TRADE_RETCODE_TRADE_DISABLED) return "trading désactivé (réponse du broker)";
+   return "";
+}
+
+void RegisterBrokerBlock(string what, uint rc)
+{
+   ulong now = GetTickCount64();
+   bool first = (g_blkNotifyMs == 0);
+   NoteBrokerBlockRc(rc);
+   g_blkCount++;
+   int sec = 60;                                           // marché fermé : un essai par minute
+   if(rc == TRADE_RETCODE_TRADE_DISABLED)
+   {
+      sec = 30 * (1 << MathMin(g_blkCount - 1, 3));        // trading désactivé : 30, 60, 120, 240 s, puis 300 s
+      if(sec > 300) sec = 300;
+   }
+   g_nextTradeMs = now + (ulong)sec * 1000;
+   g_nextGridMs  = g_nextTradeMs;
+   if(first || now - g_blkNotifyMs > 1800000)
+   {
+      g_blkNotifyMs = now;
+      Log(what + " impossible : " + BrokerBlockText() + " — nouvel essai dans " + IntegerToString(sec) + " s");
+      if(PBool(P_N_ERRORS))
+      {
+         string m;
+         if(rc == TRADE_RETCODE_TRADE_DISABLED)
+            m = "🚫 TRADING DÉSACTIVÉ (réponse du broker)\n━━━━━━━━━━━━━━━━━━\n⛔ " + what + " impossible pour l'instant." +
+                "\n🔁 Nouvel essai automatique dans " + IntegerToString(sec) + " s (délai croissant, 5 min maximum)." +
+                "\n\n💡 Vérifie le compte et le broker si cela dure.";
+         else
+            m = "🌙 MARCHÉ FERMÉ (réponse du broker)\n━━━━━━━━━━━━━━━━━━\n⏳ " + what + " impossible pour l'instant." +
+                "\n🔁 Nouvel essai automatique dans " + IntegerToString(sec) + " s, sans intervention.";
+         TgQueueP(m, rc == TRADE_RETCODE_TRADE_DISABLED ? 2 : 0);
+      }
+   }
+}
+
+void BrokerBlockClear()
+{
+   if(g_blkRc == 0) return;
+   g_blkRc = 0;
+   g_blkCount = 0;
+   if(g_blkNotifyMs > 0)
+   {
+      g_blkNotifyMs = 0;
+      Log("Trading rétabli (fin du blocage broker)");
+      if(PBool(P_N_ERRORS)) TgQueueP("✅ TRADING RÉTABLI\n━━━━━━━━━━━━━━━━━━\nLe broker accepte de nouveau les ordres : le robot reprend normalement.", 1);
+   }
+}
+
+// Raison pour laquelle une fermeture ne peut pas aboutir maintenant ("" si rien ne l'en empêche)
+string CloseBlockReason()
+{
+   string w;
+   if(!TradeEnvOK(w))   return w;
+   if(!MarketOpenNow()) return "marché fermé";
+   if(g_blkRc != 0 && GetTickCount64() - g_blkLastMs < 20000) return BrokerBlockText();
+   return "";
+}
+
+// Fermeture restée incomplète : si la cause est « marché fermé / trading désactivé / connexion », on réessaie plus tard
+bool CloseReasonRetries(string reason)
+{
+   return (StringFind(reason, "fermeture manuelle") == 0 || StringFind(reason, "stop loss d'urgence") == 0 ||
+           StringFind(reason, "mode vacances") == 0);
+}
+
+void CloseBlockNote(int left, string reason)
+{
+   string why = CloseBlockReason();
+   if(why == "") return;                                    // incomplète pour une autre raison : comportement inchangé
+   ulong now = GetTickCount64();
+   g_closeBlockCount++;
+   int sec = 5 * (1 << MathMin(g_closeBlockCount - 1, 4));  // 5, 10, 20, 40, 80 → 60 s maximum
+   if(sec > 60) sec = 60;
+   g_closeBlockUntilMs = now + (ulong)sec * 1000;
+   g_closeBlockWhy = why;
+   if(CloseReasonRetries(reason))               // décision explicite (pas de condition à réévaluer) : on la refait, 30 min maximum
+   {
+      if(g_closeRetryReason == "") g_closeRetryUntilMs = now + 1800000;
+      g_closeRetryReason = reason;
+   }
+   if(!g_closeBlocked || now - g_closeBlockNotifyMs > 1800000)
+   {
+      g_closeBlockNotifyMs = now;
+      TgQueueP("🚫 FERMETURE IMPOSSIBLE POUR LE MOMENT\n━━━━━━━━━━━━━━━━━━\n📌 " + IntegerToString(left) +
+               " élément(s) encore ouvert(s)\n❓ Raison : " + why +
+               "\n🔁 Nouvel essai automatique dans " + IntegerToString(sec) + " s (délai croissant, 60 s maximum), jusqu'à réussite.", 2);
+   }
+   g_closeBlocked = true;
+}
+
+// Appelé chaque seconde : refait une fermeture voulue (manuelle, stop loss d'urgence, vacances) restée bloquée
+void CloseRetryTick()
+{
+   if(g_closeRetryReason == "") return;
+   ulong now = GetTickCount64();
+   if(g_enabled)                                // le robot a été relancé : la décision de fermer n'est plus d'actualité
+   {
+      g_closeRetryReason = "";
+      return;
+   }
+   RefreshState();
+   if(st_posCount + st_pendCount == 0) { g_closeRetryReason = ""; return; }
+   if(now > g_closeRetryUntilMs)
+   {
+      string r = g_closeRetryReason;
+      g_closeRetryReason = "";
+      TgQueueP("⚠️ FERMETURE NON EFFECTUÉE\n━━━━━━━━━━━━━━━━━━\n📌 " + IntegerToString(st_posCount + st_pendCount) +
+               " élément(s) encore ouvert(s) après 30 min d'essais (" + r + ").\n👉 Vérifie dans MT5.", 2);
+      return;
+   }
+   if(g_closing || now < g_closeBlockUntilMs) return;
+   CloseAllFast(g_closeRetryReason);
+}
+
+void CloseBlockClear()
+{
+   if(!g_closeBlocked) return;
+   g_closeBlocked = false;
+   g_closeBlockCount = 0;
+   g_closeBlockUntilMs = 0;
+   g_closeBlockWhy = "";
+   if(g_closeBlockNotifyMs > 0)
+   {
+      g_closeBlockNotifyMs = 0;
+      Log("Fermeture rétablie");
+      TgQueueP("✅ FERMETURE RÉTABLIE\n━━━━━━━━━━━━━━━━━━\nLes positions ont pu être fermées.", 1);
+   }
+}
+// [ARCHI] fin
 
 bool SendPendingAsync(ENUM_ORDER_TYPE type, double vol, double price)
 {
@@ -449,10 +619,13 @@ int CancelPendingFast()
 int CloseAllFast(string reason)
 {
    if(g_closing) return 0;
+   // [ARCHI] début : fermeture suspendue (5 s → 60 s) tant que la cause du blocage persiste ; reprise dès qu'elle disparaît
+   if(GetTickCount64() < g_closeBlockUntilMs && CloseBlockReason() != "") return 0;
+   // [ARCHI] fin
    g_closing = true;
    RefreshState();
    int before = st_posCount + st_pendCount;
-   if(before == 0) { g_closing = false; return 0; }
+   if(before == 0) { g_closing = false; g_closeBlocked = false; g_closeBlockCount = 0; g_closeRetryReason = ""; return 0; }   // [ARCHI] rien à fermer : épisode clos
    Log("Fermeture complète (" + reason + ") : " + IntegerToString(st_posCount) + " position(s), " +
        IntegerToString(st_pendCount) + " ordre(s)");
 
@@ -502,7 +675,9 @@ int CloseAllFast(string reason)
          if(async) { if(!OrderSendAsync(rq, rs)) Dbg("Clôture asynchrone non envoyée"); }
          else
          {
-            if(!OrderSend(rq, rs) && rs.retcode == TRADE_RETCODE_INVALID_FILL)
+            bool okSync = OrderSend(rq, rs);
+            if(!okSync && IsBlockingRc(rs.retcode)) NoteBrokerBlockRc(rs.retcode);   // [ARCHI]
+            if(!okSync && rs.retcode == TRADE_RETCODE_INVALID_FILL)
             {
                g_fillMkt = NextFilling(g_fillMkt);
                rq.type_filling = g_fillMkt;
@@ -527,6 +702,10 @@ int CloseAllFast(string reason)
    g_tpPrice = 0; g_tpSig = -1;
    g_failCount = 0; g_nextTradeMs = 0;
    if(after > 0) Log("⚠️ Fermeture incomplète : " + IntegerToString(after) + " élément(s) restant(s)");
+   // [ARCHI] début : blocage (marché fermé / trading désactivé / connexion) → essais espacés ; réussite → épisode clos
+   if(after > 0) CloseBlockNote(after, reason);
+   else          { CloseBlockClear(); BrokerBlockClear(); g_closeRetryReason = ""; }
+   // [ARCHI] fin
    return before - after;
 }
 

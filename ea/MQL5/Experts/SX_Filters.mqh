@@ -220,7 +220,13 @@ bool EntryAllowed(string &why)
    string w;
    if(!TradeEnvOK(w))    { why = w; return false; }
    if(!f_marketOpen)     { why = "Marché fermé"; return false; }
-   if(GetTickCount64() < g_nextTradeMs) { why = "Attente après un échec d'ordre"; return false; }
+   if(GetTickCount64() < g_nextTradeMs)
+   {
+      // [ARCHI] début : raison précise quand le broker a refusé (marché fermé / trading désactivé)
+      why = (g_blkRc != 0) ? "Nouvel essai automatique : " + BrokerBlockText() : "Attente après un échec d'ordre";
+      // [ARCHI] fin
+      return false;
+   }
    if(g_vacation)        { why = "Mode vacances"; return false; }
    if(g_newsBlock)       { why = "News : " + g_newsWhy; return false; }
    if(mk_spread > PInt(P_MAXSPREAD))    { why = "Spread trop large (" + F0(mk_spread) + " > " + IntegerToString(PInt(P_MAXSPREAD)) + " pts)"; return false; }

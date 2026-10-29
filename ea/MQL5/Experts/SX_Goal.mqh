@@ -173,7 +173,7 @@ void FinishGoal(bool early)
 
    //--- Vérification finale : le solde doit réellement atteindre la cible (il peut mettre un instant à se mettre à jour)
    ulong tw = GetTickCount64();
-   while(!GoalBalanceReached(bal) && GetTickCount64() - tw < 2500)
+   while(!GoalBalanceReached(bal) && !g_closeBlocked && GetTickCount64() - tw < 2500)   // [ARCHI] inutile d'attendre si la fermeture est bloquée
    {
       Sleep(100);
       bal = AccountInfoDouble(ACCOUNT_BALANCE);
@@ -189,7 +189,13 @@ void FinishGoal(bool early)
       g_finishRetryMs = GetTickCount64() + 15000;
       RefreshState();
       Log("Objectif non confirmé après clôture : solde " + F2(bal) + " < cible " + F2(g_goalTarget) + " → la série continue");
-      if(g_finishFails <= 3)
+      // [ARCHI] début : clôture bloquée (marché fermé / trading désactivé) : message adapté, nouvelle tentative automatique
+      if(g_closeBlocked && g_finishFails == 1)
+         TgQueueP("⏳ OBJECTIF ATTEINT — CLÔTURE EN ATTENTE\n━━━━━━━━━━━━━━━━━━" +
+                  "\n🔒 La clôture n'a pas pu se faire : " + g_closeBlockWhy +
+                  "\n🔁 Elle sera refaite automatiquement. La série reste active d'ici là.", 1);
+      // [ARCHI] fin
+      if(g_finishFails <= 3 && !g_closeBlocked)
          TgQueue("⚠️ OBJECTIF PAS ENCORE ATTEINT\n━━━━━━━━━━━━━━━━━━" +
                  "\n🔒 Clôture faite, mais à un prix différent de celui attendu." +
                  "\n💰 Solde : " + F2(bal) + " | 🏁 Cible : " + F2(g_goalTarget) + " " + Cur() +
@@ -324,6 +330,7 @@ void RiskTick()
                  "\n❌ Perte à l'instant : " + F2(lossBefore) + " " + Cur() + " (" + F1(lossBefore / g_goalInit * 100.0) + " %)" +
                  "\n💼 Balance initiale : " + F2(g_goalInit) + " | finale : " + F2(balAfter) + " " + Cur() +
                  "\n🔒 " + IntegerToString(closed) + " élément(s) fermé(s)" +
+                 (g_closeBlocked ? "\n⏳ Fermeture bloquée (" + g_closeBlockWhy + ") : nouvelles tentatives automatiques." : "") +   // [ARCHI]
                  "\n\n⏸ Objectif terminé, robot en pause.");
          return;
       }

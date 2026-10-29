@@ -1140,12 +1140,13 @@ void ArchiTimer()
       TerminalClose(0);
       return;
    }
-   if(now - lastCmd >= 2000)  { lastCmd = now; CmdPoll(); }
+   if(now - lastCmd >= 1000)  { lastCmd = now; CmdPoll(); }   // 1 s (avant 2 s) : commandes du bot prises en compte plus vite
    if(now - lastStat >= 5000) { lastStat = now; StatutWrite(); }
    if(now - lastSec >= 1000)
    {
       lastSec = now;
       EvFlushPending();
+      CloseRetryTick();                  // fermeture voulue restée bloquée (marché fermé / trading désactivé) : nouvel essai
       SlotTick();
       //--- cohérence avec le panneau / l'ancien code : arrêt manuel <-> PAUSE
       if(g_state == ST_ACTIF && g_stoppedManually) SetState(ST_PAUSE, true, "Arrêt manuel détecté");

@@ -17,8 +17,8 @@
 //|   SX_Panel.mqh     panneau d'informations dynamique              |
 //+------------------------------------------------------------------+
 #property copyright   "ScalpX"
-#property version     "6.00"
-#property description "ScalpX v6.0.0 — EMA 10/20 + grille ATR + TP commun + filtres multi-timeframe, pilotage par bot central (fichiers)"
+#property version     "6.01"
+#property description "ScalpX v6.1.0 — EMA 10/20 + grille ATR + TP commun + filtres multi-timeframe, pilotage par bot central (fichiers)"
 
 // [SEUIL500] début : TEST UNIQUEMENT (test B-3 de la checklist). Décommenter pour simuler un glissement de 2.0 (devise du compte)
 // sur le solde final de la clôture à 500 → événement CLOTURE_500_SOUS_SEUIL. Laisser commenté en production.
@@ -361,11 +361,24 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    if(trans.type != TRADE_TRANSACTION_REQUEST) return;
 
    uint rc = result.retcode;
-   if(rc == TRADE_RETCODE_DONE || rc == TRADE_RETCODE_PLACED || rc == TRADE_RETCODE_DONE_PARTIAL) return;
+   if(rc == TRADE_RETCODE_DONE || rc == TRADE_RETCODE_PLACED || rc == TRADE_RETCODE_DONE_PARTIAL)
+   {
+      // [ARCHI] début : un ordre accepté met fin à un blocage « marché fermé / trading désactivé »
+      if(request.symbol == _Symbol && request.magic == MagicNumber) BrokerBlockClear();
+      // [ARCHI] fin
+      return;
+   }
    if(request.symbol != _Symbol || request.magic != MagicNumber) return;
 
    if(request.action == TRADE_ACTION_PENDING)
    {
+      // [ARCHI] début : marché fermé / trading désactivé : essais espacés, un seul message par épisode (pas de rafale)
+      if(IsBlockingRc(rc))
+      {
+         RegisterBrokerBlock("ordre de grille", rc);
+         return;
+      }
+      // [ARCHI] fin
       if(rc == TRADE_RETCODE_INVALID_FILL) g_fillPend = NextFilling(g_fillPend);   // auto-correction
       g_nextGridMs = GetTickCount64() + 3000;
       Log("Ordre de grille refusé : " + TradeErrText(rc));
@@ -380,7 +393,10 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    else if(request.action == TRADE_ACTION_SLTP)
       Dbg("Pose du TP refusée : " + TradeErrText(rc) + " (la surveillance du robot prend le relais)");
    else if(request.action == TRADE_ACTION_DEAL)
+   {
       Log("Ordre au marché refusé : " + TradeErrText(rc));
+      if(IsBlockingRc(rc)) NoteBrokerBlockRc(rc);   // [ARCHI] retenu pour les fermetures (CloseBlockReason)
+   }
 }
 
 //+------------------------------------------------------------------+
