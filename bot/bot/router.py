@@ -261,15 +261,12 @@ class Router:
             if sub == "r" or not ui.fresh(inst.id):
                 self.dash.flash("⏳ Lecture des paramètres…")
                 self._bg(self._prm_fetch(inst))
-        elif sub == "c":                                                # 🕐 créneaux
-            self.dash.goto("prc", inst.id)
+        elif sub == "c" or (sub.startswith("cp") and sub[2:].isdigit()):   # 🕐 créneaux (cp<n> : page n)
+            self.dash.goto("prc", inst.id, int(sub[2:]) if sub.startswith("cp") else 0)
             if not ui.fresh(inst.id):
                 self._bg(self._prm_fetch(inst))
         elif sub == "ca":                                               # ➕ choix de l'heure
-            if len(pu.cat.slots_of(ui.masks(inst.id) or [0, 0, 0, 0])) >= pu.cat.MAX_SLOTS:
-                self.dash.flash(f"⚠️ {pu.cat.MAX_SLOTS} créneaux maximum : retires-en un d'abord.")
-            else:
-                self.dash.goto("prh", inst.id)
+            self.dash.goto("prh", inst.id)
         elif sub.startswith("ch") and sub[2:].isdigit() and int(sub[2:]) < 24:
             self.dash.goto("prq", inst.id, int(sub[2:]))
         elif sub.startswith("cm") and sub[2:].isdigit() and len(p) > 3 and p[3].isdigit():
@@ -329,9 +326,6 @@ class Router:
             return
         if not add and slot not in slots:
             self.dash.flash(f"ℹ️ Le créneau {t} n'existe plus.")
-            return
-        if add and len(slots) >= cat.MAX_SLOTS:
-            self.dash.flash(f"⚠️ {cat.MAX_SLOTS} créneaux maximum : retires-en un d'abord.")
             return
         mi = cat.SLOT_MINUTES.index(m)
         new = masks[mi] | (1 << h) if add else masks[mi] & ~(1 << h)

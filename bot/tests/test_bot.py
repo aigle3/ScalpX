@@ -1088,12 +1088,26 @@ async def test_creneaux_par_boutons_sur_un_compte(svc):
         assert "existe déjà" in dash.render()[0]
         await router.on_callback(f"p:{c}:cm9:20")
         assert "invalide" in dash.render()[0]
-        # 12 créneaux maximum
+        # pas de limite : 24 créneaux de plus (:15) → 30 créneaux, ✖ sur une seule page (40 par page)
         ea.accounts[a.id]["params"]["sl_m15"] = str((1 << 24) - 1)
         await router.on_callback(f"p:{c}:r")
         assert await _until(lambda: dash.params.cached(a.id).get("sl_m15") == str((1 << 24) - 1))
+        await router.on_callback(f"p:{c}:c")
+        assert "30 créneau(x)" in dash.render()[0]
         await router.on_callback(f"p:{c}:ca")
-        assert "maximum" in dash.render()[0]
+        await router.on_callback(f"p:{c}:ch23")
+        await router.on_callback(f"p:{c}:cm23:45")
+        assert await _until(lambda: ea.accounts[a.id]["params"]["sl_m45"] == str(1 << 23))
+        # 96 créneaux : pages de 40, jamais plus de 100 boutons
+        for k in ("sl_m00", "sl_m15", "sl_m30", "sl_m45"):
+            ea.accounts[a.id]["params"][k] = str((1 << 24) - 1)
+        await router.on_callback(f"p:{c}:r")
+        assert await _until(lambda: dash.params.cached(a.id).get("sl_m45") == str((1 << 24) - 1))
+        await router.on_callback(f"p:{c}:c")
+        kb = dash.render()[1]
+        assert sum(len(r) for r in kb) <= 100 and any(d == f"p:{c}:cp1" for r in kb for _, d in r)
+        await router.on_callback(f"p:{c}:cp2")
+        assert any(d == f"p:{c}:cx{23 * 60 + 45}" for r in dash.render()[1] for _, d in r)
     finally:
         await ea.stop()
 

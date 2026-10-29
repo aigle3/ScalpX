@@ -329,7 +329,8 @@ void PanelUpdate()
    int nl = PWrap("p_m", xl, y, rm, rc, 9, 52, 3);
    y += nl * 15 + 4;
    static int s_chips = 0;                              // nombre de pastilles dessinées au rafraîchissement précédent
-   int wantChips = slotsOn ? g_slotsN : 0;
+   int maxChips = 12;                                   // au-delà : les 12 prochains créneaux (le panneau reste lisible)
+   int wantChips = slotsOn ? MathMin(g_slotsN, maxChips) : 0;
    for(int i = wantChips; i < s_chips; i++)             // créneau retiré (ou désactivé) : on efface les pastilles en trop
    {
       ObjectDelete(0, PNM("p_c" + IntegerToString(i)));
@@ -338,27 +339,37 @@ void PanelUpdate()
    s_chips = wantChips;
    if(slotsOn)
    {
-      int perRow = MathMin(g_slotsN, 6);
+      int perRow = MathMin(wantChips, 6);
       int cw = (iw - (perRow - 1) * 4) / perRow;
       MqlDateTime lt;
       TimeToStruct(LocalNow(), lt);
       bool weekday = (lt.day_of_week >= 1 && lt.day_of_week <= 5);
       int nowMin = lt.hour * 60 + lt.min, win = SlotWindow();
-      bool nextMarked = false;
-      for(int i = 0; i < g_slotsN; i++)
+      bool many = (g_slotsN > maxChips);
+      int start = 0;                                    // beaucoup de créneaux : on commence au prochain
+      if(many && weekday)
       {
+         start = g_slotsN;
+         for(int k = 0; k < g_slotsN; k++) if(nowMin < g_slots[k] + win) { start = k; break; }
+         if(start >= g_slotsN) start = 0;               // tous passés aujourd'hui : ceux de demain
+      }
+      bool nextMarked = false;
+      for(int i = 0; i < wantChips; i++)
+      {
+         int si = (start + i) % g_slotsN;
          int cx = i % perRow, row = i / perRow;
          int px = xl + cx * (cw + 4), py = y + row * 22;
-         bool passed = weekday && (nowMin >= g_slots[i] + win);        // fenêtre terminée
-         bool isNext = (!passed && !nextMarked && weekday) || (!weekday && i == 0 && !nextMarked);
+         bool passed = !many && weekday && (nowMin >= g_slots[si] + win);   // fenêtre terminée
+         bool isNext = (!passed && !nextMarked && (weekday || i == 0));
          if(isNext) nextMarked = true;
          color fill = isNext ? PC_ORANGE : C'24,34,58';
          color tcol = isNext ? C'10,14,24' : (passed ? PC_GREY : PC_TEXT);
          PRect("p_c" + IntegerToString(i), px, py, cw, 18, fill, isNext ? PC_ORANGE : PC_BORDER);
-         PText("p_ct" + IntegerToString(i), px + cw / 2, py + 3, SlotText(g_slots[i]), tcol, 8, 2, isNext ? "Segoe UI Semibold" : "Segoe UI");
+         PText("p_ct" + IntegerToString(i), px + cw / 2, py + 3, SlotText(g_slots[si]), tcol, 8, 2, isNext ? "Segoe UI Semibold" : "Segoe UI");
       }
-      y += ((g_slotsN - 1) / perRow + 1) * 22;
-      PText("p_n", xl, y, "Lun–ven · fenêtre " + IntegerToString(win) + " min · sauté si objectif en cours", PC_DIM, 8);
+      y += ((wantChips - 1) / perRow + 1) * 22;
+      PText("p_n", xl, y, many ? IntegerToString(g_slotsN) + " créneaux · les " + IntegerToString(maxChips) + " prochains · fenêtre " + IntegerToString(win) + " min"
+                               : "Lun–ven · fenêtre " + IntegerToString(win) + " min · sauté si objectif en cours", PC_DIM, 8);
       y += 14;
    }
    y += 8;

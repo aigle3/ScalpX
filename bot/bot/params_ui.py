@@ -284,14 +284,20 @@ class ParamsUI:
         if slots:
             lines.append("<i>Touche ✖ pour retirer un créneau.</i>")
         kb = []
+        per = cat.SLOTS_PER_PAGE
+        pages = max(1, (len(slots) + per - 1) // per)
+        page = min(max(0, int(screen[2]) if len(screen) > 2 else 0), pages - 1)
         row = []
-        for s in slots:
+        for s in slots[page * per:(page + 1) * per]:
             row.append((f"✖ {cat.slot_text(s)}", f"p:{c}:cx{s}"))
-            if len(row) == 3:
+            if len(row) == 4:
                 kb.append(row)
                 row = []
         if row:
             kb.append(row)
+        if pages > 1:
+            kb.append([("◀", f"p:{c}:cp{(page - 1) % pages}"), (f"{page + 1}/{pages}", f"p:{c}:cp{page}"),
+                       ("▶", f"p:{c}:cp{(page + 1) % pages}")])
         kb.append([("➕ Ajouter un créneau", f"p:{c}:ca")])
         i_on, i_pct, i_win = find("sl_on"), find("sl_pct"), find("sl_win")
         kb.append([(("✅ Activés" if on else "❌ Désactivés") if on is not None else "Activation ?", f"p:{c}:t{i_on}"),

@@ -111,7 +111,7 @@ PARAMS = [
 SLOT_KEYS = ("sl_m00", "sl_m15", "sl_m30", "sl_m45")
 SLOT_MINUTES = (0, 15, 30, 45)
 HIDDEN = frozenset(SLOT_KEYS)          # pas de bouton « nombre » : ils se règlent dans l'écran 🕐 Créneaux
-MAX_SLOTS = 12                         # au-delà, le panneau du graphique devient illisible
+SLOTS_PER_PAGE = 40                    # boutons ✖ par page (Telegram : 100 boutons au plus par message)
 SLOT_GROUP = 7                         # 🏆 Objectifs
 # Valeurs par défaut de l'EA (inputs) des réglages ajoutés en 6.2.0 : point de départ quand un preset plus ancien
 # ne les contient pas encore (rien n'est enregistré tant qu'on ne les modifie pas)
