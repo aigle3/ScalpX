@@ -142,7 +142,7 @@ class QuitListener:
             if data.startswith(b"QUIT"):
                 logging.getLogger("main").warning("Arrêt demandé par un nouveau bot qui démarre.")
                 self.requested.set()
-                threading.Timer(25, lambda: os._exit(0)).start()       # filet : arrêt forcé si l'arrêt propre bloque
+                _safety_exit(25, "arrêt demandé par un nouveau bot")     # filet : arrêt forcé si l'arrêt propre bloque
 
 
 def make_ctx(cfg: Config) -> "Ctx":
@@ -193,7 +193,19 @@ def check_install(cfg: Config) -> int:
     return 0 if ok else 1
 
 
+def _safety_exit(delay: float, why: str) -> None:
+    """Filet : arrêt forcé si l'arrêt propre n'a pas abouti au bout de `delay` s. Minuterie en fil DÉMON : quand l'arrêt propre
+    réussit, le processus se termine aussitôt (avant 2.20.0, la minuterie le gardait en vie jusqu'au bout → 90 s perdues)."""
+    def fire() -> None:
+        logging.getLogger("main").warning("%s : arrêt propre trop long (%d s), arrêt forcé", why, delay)
+        os._exit(0)
+    t = threading.Timer(delay, fire)
+    t.daemon = True
+    t.start()
+
+
 def main() -> int:
+    t_start = time.monotonic()
     console = "--console" in sys.argv or sys.stdout is not None and sys.stdout.isatty()
     cfg_path = ROOT / "config.toml"
     for a in sys.argv[1:]:
@@ -205,6 +217,7 @@ def main() -> int:
         return check_install(cfg)
     setup_logging(cfg, console)
     log = logging.getLogger("main")
+    log.info("démarrage du processus (pid %d)", os.getpid())
     if not cfg.token or not cfg.allowed_chats:
         log.critical("TELEGRAM_TOKEN ou ALLOWED_CHAT_IDS manquant dans .env")
         return 2
@@ -226,11 +239,11 @@ def main() -> int:
             context.job.schedule_removal()
             log.info("arrêt demandé (mise à jour ou nouveau bot) : arrêt propre")
             # filet : une tâche longue (compilation) ne doit pas retenir l'ancien bot indéfiniment
-            threading.Timer(90, lambda: (log.warning("arrêt propre trop long : arrêt forcé"), os._exit(0))).start()
+            _safety_exit(90, "arrêt pour mise à jour / redémarrage")
             context.application.stop_running()
 
     app.job_queue.run_repeating(j_quit, interval=1, first=1, job_kwargs=JOB_KW)
-    log.info("ScalpX central démarré (%d chat autorisé)", len(cfg.allowed_chats))
+    log.info("ScalpX central démarré (%d chat autorisé) en %.1f s", len(cfg.allowed_chats), time.monotonic() - t_start)
     try:
         app.run_polling(allowed_updates=["message", "callback_query"], drop_pending_updates=False,
                         bootstrap_retries=-1)      # Telegram injoignable au démarrage : on réessaie au lieu de s'arrêter
@@ -239,6 +252,7 @@ def main() -> int:
             raise
         log.info("arrêt terminé (%s)", exc)            # arrêt demandé : fin de boucle anticipée sans conséquence
     lock.close()
+    log.info("processus terminé proprement")
     return 0
 
 

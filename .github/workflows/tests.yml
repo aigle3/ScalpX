@@ -39,7 +39,12 @@ jobs:
         shell: powershell
         run: |
           $bad = 0
-          foreach ($f in Get-ChildItem -Path $env:GITHUB_WORKSPACE -Recurse -Filter *.ps1) {
+          # script de relance généré par le bot (core/update.py) : vérifié aussi
+          Push-Location (Join-Path $env:GITHUB_WORKSPACE 'bot')
+          python -m pip install -q pydantic psutil
+          python -c "from pathlib import Path; from core.update import restart_script; open(r'$env:RUNNER_TEMP\restart_check.ps1','w',encoding='utf-8-sig').write(restart_script(1234, log_path=Path(r'C:\ScalpX\bot\data\logs\restart.log')))"
+          Pop-Location
+          foreach ($f in @(Get-ChildItem -Path $env:GITHUB_WORKSPACE -Recurse -Filter *.ps1) + @(Get-Item (Join-Path $env:RUNNER_TEMP 'restart_check.ps1'))) {
             $errs = $null
             [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$errs) | Out-Null
             foreach ($e in $errs) { Write-Output "::error file=$($f.Name)::$($e.Message) (ligne $($e.Extent.StartLineNumber))"; $bad++ }

@@ -1281,3 +1281,19 @@ async def test_installer_pendant_une_compilation_mise_en_file(svc, monkeypatch):
     router.building = False
     await router._after_busy()
     assert await _until(lambda: done == [router._upd_msg]) and router._upd_after == ""
+
+
+@pytest.mark.asyncio
+async def test_detecteur_de_blocage_de_la_boucle(caplog):
+    import logging
+    import time as _t
+    from bot import app as ap
+    task = asyncio.create_task(ap.loop_lag_watch(0.1))
+    await asyncio.sleep(0.15)
+    ap.RUNNING_JOBS["j_test"] = _t.monotonic()
+    with caplog.at_level(logging.WARNING, logger="bot.app"):
+        _t.sleep(1.3)                                   # boucle figée volontairement
+        await asyncio.sleep(0.3)
+    task.cancel()
+    ap.RUNNING_JOBS.pop("j_test", None)
+    assert any("boucle du bot bloquée" in r.message and "j_test" in r.message for r in caplog.records)

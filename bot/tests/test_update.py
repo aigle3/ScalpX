@@ -359,10 +359,13 @@ def test_paquet_github_chemins_hors_dossier_refuses(tmp_path):
 
 def test_relance_attend_la_fin_de_l_ancien_bot():
     """La tâche planifiée n'accepte qu'une instance : la relance attend la fin de CE processus (plus de délai fixe de 20 s)."""
+    from pathlib import Path
     from core import update as u
     sc = u.restart_script(4321)
-    assert sc.startswith("Wait-Process -Id 4321 -Timeout 300") and f"schtasks /run /tn '{u.TASK}'" in sc
-    assert sc.index("Wait-Process") < sc.index("schtasks /run") and "for ($i = 0; $i -lt 5" in sc
+    assert "Wait-Process -Id 4321 -Timeout 300" in sc and f"schtasks /run /tn '{u.TASK}'" in sc and "$l =" not in sc
+    lg = u.restart_script(4321, log_path=Path("C:/ScalpX/bot/data/logs/restart.log"))
+    assert lg.startswith("$l = 'C:") and "L 'bot arrêté'" in lg and lg.index("Wait-Process") < lg.index("schtasks /run")
+    assert sc.index("Wait-Process") < sc.index("schtasks /run") and "for ($i = 1; $i -le 5" in sc
 
 
 def test_surveillance_du_bot_tache_et_marqueur(tmp_path):

@@ -284,12 +284,19 @@ TASK = "ScalpX Bot"
 STOP = threading.Event()                  # positionné après une mise à jour du bot : main.py arrête proprement ce processus
 
 
-def restart_script(pid: int, wait_s: int = 300) -> str:
+def restart_script(pid: int, wait_s: int = 300, log_path: Path | None = None) -> str:
     """Script PowerShell de relance : attend la fin du processus `pid` (au plus wait_s), puis lance la tâche ; si elle n'est
     toujours pas en cours d'exécution 20 s plus tard, nouvel essai (jusqu'à 5)."""
-    return (f"Wait-Process -Id {int(pid)} -Timeout {int(wait_s)} -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3; "
-            f"for ($i = 0; $i -lt 5; $i++) {{ schtasks /run /tn '{TASK}' | Out-Null; Start-Sleep -Seconds 20; "
-            f"if ((schtasks /query /tn '{TASK}' /fo csv /nh) -match 'Running|En cours') {{ break }} }}")
+    if log_path:                                  # chaque étape dans data\\logs\\restart.log
+        log = (f"$l = '{str(log_path).replace(chr(39), chr(39) * 2)}'; function L($m) {{ Add-Content -Path $l -Encoding UTF8 "
+               "-Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' ' + $m) }; ")
+    else:
+        log = "function L($m) {}; "
+    return (log + f"L 'attente de la fin du bot (pid {int(pid)})'; "
+            f"Wait-Process -Id {int(pid)} -Timeout {int(wait_s)} -ErrorAction SilentlyContinue; L 'bot arrêté'; Start-Sleep -Seconds 3; "
+            f"for ($i = 1; $i -le 5; $i++) {{ schtasks /run /tn '{TASK}' | Out-Null; L ('relance de la tâche, essai ' + $i); "
+            f"Start-Sleep -Seconds 20; $q = schtasks /query /tn '{TASK}' /fo csv /nh; L ('état : ' + $q); "
+            f"if ($q -match 'Running|En cours') {{ break }} }}")
 
 
 def restart_bot(bot_root: Path) -> str:
@@ -305,7 +312,8 @@ def restart_bot(bot_root: Path) -> str:
         # La tâche n'accepte qu'une instance (IgnoreNew) : elle n'est relancée qu'une fois CE processus terminé.
         # Avant : relance fixe après 20 s, refusée si l'arrêt prenait plus longtemps (compilation en cours) → bot arrêté.
         subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command",
-                          restart_script(os.getpid())], creationflags=detached | no_win, close_fds=True)
+                          restart_script(os.getpid(), log_path=bot_root / "data" / "logs" / "restart.log")],
+                         creationflags=detached | no_win, close_fds=True)
         return "task"
     exe = Path(sys.executable)
     if os.name == "nt" and exe.name.lower() == "python.exe" and (exe.with_name("pythonw.exe")).exists():

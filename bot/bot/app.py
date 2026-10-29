@@ -292,20 +292,38 @@ JOB_KW = {"coalesce": True, "max_instances": 1, "misfire_grace_time": 5}
 SLOW_JOB_S = 1.0          # au-delà, la tâche est signalée dans bot.log (elle a retenu la boucle : cause des « missed by »)
 
 
+RUNNING_JOBS: dict[str, float] = {}      # tâches en cours (nom → début) : citées quand la boucle est bloquée
+
+
 def timed(fn):
-    """Mesure une tâche périodique et journalise celles qui durent plus de SLOW_JOB_S (diagnostic, aucun effet sinon)."""
+    """Note la tâche en cours (pour le détecteur de blocage de la boucle). Une tâche longue qui ATTEND (réseau, compilation
+    dans un fil) ne bloque rien : seule la très longue durée est notée, sans alarme."""
     import functools
 
     @functools.wraps(fn)
     async def run(context):
         t0 = time.monotonic()
+        RUNNING_JOBS[fn.__name__] = t0
         try:
             return await fn(context)
         finally:
+            RUNNING_JOBS.pop(fn.__name__, None)
             dt = time.monotonic() - t0
-            if dt > SLOW_JOB_S:
-                log.warning("tâche %s lente : %.1f s", fn.__name__, dt)
+            if dt > 60:
+                log.info("tâche %s : %.0f s (attente normale : compilation, réseau…)", fn.__name__, dt)
     return run
+
+
+async def loop_lag_watch(step: float = 0.5) -> None:
+    """Détecteur de blocage : si la boucle du bot a été figée plus de SLOW_JOB_S (calcul ou accès disque fait dans la boucle),
+    une ligne dit combien de temps et quelles tâches tournaient. C'est la vraie cause des « missed by » d'APScheduler."""
+    while True:
+        t0 = time.monotonic()
+        await asyncio.sleep(step)
+        lag = time.monotonic() - t0 - step
+        if lag > SLOW_JOB_S:
+            who = ", ".join(sorted(RUNNING_JOBS)) or "aucune tâche périodique (bouton ou message Telegram ?)"
+            log.warning("boucle du bot bloquée %.1f s (en cours : %s)", lag, who)
 JOB_KW_DAILY = {**JOB_KW, "misfire_grace_time": 300}        # tâches quotidiennes : jamais ratées pour quelques secondes de retard
 
 async def j_presets(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -452,6 +470,7 @@ async def post_init(app: Application) -> None:
     s: Services = app.bot_data["svc"]
     await app.bot.delete_my_commands()                  # aucune commande « / » : tout passe par des boutons
     app.create_task(startup(app))
+    app.create_task(loop_lag_watch())
 
 
 def build_application(cfg: Config, ctx_factory) -> Application:
