@@ -21,6 +21,7 @@ servers        = []                     # facultatif : saisis au premier compte 
 [timing]
 heartbeat_stale_s   = 30     # heartbeat plus vieux : 🟠
 create_timeout_s    = 120    # attente du premier heartbeat connecté à la création
+refused_s           = 40     # création : compte « non connecté » pendant ce délai → mot de passe redemandé
 stop_wait_s         = 30     # attente après FERMER_TERMINAL avant kill
 launch_stagger_s    = 5      # écart entre deux relances au démarrage
 ack_timeout_s       = 20

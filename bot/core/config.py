@@ -43,6 +43,7 @@ class MT5(BaseModel):
 class Timing(BaseModel):
     heartbeat_stale_s: int = 30            # au-delà : heartbeat considéré ancien (🟠)
     create_timeout_s: int = 120
+    refused_s: int = 40                    # création : compte vu « non connecté » pendant ce délai → identifiants refusés
     stop_wait_s: int = 30                  # attente après FERMER_TERMINAL avant kill
     launch_stagger_s: int = 5              # écart entre deux lancements au démarrage
     ack_timeout_s: int = 20

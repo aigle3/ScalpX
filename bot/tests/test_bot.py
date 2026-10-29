@@ -388,6 +388,84 @@ async def test_assistant_mot_de_passe_supprime_avant_tout_et_jamais_affiche(svc)
 
 
 @pytest.mark.asyncio
+async def test_assistant_mot_de_passe_refuse_ressaisie_serveur_et_3_essais(svc):
+    from bot.wizard import MAX_TRIES
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    ctx.cfg.timing.create_timeout_s = 30
+    ctx.cfg.timing.refused_s = 1
+    ea.password_ok = False
+    done = []
+
+    async def on_done(res, mode, mid):
+        done.append((res, mode))
+
+    async def wait(cond):
+        for _ in range(400):
+            if cond():
+                return
+            await asyncio.sleep(0.05)
+        raise AssertionError("délai dépassé")
+
+    w = WizardCore(ctx, sender, 1, on_done)
+    ea.start()
+    try:
+        await w.begin_new(1); await w.on_login(1, "777"); await w.on_password(1, 10, PWD)
+        await w.on_server(1, 0); await w.on_alias(1, "Perso")
+        assert await w.on_confirm(1, True) == END
+        await wait(lambda: 1 in w.pending)                                         # essai 1 refusé
+        mid = w.pending[1]["mid"]
+        text, kb = sender.msgs[mid]
+        assert "1/3" in text and [c for row in kb for _, c in row] == ["wz:rpw", "wz:rsrv", "wz:rab"]
+        iid = w.pending[1]["iid"]
+        assert ctx.db.get(iid) is not None                                         # dossier gardé
+        # 🔑 ressaisir : le message est supprimé, l'essai part aussitôt
+        assert await w.retry_password(1) == PASSWORD
+        assert await w.on_password(1, 11, PWD + "2") == END and 11 in sender.deleted
+        await wait(lambda: w.pending.get(1, {}).get("tries") == 2)
+        # 🌐 changer de serveur : l'ancien dossier est abandonné, l'alias est conservé (pas redemandé)
+        assert await w.retry_server(1) == PASSWORD
+        assert ctx.db.get(iid) is None
+        assert await w.on_password(1, 12, PWD) == SERVER
+        assert await w.on_server(1, 1) == CONFIRM and w.sessions[1]["alias"] == "Perso"
+        assert await w.on_confirm(1, True) == END
+        await wait(lambda: done)                                                   # 3e refus : abandon définitif
+    finally:
+        await ea.stop()
+    res, mode = done[0]
+    assert not res.ok and f"{MAX_TRIES} essais" in res.message and w.pending == {}
+    assert ctx.db.list(include_archived=True) == []                                # aucun fantôme
+    assert PWD not in sender.all_text()
+
+
+@pytest.mark.asyncio
+async def test_assistant_mot_de_passe_refuse_abandon(svc):
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    ctx.cfg.timing.create_timeout_s = 30
+    ctx.cfg.timing.refused_s = 1
+    ea.password_ok = False
+
+    async def on_done(res, mode, mid):
+        pass
+
+    w = WizardCore(ctx, sender, 1, on_done)
+    ea.start()
+    try:
+        await w.begin_new(1); await w.on_login(1, "778"); await w.on_password(1, 10, PWD)
+        await w.on_server(1, 0); await w.on_alias(1, "")
+        await w.on_confirm(1, True)
+        for _ in range(400):
+            if 1 in w.pending:
+                break
+            await asyncio.sleep(0.05)
+        assert await w.retry_abandon(1) == END
+    finally:
+        await ea.stop()
+    assert w.pending == {} and ctx.db.list(include_archived=True) == []
+    assert "abandonnée" in sender.all_text()
+    assert await w.retry_password(1) == END and "plus en attente" in sender.sent[-1][1]
+
+
+@pytest.mark.asyncio
 async def test_assistant_autre_serveur_saisi_et_memorise(svc):
     from bot.wizard import SERVER_TEXT
     ctx, sender, dash, router, notifier, ea, conf = svc

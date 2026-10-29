@@ -32,6 +32,7 @@ class CreateResult:
     iid: str = ""
     status: Statut | None = None
     warnings: list[str] = field(default_factory=list)
+    refused: bool = False                       # identifiants refusés : terminal arrêté, dossier gardé pour un nouvel essai
 
 
 async def _noop(_: str) -> None:
@@ -71,6 +72,7 @@ class InstanceCreator:
         Renvoie (statut valide, dernier statut vu même s'il n'est pas valide)."""
         end = time.monotonic() + timeout
         last: Statut | None = None
+        refused_since = 0.0
         while time.monotonic() < end:
             st = self.status.read(iid)
             if st is not None and st.ts >= since - 5:
@@ -78,6 +80,14 @@ class InstanceCreator:
                 match = (st.id == iid) or (st.login == login and st.serveur == server)
                 if match and st.connecte and (want_version is None or st.version == want_version):
                     return st, last
+                # l'EA tourne mais le compte reste « non connecté » : identifiants refusés, inutile d'attendre la fin
+                if match and not st.connecte:
+                    refused_since = refused_since or time.monotonic()
+                    if time.monotonic() - refused_since >= self.cfg.timing.refused_s:
+                        log.info("création %s : compte non connecté depuis %d s : identifiants refusés", iid, self.cfg.timing.refused_s)
+                        return None, last
+                else:
+                    refused_since = 0.0
             await asyncio.sleep(1.0)
         return None, last
 
@@ -130,16 +140,18 @@ class InstanceCreator:
         return CreateResult(True, "Compte connecté.", inst.id, st2, warnings)
 
     async def create(self, login: str, password: str, server: str, alias: str = "",
-                     progress: Progress = _noop) -> CreateResult:
-        """Déroulé complet. Aucune instance fantôme ne reste en cas d'échec."""
+                     progress: Progress = _noop, keep_on_refusal: bool = False) -> CreateResult:
+        """Déroulé complet. Aucune instance fantôme ne reste en cas d'échec.
+        keep_on_refusal : identifiants refusés → terminal arrêté, dossier gardé (EN_CREATION) pour retry() ou abandon()."""
         async with self._lock:
             try:
-                return await self._create(login.strip(), password, server, alias.strip(), progress)
+                return await self._create(login.strip(), password, server, alias.strip(), progress, keep_on_refusal)
             except Exception as exc:                      # le message ne doit JAMAIS contenir le mot de passe
                 log.error("création : erreur inattendue : %s", mask(repr(exc), password))
                 return CreateResult(False, "Erreur inattendue : " + mask(str(exc), password))
 
-    async def _create(self, login: str, password: str, server: str, alias: str, progress: Progress) -> CreateResult:
+    async def _create(self, login: str, password: str, server: str, alias: str, progress: Progress,
+                      keep_on_refusal: bool = False) -> CreateResult:
         err = self.precheck(login, server)
         if err:
             return CreateResult(False, err)
@@ -159,11 +171,84 @@ class InstanceCreator:
         finally:
             remove_ini(dest)                              # le .ini disparaît dans TOUS les cas
         if st is None:
+            if keep_on_refusal and last is not None and not last.connecte:
+                return await self._keep_refused(inst, last)
             return await self._fail(inst, self._why(last))
         res = await self._finalize(inst, st, progress)
         if not res.ok:
             return await self._fail(inst, res.message)
         return res
+
+    async def _keep_refused(self, inst: Instance, last: Statut) -> CreateResult:
+        """Identifiants refusés : terminal arrêté, .ini effacé, dossier et instance (EN_CREATION, ignorée par le watchdog)
+        gardés pour un nouvel essai sans recopier BASE."""
+        await self.mgr.stop(inst, force=True, set_desired=None)
+        remove_ini(Path(inst.folder))
+        self.status.remove(inst.id)
+        self._mark_refused(inst.id, True)
+        log.warning("création %s : identifiants refusés, nouvel essai possible", inst.id)
+        return CreateResult(False, self._why(last), inst.id, last, refused=True)
+
+    # ---- créations refusées en attente d'un nouvel essai (survivent à un redémarrage du bot → nettoyées au démarrage)
+    def _refused_list(self) -> list[str]:
+        import json
+        try:
+            v = json.loads(self.db.meta_get("creations_refusees", "[]") or "[]")
+        except ValueError:
+            v = []
+        return [x for x in v if isinstance(x, str)]
+
+    def _mark_refused(self, iid: str, on: bool) -> None:
+        import json
+        cur = self._refused_list()
+        new = [x for x in cur if x != iid] + ([iid] if on else [])
+        if new != cur:
+            self.db.meta_set("creations_refusees", json.dumps(new))
+
+    async def cleanup_refused(self) -> int:
+        """Démarrage : les créations refusées laissées en suspens (bot redémarré entre-temps) sont abandonnées."""
+        n = 0
+        for iid in self._refused_list():
+            inst = self.db.get(iid)
+            if inst is not None and inst.desired_state == EN_CREATION:
+                await self.abandon(iid, "création abandonnée (bot redémarré)")
+                n += 1
+            else:
+                self._mark_refused(iid, False)
+        return n
+
+    async def retry(self, iid: str, password: str, progress: Progress = _noop) -> CreateResult:
+        """Nouveau mot de passe pour une création refusée : même dossier, pas de nouvelle copie de BASE.
+        Refusé encore : dossier gardé (refused=True) ; autre échec : nettoyage complet."""
+        async with self._lock:
+            inst = self.db.get(iid)
+            if inst is None or inst.desired_state != EN_CREATION or not Path(inst.folder).is_dir():
+                return CreateResult(False, "Création introuvable (abandonnée ?) : recommence avec ➕ Nouveau compte.", iid)
+            try:
+                st, last = await self._attempt(inst, password, progress)
+            except IniError as exc:
+                return await self._fail(inst, "Données invalides : " + mask(str(exc), password))
+            except Exception as exc:
+                log.error("nouvel essai : erreur inattendue : %s", mask(repr(exc), password))
+                return await self._fail(inst, "Échec de création : " + mask(str(exc), password))
+            finally:
+                remove_ini(Path(inst.folder))
+            if st is None:
+                if last is not None and not last.connecte:
+                    return await self._keep_refused(inst, last)
+                return await self._fail(inst, self._why(last))
+            self._mark_refused(iid, False)
+            res = await self._finalize(inst, st, progress)
+            if not res.ok:
+                return await self._fail(inst, res.message)
+            return res
+
+    async def abandon(self, iid: str, why: str = "création abandonnée") -> None:
+        """Création refusée qu'on n'essaie plus : nettoyage complet (comme un échec)."""
+        async with self._lock:
+            inst = self.db.get(iid)
+            if inst is not None and inst.desired_state == EN_CREATION:
+                await self._fail(inst, why)
 
     async def reconnect(self, iid: str, password: str, progress: Progress = _noop) -> CreateResult:
         """« Reconnecter » : relance l'assistant sur le dossier existant ; s'il est inutilisable,
@@ -234,5 +319,6 @@ class InstanceCreator:
             log.error("archivage impossible : %s", exc)
         self.db.delete_instance(inst.id)
         self.status.remove(inst.id)
+        self._mark_refused(inst.id, False)
         log.warning("création échouée pour %s : %s", inst.id, why)
         return CreateResult(False, why, inst.id)

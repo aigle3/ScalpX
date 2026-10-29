@@ -93,6 +93,64 @@ async def _aw():
 
 
 @pytest.mark.asyncio
+async def test_creation_refus_detecte_tot_puis_nouvel_essai(stack, caplog):
+    """Mot de passe refusé : détecté après refused_s (pas le délai complet), dossier gardé, nouvel essai sans recopie."""
+    cfg, db, procs, status, cmdq, mgr, ea = stack
+    cfg.timing.create_timeout_s = 30
+    cfg.timing.refused_s = 1
+    ea.password_ok = False
+    ea.start()
+    cr = InstanceCreator(cfg, db, mgr, status)
+    iid = make_id(999, "Demo-Server 1")
+    try:
+        t0 = time.monotonic()
+        r = await cr.create("999", PWD, "Demo-Server 1", "A", lambda t: _aw(), keep_on_refusal=True)
+        assert time.monotonic() - t0 < 10                                             # n'attend pas les 30 s
+        assert not r.ok and r.refused and r.iid == iid and "connecté" in r.message
+        inst = db.get(iid)
+        assert inst is not None and inst.desired_state == "EN_CREATION"               # gardé pour le nouvel essai
+        assert (cfg.paths.instances / iid).is_dir() and not (cfg.paths.instances / iid / INI_NAME).exists()
+        assert not procs.running and json.loads(db.meta_get("creations_refusees")) == [iid]
+        marker = cfg.paths.instances / iid / "marqueur.txt"
+        marker.write_text("x")                                                        # le dossier n'est pas recopié
+        r2 = await cr.retry(iid, PWD + "x", lambda t: _aw())                          # encore faux
+        assert r2.refused and db.get(iid) is not None
+        ea.password_ok = True
+        r3 = await cr.retry(iid, PWD, lambda t: _aw())
+        assert r3.ok, r3.message
+        assert marker.exists() and db.get(iid).desired_state == "DEMARRE"
+        assert json.loads(db.meta_get("creations_refusees")) == []
+        assert list(cfg.paths.archives.iterdir()) == [] if cfg.paths.archives.exists() else True
+    finally:
+        await ea.stop()
+    assert PWD not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_creation_refusee_abandon_et_nettoyage_au_demarrage(stack):
+    cfg, db, procs, status, cmdq, mgr, ea = stack
+    cfg.timing.create_timeout_s = 30
+    cfg.timing.refused_s = 1
+    ea.password_ok = False
+    ea.start()
+    cr = InstanceCreator(cfg, db, mgr, status)
+    try:
+        r = await cr.create("111", PWD, "Demo-Server 1", "", lambda t: _aw(), keep_on_refusal=True)
+        r2 = await cr.create("222", PWD, "Demo-Server 1", "", lambda t: _aw(), keep_on_refusal=True)
+    finally:
+        await ea.stop()
+    assert r.refused and r2.refused
+    await cr.abandon(r.iid)
+    assert db.get(r.iid) is None and not (cfg.paths.instances / r.iid).exists()
+    assert any("ECHEC" in a.name for a in cfg.paths.archives.iterdir())
+    assert await cr.cleanup_refused() == 1                                            # bot redémarré : l'autre est abandonnée
+    assert db.get(r2.iid) is None and db.list(include_archived=True) == []
+    assert json.loads(db.meta_get("creations_refusees")) == []
+    r3 = await cr.retry(r2.iid, PWD, lambda t: _aw())
+    assert not r3.ok and "introuvable" in r3.message
+
+
+@pytest.mark.asyncio
 async def test_creation_timeout_sans_heartbeat(stack):
     cfg, db, procs, status, cmdq, mgr, ea = stack
     cfg.timing.create_timeout_s = 1                       # pas de FakeEA : aucun heartbeat

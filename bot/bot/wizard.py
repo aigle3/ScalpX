@@ -21,6 +21,9 @@ log = logging.getLogger(__name__)
 LOGIN, PASSWORD, SERVER, ALIAS, CONFIRM, SERVER_TEXT = range(6)
 CANCEL = [("✖ Annuler", "wz:cancel")]
 END = -1
+MAX_TRIES = 3                      # essais de mot de passe pour une création
+PENDING_TTL_S = 600                # sans réponse après un refus : création abandonnée (dossier archivé)
+RETRY_KB = [[("🔑 Ressaisir le mot de passe", "wz:rpw")], [("🌐 Changer de serveur", "wz:rsrv")], [("✖ Abandonner", "wz:rab")]]
 _ALIAS_OK = re.compile(r"[^\w .\-éèêàùçÉÈÊÀÙÇ]")
 
 
@@ -29,6 +32,7 @@ class WizardCore:
         """on_done(result, mode, iid) : appelé (en arrière-plan) à la fin de la création/reconnexion."""
         self.ctx, self.sender, self.chat_id, self.on_done = ctx, sender, chat_id, on_done
         self.sessions: dict[int, dict] = {}
+        self.pending: dict[int, dict] = {}         # création refusée en attente (jamais de mot de passe dedans)
 
     # ---- serveurs : liste du config.toml + serveurs saisis à la main (mémorisés après une création réussie)
     def known_servers(self) -> list[str]:
@@ -86,6 +90,9 @@ class WizardCore:
             return END
         if not deleted:
             await self.sender.send(chat, "⚠️ Je n'ai pas pu supprimer ton message : supprime-le toi-même maintenant.", None, False)
+        if s["mode"] == "retry":                         # nouvel essai : même dossier, lancé tout de suite
+            self.sessions.pop(chat, None)
+            return await self._run_retry(chat, s, text)
         s["pw"] = text
         if s["mode"] == "recon":
             return await self._ask_confirm(chat)
@@ -131,6 +138,8 @@ class WizardCore:
             await self.sender.send(chat, f"❌ Ce compte existe déjà ({esc(iid)}).", None, True)
             self._clear(chat)
             return END
+        if "tries" in s:                                 # changement de serveur après un refus : alias déjà saisi
+            return await self._ask_confirm(chat)
         await self.sender.send(chat, "🏷 <b>Alias</b> facultatif (nom lisible) :", [[("Passer", "alias:skip")], CANCEL], True)
         return ALIAS
 
@@ -159,6 +168,7 @@ class WizardCore:
             return END
         mode, pw = s["mode"], s.pop("pw", "")
         login, server, alias, iid = s["login"], s["server"], s.get("alias", ""), s.get("iid", "")
+        tries = int(s.get("tries", 0)) + 1
         s.clear()
         mid = await self.sender.send(chat, "⏳ " + ("Création" if mode == "new" else "Reconnexion") + " en cours…", None, True)
 
@@ -170,7 +180,11 @@ class WizardCore:
                 new_server = server not in self.known_servers()
                 if new_server:
                     self._remember_server(server)                 # mémorisé tout de suite : plus besoin de le retaper
-                res = await self.ctx.creator.create(login, pw, server, alias, progress)
+                res = await self.ctx.creator.create(login, pw, server, alias, progress, keep_on_refusal=True)
+                if res.refused:
+                    await self._refused(chat, res, {"login": login, "server": server, "alias": alias, "tries": tries,
+                                                    "mid": mid, "new_server": new_server})
+                    return
                 if new_server and not res.ok and not (res.status is not None and res.status.connecte):
                     self._forget_server(server)                   # jamais connecté à ce serveur : probablement une faute de frappe
             else:
@@ -179,6 +193,107 @@ class WizardCore:
 
         self._spawn(task())
         return END
+
+    # ---- identifiants refusés à la création : ressaisie du mot de passe / autre serveur / abandon
+    async def _refused(self, chat: int, res, p: dict) -> None:
+        p["iid"] = res.iid
+        if p["tries"] >= MAX_TRIES:
+            await self.ctx.creator.abandon(res.iid, f"{MAX_TRIES} essais refusés")
+            if p.get("new_server"):
+                self._forget_server(p["server"])
+            log.warning("création %s : %d essais refusés, abandon", res.iid, p["tries"])
+            res.message = (f"le compte ne se connecte pas après {MAX_TRIES} essais (mot de passe ou serveur incorrect). "
+                           "Vérifie tes identifiants puis recommence avec ➕ Nouveau compte.")
+            res.refused = False
+            await self.on_done(res, "new", p["mid"])
+            return
+        self.pending[chat] = p
+        log.info("création %s : identifiants refusés (essai %d/%d), choix demandé", res.iid, p["tries"], MAX_TRIES)
+        await self.sender.edit(chat, p["mid"],
+                               f"🔐 <b>Le compte ne se connecte pas</b> ({esc(p['login'])} · {esc(p['server'])}) : "
+                               f"mot de passe ou serveur incorrect.\n\nEssai {p['tries']}/{MAX_TRIES}. Que veux-tu faire ?\n"
+                               f"<i>Sans réponse sous {PENDING_TTL_S // 60} min, la création est abandonnée.</i>", RETRY_KB)
+        self._spawn(self._expire(chat, p))
+
+    async def _expire(self, chat: int, p: dict) -> None:
+        import asyncio
+        await asyncio.sleep(PENDING_TTL_S)
+        if self.pending.get(chat) is p:                    # toujours la même attente (pas de nouvel essai entre-temps)
+            self.pending.pop(chat, None)
+            s = self.sessions.get(chat)
+            if s is not None and s.get("mode") == "retry":
+                self._clear(chat)
+            await self.ctx.creator.abandon(p["iid"], "création abandonnée (sans réponse)")
+            await self.sender.edit(chat, p["mid"], "✖ Création abandonnée (sans réponse après le refus du mot de passe).", None)
+
+    async def retry_password(self, chat: int) -> int:
+        p = self.pending.get(chat)
+        if p is None:
+            await self.sender.send(chat, "⌛ Cette création n'est plus en attente : recommence avec ➕ Nouveau compte.", None, True)
+            return END
+        self.sessions[chat] = {"mode": "retry", **{k: p[k] for k in ("iid", "login", "server", "alias", "tries", "mid", "new_server")}}
+        await self.sender.edit(chat, p["mid"], f"🔐 Identifiants refusés ({esc(p['login'])} · {esc(p['server'])}), essai {p['tries']}/{MAX_TRIES}.", None)
+        await self.sender.send(chat, "🔑 Envoie le <b>mot de passe</b> : je supprime ton message aussitôt (je ne le stocke jamais).",
+                               [[("✖ Abandonner", "wz:rab")]], True)
+        return PASSWORD
+
+    async def _run_retry(self, chat: int, s: dict, pw: str) -> int:
+        if self.pending.get(chat, {}).get("iid") != s["iid"]:
+            await self.sender.send(chat, "⌛ Cette création n'est plus en attente : recommence avec ➕ Nouveau compte.", None, True)
+            return END
+        p = self.pending.pop(chat)
+        p["tries"] += 1
+        mid = await self.sender.send(chat, f"⏳ Nouvel essai ({p['tries']}/{MAX_TRIES})…", None, True)
+        p["mid"] = mid
+
+        async def progress(t: str) -> None:
+            await self.sender.edit(chat, mid, "⏳ " + esc(t), None)
+
+        async def task() -> None:
+            res = await self.ctx.creator.retry(p["iid"], pw, progress)
+            if res.refused:
+                await self._refused(chat, res, p)
+                return
+            if p.get("new_server") and not res.ok and not (res.status is not None and res.status.connecte):
+                self._forget_server(p["server"])
+            await self.on_done(res, "new", mid)
+
+        self._spawn(task())
+        return END
+
+    async def retry_server(self, chat: int) -> int:
+        p = self.pending.pop(chat, None)
+        if p is None:
+            await self.sender.send(chat, "⌛ Cette création n'est plus en attente : recommence avec ➕ Nouveau compte.", None, True)
+            return END
+        self._clear(chat)
+        await self.ctx.creator.abandon(p["iid"], "changement de serveur")       # le dossier dépend du serveur : nouvelle copie
+        if p.get("new_server"):
+            self._forget_server(p["server"])
+        await self.sender.edit(chat, p["mid"], f"🌐 Changement de serveur pour le compte {esc(p['login'])}.", None)
+        self.sessions[chat] = {"mode": "new", "login": p["login"], "alias": p.get("alias", ""), "tries": p["tries"]}
+        await self.sender.send(chat, "🔐 Envoie le <b>mot de passe</b> du compte.\nJe supprime ton message immédiatement et je ne le stocke jamais.",
+                               [CANCEL], True)
+        return PASSWORD
+
+    async def retry_abandon(self, chat: int) -> int:
+        p = self.pending.pop(chat, None)
+        s = self.sessions.get(chat)
+        if s is not None and s.get("mode") == "retry":
+            self._clear(chat)
+        if p is None:
+            await self.sender.send(chat, "✖ Rien à abandonner.", None, True)
+            return END
+        await self.ctx.creator.abandon(p["iid"], "création abandonnée")
+        if p.get("new_server"):
+            self._forget_server(p["server"])
+        await self.sender.edit(chat, p["mid"], f"✖ Création du compte {esc(p['login'])} abandonnée.", None)
+        await self.dash_refresh()
+        return END
+
+    async def dash_refresh(self) -> None:
+        """Surchargé par l'application (rafraîchit le tableau de bord) ; rien en test."""
+        return None
 
     def _spawn(self, coro) -> None:
         import asyncio

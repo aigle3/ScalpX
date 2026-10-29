@@ -144,6 +144,7 @@ class Services:
         ctx.watchdog.alert = self.router.alert
         self.monitor = Monitor(cfg, ctx.db, ctx.status, EventReader(cfg.paths.common()), self.notifier.emit)
         self.wizard = WizardCore(ctx, self.sender, self.chat_id, self.on_created)
+        self.wizard.dash_refresh = lambda: self.dash.refresh(force=True)
 
     async def on_created(self, res, mode: str, mid: int) -> None:
         """Fin de l'assistant : message de résultat + carte du compte (ou échec clair)."""
@@ -252,6 +253,19 @@ async def w_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     q = update.callback_query
     await q.answer()
     return await svc(context).wizard.on_confirm(update.effective_chat.id, q.data == "wz:go")
+
+
+async def w_retry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Création refusée (mauvais mot de passe) : 🔑 ressaisir / 🌐 changer de serveur / ✖ abandonner."""
+    q = update.callback_query
+    await q.answer()
+    w, chat = svc(context).wizard, update.effective_chat.id
+    act = q.data.split(":")[1]
+    if act == "rpw":
+        return await w.retry_password(chat)
+    if act == "rsrv":
+        return await w.retry_server(chat)
+    return await w.retry_abandon(chat)
 
 
 async def w_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -457,6 +471,12 @@ async def startup(app: Application) -> None:
     except Exception:
         log.exception("surveillance du bot : création de la tâche")
     try:
+        n = await s.ctx.creator.cleanup_refused()                  # créations refusées laissées en suspens
+        if n:
+            log.info("démarrage : %d création(s) refusée(s) en suspens abandonnée(s)", n)
+    except Exception:
+        log.exception("démarrage : nettoyage des créations refusées")
+    try:
         launched = await s.ctx.watchdog.startup_launch()
         await s.sender.reply_menu(s.chat_id, f"🤖 Bot {bot_version()} démarré · {len(launched)} terminal(aux) relancé(s).\n"
                                               f"Le bouton <b>{MENU_BUTTON}</b> (en bas) affiche le panneau.")
@@ -489,7 +509,8 @@ def build_application(cfg: Config, ctx_factory) -> Application:
     app.add_handler(TypeHandler(Update, h_guard), group=-1)
     conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(w_new, pattern=r"^n$"),
-                      CallbackQueryHandler(w_recon, pattern=r"^a:[0-9a-f]{8}:recon$")],
+                      CallbackQueryHandler(w_recon, pattern=r"^a:[0-9a-f]{8}:recon$"),
+                      CallbackQueryHandler(w_retry, pattern=r"^wz:(rpw|rsrv|rab)$")],
         states={
             LOGIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, w_login)],
             PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, w_password)],
