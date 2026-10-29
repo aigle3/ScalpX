@@ -463,7 +463,7 @@ class Router:
         """s:l liste · s:o:<P> preset · s:new[:<P>] modèle · s:src:<compte>[:<P>] · s:ap:<P> appliquer · s:del:<P> · s:chk."""
         store, dash = self.dash.store, self.dash
         sub = p[1] if len(p) > 1 else "l"
-        name = pui.find(store, p[2]) if len(p) > 2 and sub in ("o", "ap", "del", "new") else ""
+        name = pui.find(store, p[2]) if len(p) > 2 and sub in ("o", "ap", "del", "new", "cmp") else ""
         self.awaiting_preset = None
         if sub == "o" and name:
             dash.goto("pso", name)
@@ -494,6 +494,12 @@ class Router:
         elif sub == "del" and name:
             return await self._ask(f"🗑 <b>Supprimer le preset « {esc(name)} » ?</b>\nLes robots gardent leurs réglages actuels.",
                                    lambda: self._preset_delete(name), ("pso", name), "🗑 Supprimer")
+        elif sub == "cmp" and name:
+            if not self._running():
+                dash.flash("Aucun robot lancé : rien à comparer.")
+            else:
+                dash.flash("⏳ Lecture des réglages des robots…")
+                self._bg(self._preset_compare(name))
         elif sub == "chk":
             dash.goto("psl")
             dash.flash("⏳ Contrôle des robots…")
@@ -549,6 +555,17 @@ class Router:
         await self.sender.edit(self.chat_id, mid, f"📤 <b>Preset « {esc(name)} »</b> ⭐ actif : {good}/{len(insts)} robot(s) conforme(s)\n"
                                + "\n".join(lines) + (f"\n{note}" if note else ""), [[("✖ Fermer", "d:close")]])
         await self.check_presets()
+
+    async def _preset_compare(self, name: str) -> None:
+        values = self.dash.store.presets.get(name)
+        insts = self._running()
+        if values is None:
+            return
+        raws = await asyncio.gather(*[pui.read_raw(self.ctx, i) for i in insts])
+        await self.sender.send(self.chat_id, pui.compare_text(name, values, [(i.label, r) for i, r in zip(insts, raws)]),
+                               [[("✖ Fermer", "d:close")]], True)
+        self.dash.flash("🔍 Comparaison envoyée ci-dessous.", 10)
+        await self.dash.refresh(force=True)
 
     async def _preset_delete(self, name: str) -> None:
         self.dash.store.delete(name)

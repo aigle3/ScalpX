@@ -144,6 +144,7 @@ def render_one(store: ps.PresetStore, name: str, chk: Check | None, flash: str =
     else:
         lines.append("Pas encore appliqué : 📤 l'envoie à tous les robots et en fait le preset actif.")
     kb: Keyboard = [
+        [("🔍 Comparer avec les robots", f"s:cmp:{c}")],
         [("📤 Appliquer à tous les robots", f"s:ap:{c}")],
         [("⚙️ Modifier les réglages", f"p:{c}")],
         [("📸 Remplacer par les réglages d'un robot", f"s:new:{c}")],
@@ -151,6 +152,28 @@ def render_one(store: ps.PresetStore, name: str, chk: Check | None, flash: str =
     ]
     text = "\n".join(lines)
     return (f"{flash}\n\n{text}" if flash else text), kb
+
+
+def compare_text(name: str, values: dict[str, str], results: list) -> str:
+    """Ce qui changerait sur chaque robot si le preset était appliqué : réglage : robot → preset."""
+    lines = [f"🔍 <b>Preset « {esc(name)} » comparé aux robots</b>", "<i>réglage : valeur du robot → valeur du preset</i>"]
+    for label, cur in results:
+        if cur is None:
+            lines.append(f"\n⚠️ <b>{esc(label)}</b> : réglages illisibles (terminal arrêté ?)")
+            continue
+        diff = ps.differences(values, cur)
+        if not diff:
+            lines.append(f"\n✅ <b>{esc(label)}</b> : identique au preset")
+            continue
+        lines.append(f"\n🔸 <b>{esc(label)}</b> : {len(diff)} réglage(s) changeraient")
+        for k in sorted(diff, key=lambda k: [p[0] for p in ps.cat.PARAMS].index(k) if k in ps.BY_KEY else 999):
+            p = ps.BY_KEY.get(k)
+            if p is None:
+                continue
+            old = ps.display_of(p, cur[k]) if k in cur else "?"
+            lines.append(f"   • {esc(p[1])} : {esc(old)} → <b>{esc(ps.display_of(p, diff[k]))}</b>")
+    text = "\n".join(lines)
+    return text if len(text) <= 3900 else text[:3850] + "\n… (liste tronquée)"
 
 
 def render_source(insts, overwrite: str = "", flash: str = "") -> tuple[str, Keyboard]:

@@ -935,6 +935,13 @@ async def test_presets_centraux_creer_appliquer_modifier_controler(svc):
         assert await _until(lambda: "base" in dash.store.presets)
         assert dash.store.presets["base"] == {"lot": "0.02", "f_vol": "1", "news_block": "1", "tz": "2", "fast": "12"}
         assert (ctx.cfg.paths.data / "presets.json").is_file()
+        # 🔍 comparer avant d'appliquer : A identique, B montre ce qui changerait
+        from bot import presets_ui as pui
+        await router.on_callback(f"s:cmp:{pui.code_of('base')}")
+        assert await _until(lambda: any("comparé aux robots" in s[1] for s in sender.sent))
+        cmp = next(s[1] for s in sender.sent if "comparé aux robots" in s[1])
+        assert f"✅ <b>{a.label}</b> : identique" in cmp and f"🔸 <b>{b.label}</b>" in cmp
+        assert "Fuseau horaire : France (Paris) → <b>UTC</b>" in cmp and "Taille du lot : 0.01 lot → <b>0.02 lot</b>" in cmp
         # 📤 appliquer à tous : B reçoit seulement les différences, puis devient conforme ; le preset devient actif
         from bot import presets_ui as pui
         c = pui.code_of("base")

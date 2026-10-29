@@ -55,7 +55,8 @@ Voir `LISEZMOI.txt` à la racine du dépôt : `INSTALL.bat` installe tout (BASE 
 - **🎯 Objectif immédiat** (hors créneaux horaires) : +0,5 / 1 / 2 / 3 / 5 / 10 %, ou ✏️ 10 (€), +3%, =1250 (solde cible) ;
   le bot envoie `OBJECTIF` puis `DEMARRER` : la série démarre tout de suite et s'arrête à l'objectif.
 - **💾 Presets** (⚡ Actions, ou 🧰 Commandes EA) : gardés par le bot (`data\presets.json`), communs à tous les robots.
-  📸 créer depuis les réglages d'un robot (le premier preset se fait ainsi, depuis Telegram) ; ⚙️ modifier réglage par
+  📸 créer depuis les réglages d'un robot (le premier preset se fait ainsi, depuis Telegram) ; 🔍 comparer avec les robots
+  (réglage par réglage : valeur du robot → valeur du preset, avant d'appliquer) ; ⚙️ modifier réglage par
   réglage ; 📤 appliquer à tous les robots lancés, tout de suite (seules les différences sont envoyées, puis chaque robot
   est relu) : il devient le preset ⭐ actif. Toute modification du preset actif part aussitôt vers tous les robots ; un
   contrôle toutes les 5 min affiche 🟠 sur l'accueil les robots dont les réglages s'en écartent.
