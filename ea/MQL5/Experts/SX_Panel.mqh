@@ -488,6 +488,7 @@ void PanelUpdate()
       pn[5] = hiN;           on[5] = PBool(P_F_HI);  ok[5] = f_ok[4];
       pn[6] = "BG " + hiN;   on[6] = PBool(P_F_CAN); ok[6] = f_ok[5];
       pn[7] = "NEWS";        on[7] = PBool(P_NEWS_BLOCK); ok[7] = !g_newsBlock;
+      pn[8] = "SPREAD";      on[8] = true;                ok[8] = FbOK(8);     // [ARCHI] 6.3.0
       int slot = iw / 4;
       for(int i = 0; i < FB_N; i++)
       {
@@ -496,7 +497,7 @@ void PanelUpdate()
          PRect("m_d" + IntegerToString(i), xl + cx * slot, y + row * 16 + 4, 8, 8, c, c);
          PText("m_f" + IntegerToString(i), xl + cx * slot + 13, y + row * 16, pn[i], !on[i] ? PC_DIM : PC_TEXT, 8);
       }
-      y += 16 + 24;
+      y += ((FB_N - 1) / 4 + 1) * 16 + 8;                 // une ligne de pastilles de plus avec le spread
 
       //--- Session
       int tot = g_sesWins + g_sesLosses;

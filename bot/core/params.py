@@ -34,7 +34,7 @@ PARAMS = [
     ("gridmin", "Grille dynamique : minimum", 1, "int", 10.0, 2000.0, 10.0, " pts", []),
     ("gridmax", "Grille dynamique : maximum", 1, "int", 20.0, 5000.0, 10.0, " pts", []),
     ("maxpend", "Ordres en attente max", 1, "int", 1.0, 50.0, 1.0, "", []),
-    ("maxspread", "Spread maximum", 1, "int", 5.0, 500.0, 5.0, " pts", []),
+    ("maxspread", "Spread maximum", 3, "int", 5.0, 500.0, 5.0, " pts", []),   # 🛡️ Filtres marché (EA 6.3.0)
     ("wavg", "Prix moyen pondéré", 1, "bool", 0.0, 1.0, 1.0, "", []),
     ("dyntp", "TP dynamique (ATR)", 2, "bool", 0.0, 1.0, 1.0, "", []),
     ("atrmult", "Multiplicateur ATR", 2, "dbl", 0.1, 10.0, 0.1, " x", []),

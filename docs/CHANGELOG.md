@@ -6,6 +6,7 @@ Les numéros de ligne sont ceux des fichiers v5.
 ## Versions
 | Version | Date | Changement |
 |---|---|---|
+| 6.3.0 | 2026-10-29 | Affichage : le **spread** devient un filtre visible (9e pastille du panneau, tableau des filtres, statut lu par le bot, journal des filtres) ; réglage « Spread maximum » rangé dans 🛡️ Filtres marché. Le contrôle lui-même est inchangé (au-delà du maximum : aucun nouvel ordre, les sorties continuent). Pas de filtre de slippage : la déviation max (⚡ Exécution) limite le glissement accepté à l'envoi d'un ordre. Aucun changement de trading. |
 | 6.2.3 | 2026-10-29 | Alertes « filtres OK / nouvelles séries suspendues » désactivées par défaut (`NotifyFilters=false`, réglage `n_filters`) : l'état des filtres est sur le tableau de bord. Le bot les coupe une fois sur les comptes existants. Réactivables dans 🔔 Notifications. Aucun changement de trading. |
 | 6.2.2 | 2026-10-29 | Affichage : « Résultat jour » du panneau = réalisé du jour seulement (solde − solde du début de journée, dépôts/retraits exclus) ; le flottant reste sur sa ligne. Statut : nouveau champ `pl_jour_realise` (le bot l'affiche comme « jour »), `pl_jour` inchangé. Aucun changement de trading. |
 | 6.2.1 | 2026-10-29 | Diagnostic seulement : un échec d'écriture du statut, d'une réponse à une commande ou des événements (fichier verrouillé, disque) est noté dans le journal Experts de MT5 (au plus une ligne par minute et par sorte, avec le code d'erreur). Avant, ces échecs étaient silencieux (le bot voyait seulement un EA « muet »). Aucun changement de comportement. |

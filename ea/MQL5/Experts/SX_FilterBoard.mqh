@@ -7,7 +7,8 @@
 //+------------------------------------------------------------------+
 #define FA_CONFIRM_MS   30000     // un état global doit durer 30 s avant d'être annoncé
 
-//--- Les FB_N lignes : 0 ATR, 1 Prix/EMA, 2 Volume, 3 EMA inf., 4 EMA sup., 5 Bougie sup., 6 Horaire, 7 News
+//--- Les FB_N lignes : 0 ATR, 1 Prix/EMA, 2 Volume, 3 EMA inf., 4 EMA sup., 5 Bougie sup., 6 Horaire, 7 News, 8 Spread
+//    [ARCHI] 8 Spread : toujours actif (le spread maximum bloque déjà les nouveaux ordres, voir OnTick) ; ici affichage seul
 bool FbOn(int i)
 {
    switch(i)
@@ -19,7 +20,8 @@ bool FbOn(int i)
       case 4: return PBool(P_F_HI);
       case 5: return PBool(P_F_CAN);
       case 6: return PBool(P_F_TIME);
-      default: return PBool(P_NEWS_BLOCK);
+      case 7: return PBool(P_NEWS_BLOCK);
+      default: return true;                                       // [ARCHI] spread : toujours contrôlé
    }
 }
 
@@ -27,6 +29,7 @@ bool FbOK(int i)
 {
    if(i == 6) return !f_timeBlocked;
    if(i == 7) return !g_newsBlock;
+   if(i == 8) return mk_spread <= PInt(P_MAXSPREAD);              // [ARCHI] même test que OnTick
    return f_ok[i];
 }
 
@@ -41,7 +44,8 @@ string FbName(int i)
       case 4: return "EMA " + TfNameP(P_HITF);
       case 5: return "Bougie " + TfNameP(P_HITF) + " précédente";
       case 6: return "Horaire";
-      default: return "News";
+      case 7: return "News";
+      default: return "Spread";
    }
 }
 
@@ -58,6 +62,7 @@ string FbInfo(int i)
       case 4: return FbTrend(mk_hiF, mk_hiS);
       case 5: return (mk_candleDir > 0 ? "▲ haussière" : (mk_candleDir < 0 ? "▼ baissière" : "– neutre")) + ", corps " + F0(MathAbs(mk_candleBody)) + "/" + F0(mk_candleMin) + " pts";
       case 6: return "blocage " + IntegerToString(PInt(P_T_START)) + "h–" + IntegerToString(PInt(P_T_END)) + "h";
+      case 8: return F0(mk_spread) + " pts (max " + IntegerToString(PInt(P_MAXSPREAD)) + ")";
       default:
       {
          string nx = NewsNextText();
@@ -70,10 +75,11 @@ string FbWhy(int i)
 {
    if(i == 6) return f_timeBlocked ? "plage de blocage en cours" : "";
    if(i == 7) return g_newsBlock ? "news : " + g_newsWhy : "";
+   if(i == 8) return FbOK(8) ? "" : "spread trop large (" + F0(mk_spread) + " > " + IntegerToString(PInt(P_MAXSPREAD)) + " pts)";
    return f_why[i];
 }
 
-int FbOrder(int k) { int o[FB_N] = { 0, 1, 2, 6, 7, 3, 4, 5 }; return o[k]; }   // même ordre que le panneau du graphique
+int FbOrder(int k) { int o[FB_N] = { 0, 1, 2, 6, 7, 8, 3, 4, 5 }; return o[k]; }   // même ordre que le panneau du graphique
 
 bool FiltersAllOK()
 {

@@ -3,7 +3,7 @@
 //| Noyau : variables globales, registre de paramètres (tous les     |
 //| réglages sont modifiables à chaud), persistance, presets.        |
 //+------------------------------------------------------------------+
-#define SX_VERSION   "6.2.3"
+#define SX_VERSION   "6.3.0"
 #define SX_PREFIX    "SX4_"
 #define SX_MAXQ      40
 
@@ -122,7 +122,7 @@ double   mk_candleBody = 0, mk_candleMin = 0;               // corps et seuil (p
 bool     f_timeBlocked = false;
 bool     f_marketOpen  = true;
 //--- Tableau des filtres (SX_FilterBoard.mqh) : les 6 filtres de marché + Horaire + News
-#define FB_N 8
+#define FB_N 9                    // [ARCHI] 6.3.0 : + Spread (affichage ; le contrôle du spread est inchangé)
 int      g_faState  = -1;          // dernier état global annoncé : 1 = tous OK, 0 = bloqué, -1 = inconnu
 ulong    g_faSince  = 0;
 //--- Demandes d'images du bot (traitées par le timer : ShotTick)
@@ -342,7 +342,7 @@ void InitParams()
        "Borne haute de la distance de grille dynamique.");
    Reg(P_MAXPEND, "maxpend", "Ordres en attente max", G_GRID, PT_INT, MaxPendingOrders, 1, 50, 1, "",
        "Nombre maximum d'ordres limites de grille placés en même temps.");
-   Reg(P_MAXSPREAD, "maxspread", "Spread maximum", G_GRID, PT_INT, MaxSpread, 5, 500, 5, " pts",
+   Reg(P_MAXSPREAD, "maxspread", "Spread maximum", G_FILTERS, PT_INT, MaxSpread, 5, 500, 5, " pts",
        "Au-delà de ce spread, aucune nouvelle position ni ordre de grille n'est placé (les sorties restent actives).");
    Reg(P_WAVG, "wavg", "Prix moyen pondéré", G_GRID, PT_BOOL, UseWeightedAverage ? 1 : 0, 0, 1, 1, "",
        "Activé : moyenne pondérée par les lots. Désactivé : moyenne simple des prix d'ouverture.", "", PF_TP);
