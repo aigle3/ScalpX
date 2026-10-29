@@ -19,6 +19,7 @@ from .actions import CARD_CMDS, Ctx, target as act_target
 from .params_ui import ParamsUI
 from . import presets_ui as pui
 from core.presets import PresetStore
+from storage.db import MAINTENANCE
 from .ui import ALL_ID, Confirmations, EditResult, Keyboard, Sender, confirm_kb, short
 
 log = logging.getLogger(__name__)
@@ -299,7 +300,12 @@ class Dashboard:
         if fl:
             text = f"{fl}\n\n{text}"
         c = short(iid)
-        kb: Keyboard = [
+        dep = self.ctx.deploy
+        deploying = dep.running and dep.current_iid == iid
+        in_maint = deploying or v.inst.desired_state == MAINTENANCE or bool(v.st and v.st.maintenance)
+        kb: Keyboard = ([[("🔧 Retirer la maintenance" + (" (annule la mise à jour)" if deploying else ""), f"a:{c}:maintoff")]]
+                        if in_maint else [])
+        kb += [
             [("⏸ Pause", f"a:{c}:pause"), ("▶️ Reprise", f"a:{c}:resume")],
             [("🎯 Objectif", f"g:{c}"), ("⚙️ Paramètres", f"p:{c}")],
             [("🧰 Commandes EA", f"a:{c}:cmds"), ("🖥 Terminal", f"a:{c}:term")],

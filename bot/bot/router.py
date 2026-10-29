@@ -11,6 +11,7 @@ from core.service import Notice
 from mt5 import base as basemod
 from core.summary import FILTERS, SORTS
 from mt5.deploy import plan_deploy
+from storage.db import DEMARRE
 from . import actions as act
 from . import render
 from .charts import balance_chart, total_chart
@@ -418,10 +419,34 @@ class Router:
                                    lambda: self._long(inst, act.action_delete(ctx, inst), home=True), ("acc", inst.id), "🗑 Supprimer")
         elif verb == "update":
             return await self._deploy_single(inst)
+        elif verb == "maintoff":                                  # 🔧 retirer la maintenance (annule la mise à jour en cours)
+            dep = ctx.deploy
+            if dep.running and dep.current_iid == inst.id:
+                if dep.abort(inst.id):
+                    dash.flash("⏹ Mise à jour annulée : maintenance retirée, le robot repart. Les comptes suivants ne sont pas mis à jour.")
+                else:
+                    dash.flash("⚠️ Trop tard : le nouvel EA est en cours d'installation sur ce compte (1 à 3 min). Attends la fin.")
+            else:
+                self._bg(self._maint_off(inst))
+                dash.flash("⏳ Retrait de la maintenance…")
         elif verb == "recon":                                     # normalement capté par l'assistant (ConversationHandler)
             dash.flash("🔑 Utilise le bouton Reconnecter pour lancer l'assistant.")
         await dash.refresh(force=True)
         return ""
+
+    async def _maint_off(self, inst) -> None:
+        """Hors déploiement (déploiement interrompu, maintenance restée active) : l'EA reprend, le watchdog le surveille."""
+        self.ctx.db.set_desired(inst.id, DEMARRE)
+        if self.ctx.mgr.is_running(inst):
+            r = await act.send_cmd(self.ctx, inst, "MAINTENANCE_OFF")
+            msg = ("✅ Maintenance retirée : le robot peut de nouveau ouvrir des positions." if r.ok
+                   else f"⚠️ Le bot ne surveille plus ce compte comme en maintenance, mais l'EA n'a pas répondu : {esc(r.message)}")
+        else:
+            ok = self.ctx.mgr.start(inst, set_desired=False)
+            msg = "✅ Maintenance retirée, terminal relancé." if ok else "❌ Dossier du terminal introuvable."
+        log.info("maintenance retirée à la main sur %s", inst.label)
+        self.dash.flash(msg)
+        await self.dash.refresh(force=True)
 
     async def _ask(self, text: str, run, back: tuple, yes: str = "✅ Confirmer") -> str:
         tok = self.conf.ask(Pending(text, run, back[0]))
@@ -1043,9 +1068,39 @@ class Router:
             await self.sender.send(self.chat_id, "⏳ Déploiement ou compilation en cours : redémarre après.", [[("✖ Fermer", "d:close")]], True)
             return
         await self.sender.send(self.chat_id, "🔄 Redémarrage du bot… il revient dans environ 30 s.", None, True)
-        how = upd.restart_bot(_P(__file__).resolve().parent.parent)
+        how = await asyncio.to_thread(upd.restart_bot, _P(__file__).resolve().parent.parent)
         log.warning("redémarrage demandé depuis Telegram (%s)", how)
         upd.STOP.set()
+
+    async def _compile_progress(self, mid, head: str, coro):
+        """Compilation avec progression estimée (25, 50, 75, 90 %) d'après la durée de la compilation précédente
+        (MetaEditor n'indique pas son avancement). Renvoie (résultat, durée en s)."""
+        try:
+            expected = max(10.0, float(self.ctx.db.meta_get("compile_s") or 120))
+        except ValueError:
+            expected = 120.0
+        t0 = time.monotonic()
+        task = asyncio.ensure_future(coro)
+        shown, slow = 0, False
+        log.info("compilation lancée (durée habituelle ≈ %d s)", expected)
+        while not task.done():
+            await asyncio.wait({task}, timeout=1)
+            if task.done():
+                break
+            el = time.monotonic() - t0
+            reached = max([m for m in (25, 50, 75, 90) if el >= expected * m / 100], default=0)
+            late = el > expected * 1.15
+            if mid and (reached > shown or (late and not slow)):
+                shown, slow = reached, late
+                note = f" · plus long que d'habitude ({int(el)} s)" if late else f" · {int(el)} s sur ≈ {int(expected)} s"
+                log.info("compilation : ≈ %d %% (%d s)", reached, el)
+                await self.sender.edit(self.chat_id, mid, f"{head}\n{render.bar(reached / 100, 10)} ≈ {reached} %{note}", None)
+        res = task.result()
+        dt = time.monotonic() - t0
+        if res.ok:                                         # moyenne glissante : l'estimation suit la vitesse réelle du VPS
+            self.ctx.db.meta_set("compile_s", f"{(expected + dt) / 2 if self.ctx.db.meta_get('compile_s') else dt:.0f}")
+        log.info("compilation terminée en %d s", dt)
+        return res, dt
 
     async def run_manual_build(self) -> None:
         """Bouton 🔨 Compiler l'EA : compile BASE tel quel, puis propose le déploiement si le .ex5 a changé."""
@@ -1053,9 +1108,10 @@ class Router:
         from mt5.deploy import detect_new_build
         self.building = True
         try:
-            mid = await self.sender.send(self.chat_id, "🔨 Compilation de l'EA dans BASE…", None, True)
-            res = await buildmod.compile_ea(self.ctx.cfg)
-            text = (f"✅ <b>EA v{esc(res.version)} compilé</b> ({res.warnings} avertissement(s))." if res.ok else
+            head = "🔨 Compilation de l'EA dans BASE…"
+            mid = await self.sender.send(self.chat_id, head, None, True)
+            res, dt = await self._compile_progress(mid, head, buildmod.compile_ea(self.ctx.cfg))
+            text = (f"✅ <b>EA v{esc(res.version)} compilé</b> ({res.warnings} avertissement(s)) · 100 % en {int(dt)} s." if res.ok else
                     f"❌ <b>Compilation échouée</b>" + (f" ({res.errors} erreur(s))" if res.errors > 0 else "") + f"\n{esc(res.detail)}")
             if mid:
                 await self.sender.edit(self.chat_id, mid, text, [[("✖ Fermer", "d:close")]])
@@ -1072,10 +1128,11 @@ class Router:
         from mt5.deploy import detect_new_build
         self.building = True
         try:
-            mid = await self.sender.send(self.chat_id, f"🛠 <b>version.txt = {esc(req.version)}</b> : mise à jour des sources et compilation dans BASE…", None, True)
-            res = await buildmod.auto_build(self.ctx.cfg, self.ctx.db, req)
+            head = f"🛠 <b>version.txt = {esc(req.version)}</b> : mise à jour des sources et compilation dans BASE…"
+            mid = await self.sender.send(self.chat_id, head, None, True)
+            res, dt = await self._compile_progress(mid, head, buildmod.auto_build(self.ctx.cfg, self.ctx.db, req))
             if res.ok:
-                text = f"✅ <b>EA v{esc(res.version)} compilé</b> (0 erreur, {res.warnings} avertissement(s))."
+                text = f"✅ <b>EA v{esc(res.version)} compilé</b> (0 erreur, {res.warnings} avertissement(s)) · 100 % en {int(dt)} s."
             else:
                 text = (f"❌ <b>Compilation v{esc(res.version)} échouée</b>"
                         + (f" ({res.errors} erreur(s))" if res.errors > 0 else "") + f"\n{esc(res.detail)}\n\n"

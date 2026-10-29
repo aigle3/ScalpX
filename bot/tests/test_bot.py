@@ -1226,3 +1226,39 @@ async def test_bouton_tout_installer(svc, monkeypatch):
     monkeypatch.setattr(router, "_upd_install", fake_install)
     await router._upd_cb(["upd", "all"])
     assert installs == [router._upd_msg]
+
+
+@pytest.mark.asyncio
+async def test_fiche_bouton_retirer_la_maintenance(svc):
+    from storage.db import MAINTENANCE
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    st = ctx_stack(svc)
+    a = seed(st, 41, "Demo-Server 1", state=MAINTENANCE)
+    ea.start()
+    await asyncio.sleep(0.3)
+    try:
+        ea.accounts[a.id]["maintenance"] = True
+        await router.on_callback("a:" + short(a.id))
+        assert f"a:{short(a.id)}:maintoff" in [d for row in dash.render()[1] for _, d in row]
+        await router.on_callback(f"a:{short(a.id)}:maintoff")
+        assert await _until(lambda: not ea.accounts[a.id]["maintenance"] and ctx.db.get(a.id).desired_state == DEMARRE)
+        assert await _until(lambda: "Maintenance retirée" in dash.render()[0])
+    finally:
+        await ea.stop()
+
+
+@pytest.mark.asyncio
+async def test_compilation_progression_estimee(svc):
+    """25 / 50 / 75 / 90 % d'après la durée habituelle, puis 100 % avec la durée réelle (mémorisée pour la suivante)."""
+    from mt5.build import BuildResult
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    ctx.db.meta_set("compile_s", "10")
+
+    async def slow():
+        await asyncio.sleep(9.6)
+        return BuildResult(True, "6.2.3", 0, 0, "")
+    mid = await sender.send(1, "head")
+    res, dt = await router._compile_progress(mid, "head", slow())
+    shown = [t for m, t in sender.edits if m == mid]
+    assert res.ok and [x for x in ("≈ 25 %", "≈ 50 %", "≈ 75 %", "≈ 90 %") if any(x in t for t in shown)] == ["≈ 25 %", "≈ 50 %", "≈ 75 %", "≈ 90 %"]
+    assert 9 <= dt < 12 and 9 <= float(ctx.db.meta_get("compile_s")) <= 11

@@ -87,9 +87,20 @@ class DeployManager:
         self._cancel = False
         self.running = False
         self.last_version = ""
+        self.current_iid = ""                   # compte en cours de mise à jour
+        self.phase = ""                         # "attente" (série encore ouverte, annulable) ou "installation"
+        self._abort = False
 
     def cancel(self) -> None:
         self._cancel = True
+
+    def abort(self, iid: str) -> bool:
+        """🔧 Retirer la maintenance pendant le déploiement de CE compte : possible tant que le nouvel EA n'est pas en cours
+        d'installation (préparation, attente de la fin de la série). Le compte repart, les comptes suivants ne sont pas faits."""
+        if self.running and self.current_iid == iid and self.phase in ("préparation", "attente"):
+            self._abort = self._cancel = True
+            return True
+        return False
 
     # ---- chemins
     def _ex5(self, inst: Instance) -> Path:
@@ -156,6 +167,8 @@ class DeployManager:
         end = t0 + self.cfg.timing.maintenance_wait_s
         shown = -1.0
         while time.monotonic() < end:
+            if self._abort:
+                return False
             st = self.status.read(inst.id)
             if st is not None and st.positions == 0 and not st.phase_cloture500:
                 return True
@@ -210,6 +223,7 @@ class DeployManager:
 
     async def _deploy_one(self, inst: Instance, version: str) -> DeployOutcome:
         self._back_s = None
+        self.current_iid, self.phase = inst.id, "préparation"
         pre = self.status.read(inst.id)
         pre_etat = pre.etat if pre else None            # None : état inconnu avant le déploiement → pas de comparaison
         pre_cycle = pre.cycle if pre else None
@@ -223,10 +237,19 @@ class DeployManager:
             if not r.ok:
                 self.db.set_desired(inst.id, DEMARRE)
                 return DeployOutcome(inst.id, "failed", "MAINTENANCE_ON refusé : " + r.message)
+            self.phase = "attente"
             if not await self._wait_flat(inst):                           # 3)
                 await self.cmdq.send_and_wait(inst.id, "MAINTENANCE_OFF", timeout=self.cfg.timing.ack_timeout_s)
                 self.db.set_desired(inst.id, DEMARRE)
+                if self._abort:
+                    return DeployOutcome(inst.id, "waiting", "annulé : maintenance retirée à la main, le robot repart")
                 return DeployOutcome(inst.id, "waiting", "positions ouvertes ou clôture 500 en cours")
+        if self._abort:                                                    # annulé pendant la préparation
+            if was_running:
+                await self.cmdq.send_and_wait(inst.id, "MAINTENANCE_OFF", timeout=self.cfg.timing.ack_timeout_s)
+            self.db.set_desired(inst.id, DEMARRE)
+            return DeployOutcome(inst.id, "waiting", "annulé : maintenance retirée à la main, le robot repart")
+        self.phase = "installation"
         backup = self.backup_ex5(inst)                                    # 4)
         await self._step(inst, "💾 ancien EA sauvegardé" + (f" ({backup.name})" if backup else " (aucun .ex5 à sauvegarder)"))
         await self._step(inst, "🔌 arrêt du terminal (fermeture propre, forcée au bout de "
@@ -275,7 +298,7 @@ class DeployManager:
     # ---- série
     async def run(self, targets: list[str], progress: ProgressCb | None = None, dep_id: int | None = None) -> list[DeployOutcome]:
         """Déploie séquentiellement ; au premier échec les suivants ne sont PAS déployés."""
-        self.running, self._cancel = True, False
+        self.running, self._cancel, self._abort = True, False, False
         version = basemod.read_version(self.cfg.paths.base)
         insts = [i for i in (self.db.get(t) for t in targets) if i]
         view: dict[str, tuple[str, str]] = {i.id: (PENDING, "en attente") for i in insts}
@@ -326,6 +349,7 @@ class DeployManager:
             self.db.update_deployment(dep_id, ended_ts=int(time.time()), status=status, report=report,
                                       pending=",".join(waiting))
             self.running = False
+            self.current_iid, self.phase, self._abort = "", "", False
             self._on_step = None
             log.info("déploiement de l'EA v%s terminé : %s", version, status)
         return outcomes

@@ -509,3 +509,31 @@ def test_verrou_remplace_l_ancien_bot():
     new = m.acquire_lock(port, wait_s=10)
     assert new is not None and ql.requested.is_set() and _t.monotonic() - t0 < 8
     new.close()
+
+
+@pytest.mark.asyncio
+async def test_deploiement_annule_en_retirant_la_maintenance(stack):
+    """Série ouverte : pendant l'attente, 🔧 retirer la maintenance annule la mise à jour ; le compte repart, les suivants ne sont pas faits."""
+    cfg, db, procs, status, cmdq, mgr, ea = stack
+    a = seed(stack, login=71)
+    b = seed(stack, login=72)
+    ea.accounts.setdefault(a.id, {})["positions"] = 2
+    publish(cfg, "5.1")
+    ea.start()
+    await asyncio.sleep(0.3)
+    dm = DeployManager(cfg, db, mgr, status, cmdq)
+    try:
+        task = asyncio.create_task(dm.run([a.id, b.id]))
+        for _ in range(100):
+            await asyncio.sleep(0.05)
+            if dm.phase == "attente":
+                break
+        assert dm.current_iid == a.id and not dm.abort(b.id)            # seulement le compte en cours
+        assert dm.abort(a.id)
+        out = await asyncio.wait_for(task, 20)
+    finally:
+        await ea.stop()
+    assert out[0].status == "waiting" and "annulé" in out[0].message and len(out) == 1
+    assert db.get(a.id).desired_state == DEMARRE and not ea.accounts[a.id]["maintenance"]
+    assert (Path(a.folder) / "MQL5" / "Experts" / "ScalpX_v5.ex5").read_text() != "5.1"   # ancien EA gardé
+    assert not dm.running and dm.current_iid == "" and not dm.abort(a.id)
