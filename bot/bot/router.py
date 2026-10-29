@@ -939,6 +939,18 @@ class Router:
             lines.append(f"📈 EA : {len(plan.ea_files)} fichier(s) — copie dans BASE, compilation, puis proposition de déploiement")
         names = plan.bot_files[:6] + plan.ea_files[:6]
         lines.append("<i>" + esc(", ".join(names)) + ("…" if len(plan.bot_files) + len(plan.ea_files) > len(names) else "") + "</i>")
+        later = [str(x) for x in (upd.commit_info(plan.source).get("later") or [])]
+        if left:                                 # ce que « ⏩ Tout installer » apporte en plus, version par version
+            lines += ["", f"⏩ <b>Tout installer d'un coup</b> ajoute aussi {left} autre(s) version(s) :"]
+            shown = 0
+            for msg in later:
+                line = "• " + esc(msg)
+                if len("\n".join(lines)) + len(line) > 3700:        # limite d'un message Telegram
+                    break
+                lines.append(line)
+                shown += 1
+            if shown < left:
+                lines.append(f"• … et {left - shown} autre(s)")
         self._upd_msg = await self.sender.send(self.chat_id, "\n".join(lines),
                                                [[("⬆ Installer", f"upd:go:{plan.stamp}"), ("⏰ Plus tard", "upd:later")]]
                                                + ([[(f"⏩ Tout installer d'un coup ({left + 1})", "upd:all")]] if left else []), True)
@@ -955,6 +967,10 @@ class Router:
             await self.dash.refresh(force=True)
             return ""
         if sub not in ("go", "all"):
+            return ""
+        if upd.STOP.is_set():                   # déjà installée, le bot redémarre : un 2e appui ne relance rien
+            if mid:
+                await self.sender.edit(self.chat_id, mid, "🔄 Mise à jour déjà installée : le bot redémarre (≈ 30 s).", None)
             return ""
         if self.ctx.deploy.running or self.building:   # mise en file : installée toute seule à la fin, l'utilisateur le voit
             self._upd_after = sub

@@ -28,11 +28,12 @@ def marker(bot_root: Path) -> Path:
 
 
 def mark_restarting(bot_root: Path) -> None:
-    """Juste avant un redémarrage voulu : la surveillance le laisse se faire."""
+    """Juste avant un redémarrage voulu : « horodatage pid ». La surveillance attend la fin de CE processus puis relance
+    le bot elle-même, tout de suite (sans attendre ses deux passages)."""
     try:
         m = marker(bot_root)
         m.parent.mkdir(parents=True, exist_ok=True)
-        m.write_text(str(int(time.time())), encoding="utf-8")
+        m.write_text(f"{int(time.time())} {os.getpid()}", encoding="utf-8")
     except OSError as exc:
         log.warning("marqueur de redémarrage non écrit : %s", exc)
 
@@ -49,6 +50,21 @@ def clear_restarting(bot_root: Path) -> None:
 def _run(args: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(args, capture_output=True, text=True, timeout=30,
                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+
+def kick(runner=None) -> bool:
+    """Lance la tâche de surveillance tout de suite (redémarrage voulu). Elle tourne dans SA tâche planifiée : rien ne
+    peut l'interrompre quand l'ancien bot s'arrête (un processus lancé par le bot lui-même peut être tué avec lui)."""
+    if os.name != "nt" and runner is None:
+        return False
+    run = runner or _run
+    try:
+        if run(["schtasks", "/query", "/tn", TASK]).returncode != 0:
+            return False
+        return run(["schtasks", "/run", "/tn", TASK]).returncode == 0
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("surveillance non lancée : %s", exc)
+        return False
 
 
 def ensure_watchdog(bot_root: Path, runner=None) -> str:

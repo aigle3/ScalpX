@@ -161,6 +161,7 @@ def fetch(cfg: Config, http: Http | None = None, force: bool = False, now: float
         if not force and t - _SEEN["since"] < cfg.update.settle_min * 60:
             return FetchResult(True, False, sha, msg, token_expires=expires, waiting=True)
         remaining = 0
+        later: list[str] = []                                              # publications suivantes (1re ligne du message)
         if installed and not latest:                                       # publication suivante seulement
             rc = get(f"{API}/repos/{repo}/compare/{installed}...{sha}", _headers(cfg))
             if rc[0] == 200:
@@ -169,6 +170,8 @@ def fetch(cfg: Config, http: Http | None = None, force: bool = False, now: float
                 if cj.get("status") == "ahead" and commits:
                     nxt = commits[0]
                     remaining = len(commits) - 1
+                    later = [(c.get("commit", {}).get("message") or "").strip().splitlines()[0][:160]
+                             for c in commits[1:] if (c.get("commit", {}).get("message") or "").strip()]
                     sha = nxt.get("sha", sha)
                     msg = (nxt.get("commit", {}).get("message") or "").strip()
                     j = nxt
@@ -177,7 +180,7 @@ def fetch(cfg: Config, http: Http | None = None, force: bool = False, now: float
         if code != 200:
             return FetchResult(False, error=_explain(code), token_expires=expires)
         info = {"sha": sha, "message": msg, "date": j.get("commit", {}).get("committer", {}).get("date", ""),
-                "fetched": int(time.time()), "remaining": remaining}
+                "fetched": int(time.time()), "remaining": remaining, "later": later}
         extract_zip(data, dest, info)
         log.info("paquet GitHub %s@%s téléchargé : %s", repo, sha[:7], msg.splitlines()[0] if msg else "")
         return FetchResult(True, True, sha, msg, token_expires=expires, remaining=remaining)

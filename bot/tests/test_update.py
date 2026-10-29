@@ -242,6 +242,7 @@ def test_github_plusieurs_publications_proposees_une_par_une_dans_l_ordre(tmp_pa
     r = gh.fetch(cfg, http, force=True, installed="c1")
     assert r.changed and r.sha == "c2" and r.remaining == 2 and got == ["c2"]
     assert u.commit_info(tmp_path / "release")["remaining"] == 2
+    assert u.commit_info(tmp_path / "release")["later"] == ["Bot c3", "Bot c4"]        # décrites dans le message
     r = gh.fetch(cfg, http, force=True, installed="c1")                    # c2 pas encore installé : rien de plus
     assert not r.changed and got == ["c2"]
     r = gh.fetch(cfg, http, force=True, installed="c2")                    # c2 installé → c3
@@ -389,7 +390,13 @@ def test_surveillance_du_bot_tache_et_marqueur(tmp_path):
     assert str(root / "watchdog.ps1") in (root / "watchdog.vbs").read_text()
     # redémarrage voulu : marqueur posé puis effacé par le nouveau bot
     sw.mark_restarting(root)
-    assert sw.marker(root).is_file()
+    import os as _os
+    ts, pid = sw.marker(root).read_text().split()
+    assert int(pid) == _os.getpid() and int(ts) > 0
+    # redémarrage voulu : la surveillance est lancée tout de suite (si sa tâche existe)
+    calls.clear()
+    assert sw.kick(run) and calls[-1] == ["schtasks", "/run", "/tn", sw.TASK]
+    assert not sw.kick(lambda a: R(1))
     sw.clear_restarting(root)
     sw.clear_restarting(root)
     assert not sw.marker(root).exists()
@@ -401,3 +408,6 @@ def test_script_de_surveillance_present_et_prudent():
     assert ps.startswith(b"\xef\xbb\xbf") and b"\r\n" in ps and b"\n" not in ps.replace(b"\r\n", b"")
     t = ps.decode("utf-8-sig")
     assert "restarting" in t and "-lt 300" in t and "$miss -lt 2" in t and "schtasks /run /tn $task" in t
+    # le marqueur est traité AVANT le test « bot vivant » (l'ancien bot tient encore son verrou pendant l'arrêt)
+    assert t.index("if (Test-Path $mark)") < t.index("if (Alive) {\r\n    if (Test-Path $state)")
+    assert "Wait-Process -Id $old" in t and "Stop-Process -Id $old -Force" in t

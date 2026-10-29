@@ -1,5 +1,6 @@
 ﻿# Surveillance du bot ScalpX (tâche « ScalpX Watchdog », toutes les 2 min, lancée par watchdog.vbs sans fenêtre).
-# Bot vivant : rien. Redémarrage normal en cours (data\restarting de moins de 5 min) : rien.
+# Redémarrage voulu (data\restarting = « horodatage pid ») : attend la fin de l'ancien bot puis relance tout de suite.
+# Bot vivant : rien.
 # Bot absent deux passages de suite : relance de la tâche « ScalpX Bot » (arrêt puis relance si elle est bloquée).
 $ErrorActionPreference = 'SilentlyContinue'
 $root  = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -33,16 +34,38 @@ function Alive {
     } catch { return $false } finally { $c.Close() }
 }
 
-if (Alive) {
-    if (Test-Path $state) { Remove-Item $state -Force; Log 'bot de nouveau en ligne' }
+$mark = Join-Path $data 'restarting'
+if (Test-Path $mark) {
+    # redémarrage voulu (mise à jour, bouton) : attendre la fin de l'ancien bot, puis relancer tout de suite
+    $parts = "$(Get-Content $mark -TotalCount 1)".Trim() -split '\s+'
+    $old = 0
+    if ($parts.Count -gt 1) { $old = [int]$parts[1] }
+    $age = (New-TimeSpan -Start (Get-Item $mark).LastWriteTime -End (Get-Date)).TotalSeconds
+    if ($old -gt 0 -and (Get-Process -Id $old)) {
+        Log ("redémarrage voulu : attente de la fin de l'ancien bot (pid {0}, annoncé il y a {1:N0} s)" -f $old, $age)
+        $left = [int][Math]::Max(10, 240 - $age)
+        Wait-Process -Id $old -Timeout $left
+        if (Get-Process -Id $old) {
+            Log "ancien bot (pid $old) toujours là après 4 min : arrêt forcé"
+            Stop-Process -Id $old -Force
+            Start-Sleep -Seconds 3
+        }
+    } elseif ((-not $old) -and $age -lt 300 -and (Alive)) {
+        exit 0                                  # ancien format de marqueur (sans pid) : le bot n'est pas encore arrêté
+    }
+    if (Alive) { Log 'nouveau bot déjà en ligne'; Remove-Item $state -Force; exit 0 }
+    for ($i = 1; $i -le 4; $i++) {
+        Log "relance du bot (redémarrage voulu), essai $i"
+        schtasks /run /tn $task | Out-Null
+        for ($j = 0; $j -lt 10; $j++) { Start-Sleep -Seconds 5; if (Alive) { Log 'bot redémarré'; Remove-Item $state -Force; exit 0 } }
+    }
+    Log 'relance non confirmée : nouvel essai au prochain passage'
     exit 0
 }
 
-$mark = Join-Path $data 'restarting'
-if (Test-Path $mark) {
-    $age = (New-TimeSpan -Start (Get-Item $mark).LastWriteTime -End (Get-Date)).TotalSeconds
-    if ($age -lt 300) { Log ("redémarrage normal en cours depuis {0:N0} s : pas d'intervention" -f $age); exit 0 }
-    Log ("redémarrage annoncé il y a {0:N0} s mais bot toujours absent : je prends le relais" -f $age)
+if (Alive) {
+    if (Test-Path $state) { Remove-Item $state -Force; Log 'bot de nouveau en ligne' }
+    exit 0
 }
 
 $miss = 0

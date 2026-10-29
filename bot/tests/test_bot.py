@@ -1297,3 +1297,19 @@ async def test_detecteur_de_blocage_de_la_boucle(caplog):
     task.cancel()
     ap.RUNNING_JOBS.pop("j_test", None)
     assert any("boucle du bot bloquée" in r.message and "j_test" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_message_de_mise_a_jour_detaille_toutes_les_versions(svc, tmp_path):
+    import json
+    from types import SimpleNamespace
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    src = tmp_path / "release"
+    (src / "bot").mkdir(parents=True)
+    (src / ".commit.json").write_text(json.dumps({"sha": "c2", "remaining": 2, "later": ["Bot 2.3.0 : truc", "EA 6.3.0 : machin"]}))
+    plan = SimpleNamespace(source=src, note="Bot 2.2.0 : suivant", bot_files=["main.py"], bot_remove=[], ea_files=[],
+                           version="", stamp="s1")
+    await router.on_update_available(plan)
+    text, kb = sender.msgs[router._upd_msg]
+    assert "Bot 2.2.0 : suivant" in text and "• Bot 2.3.0 : truc" in text and "• EA 6.3.0 : machin" in text
+    assert any(d == "upd:all" for row in kb for _, d in row)

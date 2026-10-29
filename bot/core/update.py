@@ -302,8 +302,8 @@ def restart_script(pid: int, wait_s: int = 300, log_path: Path | None = None) ->
 def restart_bot(bot_root: Path) -> str:
     """Relance le bot avec le nouveau code. Le nouveau processus remplace l'ancien (verrou : QUIT).
     Tâche planifiée présente → elle est relancée après l'arrêt de celui-ci ; sinon nouveau processus détaché."""
-    from .selfwatch import mark_restarting
-    mark_restarting(bot_root)                     # la surveillance (tâche ScalpX Watchdog) laisse ce redémarrage se faire
+    from .selfwatch import kick, mark_restarting
+    mark_restarting(bot_root)                     # « je redémarre, pid N » : lu par la surveillance
     no_win = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     detached = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     has_task = os.name == "nt" and subprocess.run(["schtasks", "/query", "/tn", TASK], capture_output=True,
@@ -311,10 +311,13 @@ def restart_bot(bot_root: Path) -> str:
     if has_task:
         # La tâche n'accepte qu'une instance (IgnoreNew) : elle n'est relancée qu'une fois CE processus terminé.
         # Avant : relance fixe après 20 s, refusée si l'arrêt prenait plus longtemps (compilation en cours) → bot arrêté.
+        # Deux relanceurs indépendants (la tâche n'accepte qu'une instance : une double relance est sans effet) :
+        # 1) la tâche « ScalpX Watchdog », dans sa propre tâche planifiée : rien ne l'arrête avec l'ancien bot ;
+        # 2) le script PowerShell lancé d'ici (seul relanceur si la surveillance n'existe pas encore).
         subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command",
                           restart_script(os.getpid(), log_path=bot_root / "data" / "logs" / "restart.log")],
                          creationflags=detached | no_win, close_fds=True)
-        return "task"
+        return "task+surveillance" if kick() else "task"
     exe = Path(sys.executable)
     if os.name == "nt" and exe.name.lower() == "python.exe" and (exe.with_name("pythonw.exe")).exists():
         exe = exe.with_name("pythonw.exe")                            # pas de fenêtre noire orpheline
