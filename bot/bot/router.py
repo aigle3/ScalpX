@@ -762,8 +762,8 @@ class Router:
         for v in self.ctx.views():
             cur = v.st.version if v.st and v.st.version else v.inst.ea_version
             lines.append(f"{'⬆' if v.inst.id in plan.targets else '✅'} {esc(v.inst.label)} : v{esc(cur or '?')}")
-        if plan.inputs_changed:
-            lines.append(f"\n⚠️ Les inputs du .set ont changé ({esc(plan.inputs_diff)}). Les paramètres des comptes ne seront PAS modifiés.")
+        if plan.inputs_note:
+            lines.append("\n" + esc(plan.inputs_note))
         if not plan.targets:
             lines.append("\nTous les comptes sont à jour.")
             await self.sender.send(self.chat_id, "\n".join(lines), None, True)
@@ -777,7 +777,9 @@ class Router:
         self._upd_plan = plan
         from core.version import bot_version, read as vread
         from mt5 import base as basemod
-        lines = ["⬆ <b>Mise à jour ScalpX disponible</b>"]
+        from core import update as upd
+        left = int(upd.commit_info(plan.source).get("remaining", 0) or 0)
+        lines = ["⬆ <b>Mise à jour ScalpX disponible</b>" + (f" (encore {left} ensuite, proposée(s) une par une)" if left else "")]
         if plan.note:
             lines.append("📝 " + esc(plan.note.splitlines()[0][:200]))
         if plan.bot_files or plan.bot_remove:
@@ -854,7 +856,8 @@ class Router:
         cfg = self.ctx.cfg
         loop = asyncio.get_running_loop()
         if cfg.update.github:
-            res = await loop.run_in_executor(None, lambda: gh.fetch(cfg, force=True))      # demandé : sans délai
+            inst_c = (self.ctx.db.meta_get("installed_commit") or "").split(" ")[0]
+            res = await loop.run_in_executor(None, lambda: gh.fetch(cfg, force=True, installed=inst_c))   # sans délai
             if not res.ok:
                 await self.sender.send(self.chat_id, f"⚠️ Mises à jour : {esc(res.error)}", [[("✖ Fermer", "d:close")]], True)
                 return
@@ -950,8 +953,8 @@ class Router:
         lines = [f"🆕 <b>Nouvelle compilation de l'EA détectée dans BASE</b>",
                  f"Version <b>{esc(plan.base_version or '?')}</b> · compilée à {time.strftime('%H:%M', time.localtime(nb.compiled_at))}",
                  "", f"{len(plan.targets)} compte(s) tournent avec l'ancien .ex5 :", esc(", ".join(names[:15]))]
-        if plan.inputs_changed:
-            lines.append(f"\n⚠️ Les inputs du .set ont changé ({esc(plan.inputs_diff)}). Les paramètres des comptes ne seront PAS modifiés.")
+        if plan.inputs_note:
+            lines.append("\n" + esc(plan.inputs_note))
         lines.append("\nMise à jour un compte à la fois, après fermeture des positions, avec retour à l'ancien .ex5 en cas d'échec.")
         kb: Keyboard = [[(f"🚀 Déployer sur tous ({len(plan.targets)})", "dep:all")],
                         [("1️⃣ Un compte d'abord", "dep:one"), ("☑ Sélection", "dep:sel")],
@@ -963,7 +966,7 @@ class Router:
         if inst.id not in plan.targets:
             self.dash.flash("✅ Ce compte est déjà à jour.")
         else:
-            extra = f"\n⚠️ inputs modifiés ({esc(plan.inputs_diff)}), paramètres inchangés." if plan.inputs_changed else ""
+            extra = ("\n" + esc(plan.inputs_note)) if plan.inputs_note else ""
             return await self._ask(f"⬆ <b>Mettre à jour {esc(inst.label)} vers v{esc(plan.base_version)} ?</b>\nMaintenance, arrêt propre, copie du .ex5, relance, vérification.{extra}",
                                    lambda: self._run_deploy([inst.id]), ("acc", inst.id), "⬆ Déployer")
         await self.dash.refresh(force=True)
@@ -1031,7 +1034,7 @@ class Router:
         if not targets:
             return
         labels = ", ".join((self.ctx.db.get(t).label if self.ctx.db.get(t) else t) for t in targets[:10])
-        extra = f"\n⚠️ Inputs modifiés ({esc(plan.inputs_diff)}) : paramètres inchangés, à vérifier après coup." if plan.inputs_changed else ""
+        extra = ("\n" + esc(plan.inputs_note)) if plan.inputs_note else ""
         tok = self.conf.ask(Pending("deploy", lambda: self._run_deploy(targets)))
         await self._dep_edit(f"⚠️ <b>Confirmer le déploiement v{esc(plan.base_version)} sur {len(targets)} compte(s) ?</b>\n{esc(labels)}{extra}\n\n"
                              "Un compte à la fois ; le déploiement s'arrête au premier échec.",

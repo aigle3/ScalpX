@@ -115,8 +115,6 @@ def trading_block(views: list[AccountView], now: float) -> list[str]:
         head = "🏁 <b>ARRÊT À 500</b> : retrait attendu"
     elif st.vacances:
         head = "🏖 <b>MODE VACANCES</b> : aucune nouvelle série"
-    elif st.reprise_auto and not st.ea_demarre:
-        head = f"⏳ <b>REPRISE AUTOMATIQUE à {_hhmm(st.reprise_auto)}</b> : terminal relancé (⏸ Pause pour l'empêcher)"
     elif st.etat == "PAUSE" or (st.objectif_actif and not st.ea_demarre):
         head = "⏸ <b>EN PAUSE</b>" + (f" jusqu'à {_hhmm(st.pause_jusqua)} (reprise automatique)" if st.pause_jusqua else "")
     elif not st.objectif_actif:

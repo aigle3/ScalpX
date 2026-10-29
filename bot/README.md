@@ -46,7 +46,7 @@ Voir `LISEZMOI.txt` à la racine du dépôt : `INSTALL.bat` installe tout (BASE 
 - **👥 Comptes** : liste détaillée, un bouton par compte, 🔎 filtre et ↕ tri (un bouton chacun, qui fait défiler les choix).
 - **⏸ Pause** (fiche ou ⚡ Actions pour tous) : tout de suite jusqu'à ▶ Reprise, ou **programmée** 1 h / 2 h / 4 h /
   jusqu'à 08:00 : l'EA reprend tout seul à l'heure prévue (commande `PAUSE 2h`, `PAUSE 08:00`).
-- **Fiche compte** : ⏸ Pause, ▶️ Reprise, **🎯 Objectif**, **⚙️ Paramètres** (75 réglages par boutons), **🧰 Commandes EA**
+- **Fiche compte** : ⏸ Pause, ▶️ Reprise, **🎯 Objectif**, **⚙️ Paramètres** (74 réglages par boutons), **🧰 Commandes EA**
   (consultations, vacances, presets, valider, annuler l'objectif, 🛑 tout fermer), **🖥 Terminal** (redémarrer, lancer,
   arrêter, reconnecter, mettre à jour l'EA, supprimer), 📈 graphique.
 - **⚡ Actions — tous les comptes lancés à la fois** : ⏸ pause (immédiate ou programmée), ▶ tout reprendre, **🎯 Objectif (tous)**,
@@ -72,6 +72,8 @@ Voir `LISEZMOI.txt` à la racine du dépôt : `INSTALL.bat` installe tout (BASE 
 
 1. Chaque commit sur `main` est testé par GitHub ; s'il passe, la branche `stable` avance. Le bot télécharge `stable`
    (toutes les minutes) dans `C:\ScalpX\release`.
+   Une publication n'est proposée qu'après 2 min sans autre publication ; s'il y en a plusieurs, elles sont proposées
+   une par une, dans l'ordre (la suivante après l'installation de la précédente).
 2. Telegram : « ⬆ Mise à jour disponible » avec la description et les versions (ex. Bot 1.2.0 → 1.3.0, EA 5.3.0 → 5.3.1).
 3. **Installer** : fichiers du bot copiés puis redémarrage du bot (les terminaux continuent) ; sources de l'EA et `.set` copiés
    dans BASE, `version.txt` écrit en dernier → compilation automatique (MetaEditor de BASE) → proposition de déploiement.

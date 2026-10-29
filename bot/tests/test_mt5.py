@@ -331,7 +331,9 @@ def test_plan_deploiement_inputs_modifies(stack):
     publish(cfg, "5.1")
     (cfg.paths.base / "MQL5" / "Presets" / "scalpx_v5.set").write_text("A=1\nB=2\nC=3\n")
     p = plan_deploy(cfg, db)
-    assert p.inputs_changed and "C" in p.inputs_diff and p.targets == [inst.id]
+    assert p.inputs_changed and p.inputs_diff == "C" and p.targets == [inst.id] and "tes réglages actuels ne changent pas" in p.inputs_note
+    (cfg.paths.base / "MQL5" / "Presets" / "scalpx_v5.set").write_text("A=1\n")              # inputs supprimés : rien à signaler
+    assert not plan_deploy(cfg, db).inputs_changed and plan_deploy(cfg, db).inputs_note == ""
     p2 = plan_deploy(cfg, db, selection=["inconnu"])
     assert p2.targets == []
 

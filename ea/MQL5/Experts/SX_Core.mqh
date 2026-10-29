@@ -3,7 +3,7 @@
 //| Noyau : variables globales, registre de paramètres (tous les     |
 //| réglages sont modifiables à chaud), persistance, presets.        |
 //+------------------------------------------------------------------+
-#define SX_VERSION   "5.6.2"
+#define SX_VERSION   "6.0.0"
 #define SX_PREFIX    "SX4_"
 #define SX_MAXQ      40
 
@@ -30,7 +30,7 @@ enum ENUM_PID
    // Objectifs
    P_EARLY, P_GOALMAX, P_PROFNOTIF,
    // Exécution
-   P_DEVIATION, P_RETRIES, P_AUTORESUME,
+   P_DEVIATION, P_RETRIES,
    // Notifications
    P_N_FILTERS, P_N_PROGRESS, P_N_ERRORS,
    // Graphique
@@ -69,8 +69,6 @@ bool     g_enabled        = false;   // robot démarré (entrées + grille autor
 bool     g_stoppedManually= false;   // arrêt manuel (pas de reprise auto)
 bool     g_configOK       = false;   // paramètres validés par l'utilisateur
 bool     g_closing        = false;   // fermeture groupée en cours
-datetime g_resumeAt       = 0;       // reprise automatique programmée (heure serveur)
-datetime g_resumeFrom     = 0;       // heure (fuseau) du redémarrage qui l'a programmée
 ulong    g_cooldownUntilMs= 0;       // pas d'entrée avant (ms)
 ulong    g_nextTradeMs    = 0;       // backoff après échec d'ordre (ms)
 int      g_failCount      = 0;       // échecs d'ordre consécutifs
@@ -409,8 +407,6 @@ void InitParams()
        "Écart de prix toléré à l'exécution des ordres au marché.");
    Reg(P_RETRIES, "retries", "Nouvelles tentatives", G_EXEC, PT_INT, MaxRetries, 0, 5, 1, "",
        "Nombre de nouvelles tentatives immédiates sur requote / prix changé / timeout.");
-   Reg(P_AUTORESUME, "autoresume", "Reprise auto après retrait", G_EXEC, PT_INT, AutoResumeMinutes, 0, 240, 5, " min",
-       "Si le robot actif est retiré du graphique puis rattaché, il reprend après ce délai (0 = jamais). Un simple rechargement reprend tout de suite.");
 
    // --- Notifications
    Reg(P_N_FILTERS, "n_filters", "Alertes globales des filtres", G_NOTIF, PT_BOOL, NotifyFilters ? 1 : 0, 0, 1, 1, "",

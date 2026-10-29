@@ -73,7 +73,6 @@ class Statut(BaseModel):
     trading_autorise: bool | None = None
     pause_jusqua: str = ""
     vacances: bool = False
-    reprise_auto: str = ""              # reprise automatique programmée après un redémarrage (EA 5.6.0+)
     signal: str = ""                    # achat | vente | ""
     filtres: list[Filtre] | None = None
     news_filtre: bool = False

@@ -34,6 +34,7 @@ class FetchResult:
     error: str = ""
     token_expires: str = ""                     # date d'expiration du jeton (AAAA-MM-JJ), si GitHub l'indique
     waiting: bool = False                       # nouveau commit vu, en attente du délai de stabilité
+    remaining: int = 0                          # publications suivantes, proposées ensuite une par une
 
 
 def _headers(cfg: Config) -> dict[str, str]:
@@ -124,9 +125,13 @@ def http_get(url: str, headers: dict) -> tuple[int, bytes]:
 _SEEN = {"sha": "", "since": 0.0}             # dernier commit vu sur la branche et depuis quand
 
 
-def fetch(cfg: Config, http: Http | None = None, force: bool = False, now: float | None = None) -> FetchResult:
+def fetch(cfg: Config, http: Http | None = None, force: bool = False, now: float | None = None,
+          installed: str = "") -> FetchResult:
     """Met à jour la copie locale du paquet si la branche a un nouveau commit, resté inchangé depuis
-    [update] settle_min minutes (évite de proposer une publication en cours). force=True : sans attente."""
+    [update] settle_min minutes (évite de proposer une publication en cours). force=True : sans attente.
+
+    Plusieurs publications d'affilée : elles sont proposées DANS L'ORDRE, une par une. `installed` = commit installé ;
+    le paquet téléchargé est la publication qui le suit, et rien de plus n'est téléchargé tant qu'il n'est pas installé."""
     get = http or http_get
     repo = cfg.update.github.strip()
     branch = "stable" if cfg.update.validated_only else (cfg.update.branch or "main")
@@ -142,21 +147,36 @@ def fetch(cfg: Config, http: Http | None = None, force: bool = False, now: float
         j = json.loads(body.decode("utf-8"))
         sha = j.get("sha", "")
         msg = (j.get("commit", {}).get("message") or "").strip()
-        if sha and sha == local_sha(dest):
+        local = local_sha(dest)
+        if sha and sha == local:
             return FetchResult(True, False, sha, msg, token_expires=expires)
+        if installed and local and not local.startswith(installed):       # paquet précédent pas encore installé : on attend
+            return FetchResult(True, False, local, "", token_expires=expires)
         t = now if now is not None else time.time()
         if sha != _SEEN["sha"]:
             _SEEN["sha"], _SEEN["since"] = sha, t
         if not force and t - _SEEN["since"] < cfg.update.settle_min * 60:
             return FetchResult(True, False, sha, msg, token_expires=expires, waiting=True)
+        remaining = 0
+        if installed:                                                      # publication suivante seulement
+            rc = get(f"{API}/repos/{repo}/compare/{installed}...{sha}", _headers(cfg))
+            if rc[0] == 200:
+                cj = json.loads(rc[1].decode("utf-8"))
+                commits = cj.get("commits") or []
+                if cj.get("status") == "ahead" and commits:
+                    nxt = commits[0]
+                    remaining = len(commits) - 1
+                    sha = nxt.get("sha", sha)
+                    msg = (nxt.get("commit", {}).get("message") or "").strip()
+                    j = nxt
         res = get(f"{API}/repos/{repo}/zipball/{sha}", _headers(cfg))
         code, data = res[0], res[1]
         if code != 200:
             return FetchResult(False, error=_explain(code), token_expires=expires)
         info = {"sha": sha, "message": msg, "date": j.get("commit", {}).get("committer", {}).get("date", ""),
-                "fetched": int(time.time())}
+                "fetched": int(time.time()), "remaining": remaining}
         extract_zip(data, dest, info)
         log.info("paquet GitHub %s@%s téléchargé : %s", repo, sha[:7], msg.splitlines()[0] if msg else "")
-        return FetchResult(True, True, sha, msg, token_expires=expires)
+        return FetchResult(True, True, sha, msg, token_expires=expires, remaining=remaining)
     except (urllib.error.URLError, OSError, zipfile.BadZipFile, ValueError) as exc:
         return FetchResult(False, error=f"GitHub injoignable : {exc}")

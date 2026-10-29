@@ -6,6 +6,7 @@ Les numéros de ligne sont ceux des fichiers v5.
 ## Versions
 | Version | Date | Changement |
 |---|---|---|
+| 6.0.0 | 2026-10-29 | **Changement de comportement (demandé)** : plus de délai de reprise. Si le robot tournait, il reprend TOUT DE SUITE après un redémarrage du terminal ou un rattachement de l'EA (avant : après `AutoResumeMinutes` = 20 min) ; les filtres décident ensuite des entrées. Réglage `autoresume`, input `AutoResumeMinutes`, événement `REPRISE_PROGRAMMEE` et champ `reprise_auto` supprimés ; information silencieuse `REPRISE_IMMEDIATE`. |
 | 5.6.2 | 2026-10-29 | Correctif : un dépôt n'est plus compté deux fois dans les plus hauts d'equity (global, jour, objectif) → plus de faux « drawdown détecté » ni d'arrêt auto sur drawdown après un dépôt (`PeakRaise` / `PeakAfterFlow`). Seuils et calcul du drawdown inchangés. |
 | 5.6.1 | 2026-10-28 | Dépôts et retraits : un seul événement `CASHFLOW` avec le texte, priorité 1 (notification avec son). |
 | 5.6.0 | 2026-10-28 | Reprise automatique expliquée : événement `REPRISE_PROGRAMMEE` au redémarrage (heure du redémarrage, heure de reprise, ⏸ pour l'empêcher), message de reprise avec la raison, `reprise_auto` dans le statut. Logique de reprise inchangée. |

@@ -332,7 +332,8 @@ async def j_update(context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     loop = asyncio.get_running_loop()
     if cfg.update.github:
-        res = await loop.run_in_executor(None, gh.fetch, cfg)
+        inst_c = (s.ctx.db.meta_get("installed_commit") or "").split(" ")[0]
+        res = await loop.run_in_executor(None, lambda: gh.fetch(cfg, installed=inst_c))
         if res.token_expires:
             s.ctx.db.meta_set("gh_token_exp", res.token_expires)
             left = gh.days_left(res.token_expires)

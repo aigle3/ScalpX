@@ -31,8 +31,16 @@ class DeployPlan:
     base_version: str
     targets: list[str]                          # identifiants à mettre à jour
     up_to_date: list[str] = field(default_factory=list)
-    inputs_changed: bool = False                # .set de BASE ≠ .set d'une instance (noms/ordre)
-    inputs_diff: str = ""
+    inputs_changed: bool = False                # l'EA a de NOUVEAUX inputs (.set de BASE) par rapport à une instance
+    inputs_diff: str = ""                       # noms des nouveaux inputs
+
+    @property
+    def inputs_note(self) -> str:
+        """Texte pour Telegram (vide si rien à signaler : des inputs supprimés ne changent rien pour toi)."""
+        if not self.inputs_changed:
+            return ""
+        return (f"ℹ️ Nouveaux réglages d'entrée dans cette version de l'EA : {self.inputs_diff}. "
+                "Ils prennent leur valeur par défaut ; tes réglages actuels ne changent pas.")
 
 
 @dataclass
@@ -65,11 +73,10 @@ def plan_deploy(cfg: Config, db: Database, selection: list[str] | None = None) -
     bk = basemod.set_keys(base_set)
     for i in insts:
         ik = basemod.set_keys(Path(i.folder) / "MQL5" / "Presets" / cfg.mt5.set_name)
-        if ik and bk and ik != bk:
-            added = [k for k in bk if k not in ik]
-            removed = [k for k in ik if k not in bk]
+        added = [k for k in bk if k not in ik] if ik and bk else []
+        if added:                                   # inputs supprimés ou réordonnés : rien à signaler
             plan.inputs_changed = True
-            plan.inputs_diff = (f"+{', '.join(added[:6])}" if added else "") + (f" −{', '.join(removed[:6])}" if removed else "") or "ordre modifié"
+            plan.inputs_diff = ", ".join(added[:6])
             break
     return plan
 
@@ -113,6 +120,16 @@ class DeployManager:
             return None
         files = sorted(d.glob(f"{self.cfg.mt5.ea_file}.*.bak"))
         return files[-1] if files else None
+
+    def sync_set(self, inst: Instance) -> None:
+        """Recopie le .set de BASE dans l'instance (modèle des inputs ; ne change pas les réglages de l'EA qui tourne)."""
+        src = self.cfg.paths.base / "MQL5" / "Presets" / self.cfg.mt5.set_name
+        dst = Path(inst.folder) / "MQL5" / "Presets" / self.cfg.mt5.set_name
+        try:
+            if src.is_file() and dst.parent.is_dir():
+                shutil.copy2(src, dst)
+        except OSError as exc:
+            log.warning(".set non recopié pour %s : %s", inst.id, exc)
 
     def install_ex5(self, inst: Instance, source: Path) -> None:
         """Copie UNIQUEMENT le .ex5 (fichier temporaire puis remplacement)."""
@@ -182,6 +199,7 @@ class DeployManager:
         except Exception as exc:
             ok, why = False, f"erreur : {exc}"
         if ok:
+            self.sync_set(inst)                                           # l'avertissement « inputs » ne revient plus
             self.db.set_desired(inst.id, DEMARRE)
             self.db.set_version(inst.id, self.last_version or version, "déploiement")
             return DeployOutcome(inst.id, "ok")

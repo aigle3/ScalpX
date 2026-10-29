@@ -77,7 +77,6 @@ PARAMS = [
     ("profnotif", "Alerte profit cumulé", 7, "dbl", 0.0, 10000.0, 1.0, "", []),
     ("dev", "Déviation max", 8, "int", 0.0, 500.0, 5.0, " pts", []),
     ("retries", "Nouvelles tentatives", 8, "int", 0.0, 5.0, 1.0, "", []),
-    ("autoresume", "Reprise auto après retrait", 8, "int", 0.0, 240.0, 5.0, " min", []),
     ("n_filters", "Alertes globales des filtres", 9, "bool", 0.0, 1.0, 1.0, "", []),
     ("n_progress", "Progression de l'objectif", 9, "bool", 0.0, 1.0, 1.0, "", []),
     ("n_errors", "Erreurs d'ordres", 9, "bool", 0.0, 1.0, 1.0, "", []),

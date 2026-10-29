@@ -742,7 +742,6 @@ void StatutWrite()
    j += ",\"trading_autorise\":" + BoolS(g_blockReason == "");
    j += ",\"pause_jusqua\":\"" + (g_pauseUntil > 0 ? TimeToString(g_pauseUntil, TIME_DATE | TIME_MINUTES) : "") + "\"";
    j += ",\"vacances\":" + BoolS(g_vacation);
-   j += ",\"reprise_auto\":\"" + (g_resumeAt > 0 ? TimeToString(ZoneFromServer(g_resumeAt), TIME_DATE | TIME_MINUTES) : "") + "\"";
    j += ",\"signal\":\"" + (mk_fast > mk_slow ? "achat" : (mk_fast < mk_slow ? "vente" : "")) + "\"";
    j += ",\"filtres\":[";
    for(int k = 0; k < FB_N; k++)

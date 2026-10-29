@@ -117,9 +117,9 @@ def test_github_telecharge_le_paquet_une_fois_par_commit(tmp_path, cfg):
     gh._SEEN.update(sha="", since=0.0)
     r = gh.fetch(cfg, http, now=1000.0)
     assert r.ok and r.waiting and not r.changed and state["zips"] == 0      # nouveau commit : attente de stabilité
-    r = gh.fetch(cfg, http, now=1000.0 + 9 * 60)
+    r = gh.fetch(cfg, http, now=1000.0 + 1 * 60)
     assert r.waiting and state["zips"] == 0
-    r = gh.fetch(cfg, http, now=1000.0 + 10 * 60)
+    r = gh.fetch(cfg, http, now=1000.0 + 2 * 60)                          # 2 minutes sans autre publication
     assert r.ok and r.changed and (tmp_path / "release" / "bot" / "main.py").read_text() == "print(1)"
     assert not (tmp_path / "evil.txt").exists()
     assert u.commit_info(tmp_path / "release")["message"].startswith("Ajout pause news")
@@ -214,3 +214,38 @@ def test_expiration_du_jeton_github(tmp_path, cfg):
     import datetime as dt
     now = dt.datetime(2027, 10, 18, 12).timestamp()
     assert gh.days_left("2027-10-28", now) == 10 and gh.days_left("n/a") is None
+
+
+def test_github_plusieurs_publications_proposees_une_par_une_dans_l_ordre(tmp_path, cfg):
+    import json
+    from core import github as gh
+    cfg.update.github, cfg.update.source = "aigle3/scalpx", str(tmp_path / "release")
+    chain = ["c1", "c2", "c3", "c4"]                                       # c1 installé ; c2, c3, c4 publiés ensuite
+    got = []
+
+    def commit(s):
+        return {"sha": s, "commit": {"message": f"Bot {s}", "committer": {"date": "2026-10-29"}}}
+
+    def http(url, headers):
+        if url.endswith("/commits/stable"):
+            return 200, json.dumps(commit("c4")).encode()
+        if "/compare/" in url:
+            base = url.split("/compare/")[1].split("...")[0]
+            after = chain[chain.index(base) + 1:]
+            return 200, json.dumps({"status": "ahead", "commits": [commit(s) for s in after]}).encode()
+        if "/zipball/" in url:
+            got.append(url.rsplit("/", 1)[1])
+            return 200, _zip({"bot/main.py": b"print(1)"})
+        return 404, b""
+
+    gh._SEEN.update(sha="", since=0.0)
+    r = gh.fetch(cfg, http, force=True, installed="c1")
+    assert r.changed and r.sha == "c2" and r.remaining == 2 and got == ["c2"]
+    assert u.commit_info(tmp_path / "release")["remaining"] == 2
+    r = gh.fetch(cfg, http, force=True, installed="c1")                    # c2 pas encore installé : rien de plus
+    assert not r.changed and got == ["c2"]
+    r = gh.fetch(cfg, http, force=True, installed="c2")                    # c2 installé → c3
+    assert r.sha == "c3" and r.remaining == 1 and got == ["c2", "c3"]
+    r = gh.fetch(cfg, http, force=True, installed="c3")
+    assert r.sha == "c4" and r.remaining == 0
+    assert not gh.fetch(cfg, http, installed="c4").changed                 # à jour

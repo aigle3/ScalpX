@@ -80,7 +80,3 @@ def test_objectif_en_cours():
     txt = block(view(1, objectif_actif=False, ea_demarre=False, prochain_creneau=time.strftime("%Y.%m.%d") + " 09:00"))
     assert "🎯 Aucun objectif en cours · prochain créneau 09:00" in txt
 
-
-def test_reprise_automatique_programmee():
-    txt = block(view(1, ea_demarre=False, reprise_auto=time.strftime("%Y.%m.%d") + " 23:13"))
-    assert txt.startswith("⏳ <b>REPRISE AUTOMATIQUE à 23:13</b>")
