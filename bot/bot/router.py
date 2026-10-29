@@ -124,7 +124,7 @@ class Router:
         elif sub == "pos":
             self._bg(self._positions_detail())
             return ""
-        elif sub in ("lst", "act", "rpt", "logs", "gterm"):
+        elif sub in ("lst", "act", "rpt", "logs", "gterm", "wdr"):
             self.dash.goto(sub)
             self.dash.silent = self.notifier.silent_mode
         elif sub == "fa":                                   # tous les comptes (filtre remis à « Tous »)

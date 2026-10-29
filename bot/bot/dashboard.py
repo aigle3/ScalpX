@@ -155,6 +155,8 @@ class Dashboard:
             return self._render_logs()
         if kind == "flt":
             return self._render_filters(now)
+        if kind == "wdr":
+            return self._render_withdrawals(now)
         if kind == "gterm":
             return self._render_gterm()
         return self._render_home(now)
@@ -181,7 +183,8 @@ class Dashboard:
                                 pending, min(ages) if ages else None, now,
                                 extra_alerts=[a for a in [pui.alert_line(self.preset_check)] if a])
         act_btn = ("⚡ Actions" + (" 🔔" if any(v.outdated for v in views) else ""), "d:act")
-        kb = [[("🧭 Filtres et positions", "d:flt")],
+        ndue = len(render.due_withdrawals(views))
+        kb = [[("🧭 Filtres et positions", "d:flt"), ("💸 Retraits" + (f" 🔔 {ndue}" if ndue else ""), "d:wdr")],
               [("👥 Comptes", "d:lst"), act_btn],
               [("📈 Rapports", "d:rpt"), sys_btn]]
         return self._with_flash(text), kb
@@ -216,6 +219,29 @@ class Dashboard:
             [(("🔔 Rétablir le son" if silent else "🔕 Mode silencieux"), "d:sil")],
             [("⬅ Accueil", "d:home")],
         ]
+        return self._with_flash(text), kb
+
+    def withdraw_since(self) -> dict[str, int]:
+        out = {}
+        for i in self.ctx.db.list():
+            try:
+                t = int(self.ctx.db.meta_get(f"arret500_since_{i.id}", "") or 0)
+            except ValueError:
+                t = 0
+            if t:
+                out[i.id] = t
+        return out
+
+    def _render_withdrawals(self, now: float) -> tuple[str, Keyboard]:
+        views = self.ctx.views()
+        db = self.ctx.db
+        hist = list(reversed(db.withdrawals_since(int(now) - 365 * 86400)))
+        cur = next((v.st.devise for v in views if v.st and v.st.devise), "")
+        labels = {i.id: i.label for i in db.list(include_archived=True)}
+        text = render.withdraw_text(views, hist, db.total_withdrawn(), sum(r["amount"] for r in db.withdrawals_since(int(now) - 30 * 86400)),
+                                    self.withdraw_since(), cur, now, labels)
+        kb: Keyboard = [[(f"🏁 {v.inst.label[:24]}", f"a:{short(v.inst.id)}")] for v in render.due_withdrawals(views)[:6]]
+        kb.append([("🔃 Actualiser", "d:wdr"), ("⬅ Accueil", "d:home")])
         return self._with_flash(text), kb
 
     def _render_reports(self) -> tuple[str, Keyboard]:

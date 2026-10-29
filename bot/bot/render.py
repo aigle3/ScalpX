@@ -33,6 +33,8 @@ def ago(seconds: float) -> str:
         return f"{s} s"
     if s < 5400:
         return f"{s // 60} min"
+    if s >= 2 * 86400:
+        return f"{s // 86400} j {(s % 86400) // 3600} h"
     return f"{s // 3600} h {(s % 3600) // 60:02d}"
 
 
@@ -140,15 +142,12 @@ def trading_block(views: list[AccountView], now: float) -> list[str]:
     if st.filtres is None:
         lines.append("🛡 Filtres : détail après la mise à jour de l'EA (5.5.0)")
         return lines
-    on = [f for f in st.filtres if f.actif]
-    off = [f.nom for f in st.filtres if not f.actif]
+    on = [f for f in st.filtres if f.actif]                  # filtres désactivés : non affichés
     bad = [f for f in on if not f.ok]
     if not on:
         flt = "🛡 Aucun filtre actif"
     else:
         flt = f"🛡 Filtres {len(on) - len(bad)}/{len(on)} OK" if not bad else f"🛡 Filtres <b>{len(on) - len(bad)}/{len(on)} OK</b>"
-    if off:
-        flt += " · ⚪ " + esc(", ".join(off))
     lines.append(flt)
     for f in bad:
         lines.append(f"   🔴 {esc(f.nom)}" + (f" : {esc(f.raison)}" if f.raison else ""))
@@ -166,7 +165,7 @@ def trading_block(views: list[AccountView], now: float) -> list[str]:
 
 def withdraw_lines(views: list[AccountView], cur: str) -> list[str]:
     """Comptes arrivés au seuil (ARRET_500) : montant à retirer sur chacun (le robot reprend seul après le retrait)."""
-    due = sorted((v for v in views if v.st is not None and v.st.etat == "ARRET_500"), key=lambda v: v.inst.label.lower())
+    due = due_withdrawals(views)
     if not due:
         return []
     total = sum(v.st.to_retire() for v in due)
@@ -176,6 +175,61 @@ def withdraw_lines(views: list[AccountView], cur: str) -> list[str]:
     if len(due) > 6:
         out.append(f"   … et {len(due) - 6} autre(s) : 👥 Comptes")
     return out
+
+
+def due_withdrawals(views: list[AccountView]) -> list[AccountView]:
+    return sorted((v for v in views if v.st is not None and v.st.etat == "ARRET_500"), key=lambda v: v.inst.label.lower())
+
+
+def withdraw_text(views: list[AccountView], history: list, total_all: float, total_30: float, since: dict[str, int],
+                  cur: str, now: float, labels: dict[str, str], near_pct: float = 0.8) -> str:
+    """💸 Retraits : comptes à 500 (montant, depuis quand), comptes bientôt à 500, derniers retraits."""
+    lines = ["💸 <b>Retraits</b>", ""]
+    due = due_withdrawals(views)
+    if due:
+        tot = sum(v.st.to_retire() for v in due)
+        lines.append(f"🏁 <b>À retirer maintenant</b> ({len(due)} compte(s)) : <b>{money(tot, cur)}</b>")
+        rows = []
+        for v in due:
+            t0 = since.get(v.inst.id, 0)
+            wait = f" · {ago(now - t0)}" if t0 else ""
+            rows.append(f"{v.inst.label[:10]:<10} {v.st.solde:>8.2f} → {v.st.to_retire():>8.2f}{wait}")
+        lines.append("<pre>" + esc("\n".join(rows)) + "</pre>")
+        ref = due[0].st
+        lines.append(f"Retire la somme indiquée (il reste {ref.seuil_reprise:.0f}) : le robot repart <b>tout seul</b> "
+                     f"dès que le solde est entre {ref.seuil_reprise:.0f} et {ref.seuil_arret:.0f}.")
+    else:
+        lines.append("✅ Aucun compte à 500 : rien à retirer.")
+    near = sorted((v for v in views if v.st is not None and v.st.etat != "ARRET_500" and v.st.progress500() >= near_pct),
+                  key=lambda v: -v.st.progress500())
+    if near:
+        lines += ["", f"🔜 <b>Bientôt à 500</b> (≥ {near_pct * 100:.0f} %)"]
+        lines.append("<pre>" + esc("\n".join(f"{v.inst.label[:10]:<10} {v.st.solde:>8.2f} {bar(v.st.progress500())} "
+                                                f"{v.st.progress500() * 100:>3.0f}%" for v in near[:8])) + "</pre>")
+    lines += ["", "📜 <b>Derniers retraits</b>"]
+    if history:
+        rows = [f"{time.strftime('%d/%m', time.localtime(r['ts']))} {labels.get(r['iid'], r['iid'])[:10]:<10} {r['amount']:>9.2f}"
+                for r in history[:10]]
+        lines.append("<pre>" + esc("\n".join(rows)) + "</pre>")
+    else:
+        lines.append("<i>aucun retrait enregistré</i>")
+    lines.append(f"Total retiré : <b>{money(total_all, cur)}</b> · 30 derniers jours : {money(total_30, cur)}")
+    return "\n".join(lines)
+
+
+def withdraw_reminder(views: list[AccountView], since: dict[str, int], now: float) -> str | None:
+    """Rappel quotidien : None si aucun compte n'attend de retrait."""
+    due = due_withdrawals(views)
+    if not due:
+        return None
+    cur = due[0].st.devise
+    tot = sum(v.st.to_retire() for v in due)
+    lines = [f"💸 <b>Rappel : {len(due)} compte(s) à 500</b> attendent un retrait ({money(tot, cur)}) :"]
+    for v in due:
+        t0 = since.get(v.inst.id, 0)
+        lines.append(f"   • {esc(v.inst.label)} : <b>{money(v.st.to_retire(), v.st.devise)}</b>" + (f" (depuis {ago(now - t0)})" if t0 else ""))
+    lines.append("Le robot de ces comptes reste arrêté jusqu'au retrait. Détail : 💸 Retraits.")
+    return "\n".join(lines)
 
 
 def home_text(views: list[AccountView], t: Totals, vps: dict[str, float], cur: str, bot_v: str, ea_v: str,

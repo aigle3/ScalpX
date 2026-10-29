@@ -35,7 +35,7 @@ def test_autorise_filtres_et_news():
             {"heure": time.strftime("%Y.%m.%d") + " 16:00", "dans_min": 185, "devise": "USD", "nom": "ISM", "haute": False}]
     txt = block(view(1, signal="achat", news=news), view(2))
     assert txt.startswith("🟡 <b>En attente</b>") and "✅ Entrée au prochain signal (achat)" in txt
-    assert "🛡 Filtres <b>2/3 OK</b> · ⚪ Horaire" in txt and "   🔴 Volume : Volume trop faible" in txt
+    assert "🛡 Filtres <b>2/3 OK</b>\n" in txt and "Horaire" not in txt                 # désactivé : pas affiché and "   🔴 Volume : Volume trop faible" in txt
     assert "14:30 USD Non-Farm Payrolls (dans 1 h 35) · +1 autre(s)" in txt and "ISM" not in txt
     assert "Aucune position" in txt
 
@@ -91,3 +91,21 @@ def test_comptes_a_500_listes_avec_le_montant_a_retirer():
     assert "🏁 <b>1 compte(s) à 500</b> · à retirer <b>387.00 EUR</b>" in txt
     assert "💸 1 : <b>387.00 EUR</b> (laisser 125)" in txt
     assert txt.splitlines()[0].endswith("⚪ <b>À l'arrêt</b> : attend un objectif")    # un seul compte à 500 : pas le titre
+
+
+def test_menu_retraits_et_rappel():
+    now = time.time()
+    a = view(1, objectif_actif=False, etat="ARRET_500", solde=512.0, seuil_arret=500, seuil_reprise=125)
+    b = view(2, objectif_actif=False, solde=430.0, solde_plus_flottant_ea=430.0, seuil_arret=500)
+    c = view(3, objectif_actif=False, solde=200.0, solde_plus_flottant_ea=200.0, seuil_arret=500)
+    hist = [{"ts": int(now) - 86400, "iid": "2_Demo", "amount": 380.5}]
+    txt = render.withdraw_text([a, b, c], hist, 380.5, 380.5, {"1_Demo": int(now) - 7200}, "EUR", now, {"2_Demo": "deux"})
+    assert "À retirer maintenant</b> (1 compte(s)) : <b>387.00 EUR</b>" in txt
+    assert "512.00 →   387.00 · 2 h 00" in txt and "tout seul" in txt
+    assert "Bientôt à 500" in txt and "430.00" in txt and "200.00" not in txt
+    assert "deux" in txt and "380.50" in txt and "Total retiré : <b>380.50 EUR</b>" in txt
+    r = render.withdraw_reminder([a, b, c], {"1_Demo": int(now) - 2 * 86400}, now)
+    assert "Rappel : 1 compte(s) à 500" in r and "1 : <b>387.00 EUR</b> (depuis 2 j 0 h)" in r
+    assert render.withdraw_reminder([b, c], {}, now) is None
+    empty = render.withdraw_text([c], [], 0.0, 0.0, {}, "EUR", now, {})
+    assert "Aucun compte à 500" in empty and "aucun retrait enregistré" in empty

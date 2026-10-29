@@ -376,6 +376,16 @@ async def j_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     await s.sender.send(s.chat_id, build_report(s.ctx, time.time() - 86400, title="📝 Rapport quotidien"), None, True)
 
 
+async def j_withdraw_reminder(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Chaque jour : rappel des comptes à 500 qui attendent toujours un retrait (rien s'il n'y en a pas)."""
+    import time
+    s = svc(context)
+    txt = render.withdraw_reminder(s.ctx.views(), s.dash.withdraw_since(), time.time())
+    if txt:
+        log.info("rappel des retraits envoyé")
+        await s.sender.send(s.chat_id, txt, None, False)
+
+
 async def j_build(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Toutes les 20 s : version.txt changé → compilation auto ; nouvel .ex5 dans BASE → proposition de déploiement."""
     from core.update import STOP
@@ -542,6 +552,8 @@ def build_application(cfg: Config, ctx_factory) -> Application:
     jq.run_repeating(timed(j_update), interval=max(20, cfg.update.check_s), first=60, job_kwargs=JOB_KW)
     jq.run_repeating(timed(j_health), interval=60, first=15, job_kwargs=JOB_KW)
     jq.run_daily(timed(j_report), time=dtime(cfg.reports.daily_hour, 0), job_kwargs=JOB_KW_DAILY)
+    if 0 <= cfg.reports.withdraw_reminder_hour <= 23:
+        jq.run_daily(timed(j_withdraw_reminder), time=dtime(cfg.reports.withdraw_reminder_hour, 0), job_kwargs=JOB_KW_DAILY)
     jq.run_daily(timed(j_prune), time=dtime(4, 0), job_kwargs=JOB_KW_DAILY)
     jq.run_daily(timed(j_backup), time=dtime(cfg.backup.hour % 24, 0), job_kwargs=JOB_KW_DAILY)
     return app

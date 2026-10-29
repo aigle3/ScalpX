@@ -49,6 +49,7 @@ page_size  = 8
 daily_hour   = 22
 timezone     = "Europe/Paris"
 history_days = 30
+withdraw_reminder_hour = 10   # rappel quotidien des comptes à 500 en attente de retrait (-1 = jamais)
 
 [runtime]
 lock_port = 47653

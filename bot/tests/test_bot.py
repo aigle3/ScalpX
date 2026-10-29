@@ -181,7 +181,12 @@ async def test_dashboard_liste_filtres_tri_pagination(svc):
     text, kb = dash.render()                                                       # accueil : état de l'ensemble
     assert "🔴 3" in text and "à retirer" in text and "378.20" in text            # total à retirer (503.2 − 125)
     assert "▰" in text and "<pre>" in text and "Aucune alerte" not in text
-    assert [d for row in kb for _, d in row] == ["d:flt", "d:lst", "d:act", "d:rpt", "d:sys"]
+    assert [d for row in kb for _, d in row] == ["d:flt", "d:wdr", "d:lst", "d:act", "d:rpt", "d:sys"]
+    assert ("💸 Retraits 🔔 1", "d:wdr") in [b for row in kb for b in row]          # un compte à 500 : signalé sur le bouton
+    dash.goto("wdr")
+    wt, wkb = dash.render()
+    assert "À retirer maintenant" in wt and "378.20" in wt and ("🏁 " + a.label, "a:" + short(a.id)) in [b for row in wkb for b in row]
+    dash.goto("dash")
     dash.goto("lst")                                                                 # 👥 Comptes : liste détaillée
     text, kb = dash.render()
     assert "page 1/2" in text

@@ -108,6 +108,10 @@ class Monitor:
             return
         if st.etat == "ARRET_500":
             self._last_arret_balance[inst.id] = st.solde
+            if not self.db.meta_get(f"arret500_since_{inst.id}"):
+                self.db.meta_set(f"arret500_since_{inst.id}", str(int(now)))
+        elif self._last_state.get(inst.id) == "ARRET_500" or self.db.meta_get(f"arret500_since_{inst.id}"):
+            self.db.meta_set(f"arret500_since_{inst.id}", "")
         self._last_state[inst.id] = st.etat
         if st.devise and st.devise != inst.currency:
             self.db.set_currency(inst.id, st.devise)

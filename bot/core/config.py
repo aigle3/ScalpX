@@ -77,6 +77,7 @@ class Reports(BaseModel):
     daily_hour: int = 22
     timezone: str = "Europe/Paris"         # fuseau du rapport quotidien
     history_days: int = 30
+    withdraw_reminder_hour: int = 10       # rappel quotidien des comptes à 500 qui attendent un retrait (-1 = jamais)
 
 
 class Runtime(BaseModel):
