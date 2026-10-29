@@ -31,6 +31,7 @@ class Router:
     def __init__(self, ctx: act.Ctx, sender: Sender, chat_id: int, dash: Dashboard, conf: Confirmations,
                  notifier: Notifier) -> None:
         self.ctx, self.sender, self.chat_id, self.dash, self.conf, self.notifier = ctx, sender, chat_id, dash, conf, notifier
+        dash.params.on_active_change = self.sync_base_set
         self._tasks: set[asyncio.Task] = set()
         self._dep_msg: int | None = None
         self.building = False
@@ -535,6 +536,7 @@ class Router:
         mid = await self.sender.send(self.chat_id, f"⏳ <b>Preset « {esc(name)} »</b> → {len(insts)} robot(s)…", None, True)
         res = await asyncio.gather(*[pui.apply_to(self.ctx, i, values) for i in insts])
         self.dash.store.set_active(name)
+        note = self.sync_base_set()
         lines = []
         for i, (ok, n, bad, err) in zip(insts, res):
             if err:
@@ -545,7 +547,7 @@ class Router:
                 lines.append(f"⚠️ <b>{esc(i.label)}</b> : refusé par l'EA : {esc(pui._keys_text(bad))}")
         good = sum(1 for ok, _, _, err in res if ok and not err)
         await self.sender.edit(self.chat_id, mid, f"📤 <b>Preset « {esc(name)} »</b> ⭐ actif : {good}/{len(insts)} robot(s) conforme(s)\n"
-                               + "\n".join(lines), [[("✖ Fermer", "d:close")]])
+                               + "\n".join(lines) + (f"\n{note}" if note else ""), [[("✖ Fermer", "d:close")]])
         await self.check_presets()
 
     async def _preset_delete(self, name: str) -> None:
@@ -555,6 +557,33 @@ class Router:
         if self.dash.preset_check and self.dash.preset_check.preset == name:
             self.dash.preset_check = None
         await self.dash.refresh(force=True)
+
+    def sync_base_set(self) -> str:
+        """Preset ⭐ actif → .set de BASE : les nouveaux comptes partent de ces réglages. Renvoie une note (vide si rien)."""
+        from core import presets as cps
+        store = self.dash.store
+        if not store.active:
+            return ""
+        path = self.ctx.cfg.paths.base / "MQL5" / "Presets" / self.ctx.cfg.mt5.set_name
+        try:
+            ok = cps.write_base_set(path, store.presets[store.active])
+        except (OSError, UnicodeDecodeError) as exc:
+            log.warning(".set de BASE non mis à jour : %s", exc)
+            return "⚠️ .set de BASE non mis à jour"
+        return "📦 .set de BASE mis à jour (nouveaux comptes)" if ok else ""
+
+    async def preset_for_new(self, iid: str) -> str:
+        """Nouveau compte : applique le preset ⭐ actif et vérifie. Renvoie la ligne à ajouter au message de création."""
+        store = self.dash.store
+        inst = self.ctx.db.get(iid)
+        if not store.active or inst is None:
+            return "💾 Aucun preset actif : réglages du .set de BASE."
+        ok, n, bad, err = await pui.apply_to(self.ctx, inst, store.presets[store.active])
+        if err:
+            return f"⚠️ Preset « {esc(store.active)} » non appliqué : {esc(err)} (💾 Presets → 📤 Appliquer)."
+        if not ok:
+            return f"⚠️ Preset « {esc(store.active)} » : refusé par l'EA pour {esc(pui._keys_text(bad))}."
+        return f"💾 Preset « {esc(store.active)} » appliqué" + (f" ({n} réglage(s) ajusté(s))." if n else " (déjà conforme).")
 
     async def check_presets(self) -> None:
         """Compare les réglages de chaque robot lancé au preset actif (toutes les 5 min et après une application)."""

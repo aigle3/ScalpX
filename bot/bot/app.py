@@ -152,6 +152,8 @@ class Services:
                 text += "\n" + "\n".join(render.esc(w) for w in res.warnings)
                 inst = self.ctx.db.get(res.iid)
                 await self.notifier.emit(Notice(res.iid, inst.label if inst else res.iid, "DOUBLON", "\n".join(res.warnings), 2))
+            if mode == "new":                                       # preset ⭐ actif : appliqué au nouveau robot
+                text += "\n" + await self.router.preset_for_new(res.iid)
             await self.sender.edit(self.chat_id, mid, text, None)
             self.dash.goto("acc", res.iid)
             await self.dash.refresh(force=True)
@@ -391,6 +393,7 @@ async def j_prune(context: ContextTypes.DEFAULT_TYPE) -> None:
 async def startup(app: Application) -> None:
     """Après le démarrage : relance échelonnée des instances DEMARRE, reprise d'un déploiement interrompu."""
     s: Services = app.bot_data["svc"]
+    s.router.sync_base_set()                                        # preset ⭐ actif → .set de BASE
     try:
         launched = await s.ctx.watchdog.startup_launch()
         await s.sender.reply_menu(s.chat_id, f"🤖 Bot {bot_version()} démarré · {len(launched)} terminal(aux) relancé(s).\n"

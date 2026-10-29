@@ -79,6 +79,7 @@ class ParamsUI:
     def __init__(self, ctx: Ctx, store=None) -> None:
         self.ctx = ctx
         self.store = store                                   # presets centraux (cible PresetTarget)
+        self.on_active_change = None                         # rappel : preset actif modifié
         self.vals: dict[str, tuple[float, dict[str, str]]] = {}
         self.last_error = ""
 
@@ -141,6 +142,8 @@ class ParamsUI:
             return "❌ Preset introuvable"
         self.store.set_value(inst.name, p[0], value)
         await self.fetch(inst)
+        if self.store.active == inst.name and self.on_active_change:
+            self.on_active_change()                              # .set de BASE suit le preset actif
         head = f"{esc(p[1])} = {esc(display_of(p, value))}"
         if self.store.active != inst.name:
             return f"✅ {head} (preset enregistré ; 📤 Appliquer pour l'envoyer aux robots)"

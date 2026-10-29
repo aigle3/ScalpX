@@ -121,3 +121,84 @@ class PresetStore:
     def set_active(self, name: str) -> None:
         self.active = name if name in self.presets else ""
         self.save()
+
+
+# ---------------------------------------------------------------- .set de BASE (point de départ des nouveaux comptes)
+# réglage du bot → input de l'EA (nom dans le .set). Les réglages sans input (fuseau, alertes, news : délais) ne
+# peuvent pas aller dans le .set : ils sont envoyés au nouveau robot juste après sa création.
+_TF_PERIOD = ["1", "5", "15", "30", "16385", "16388"]          # M1 M5 M15 M30 H1 H4 → ENUM_TIMEFRAMES
+SET_INPUTS = {
+    "tf": "TradingTimeframe", "bar": "SignalBar", "fast": "FastEMA", "slow": "SlowEMA", "atrp": "ATRPeriod",
+    "lot": "LotSize", "tbm": "TradesBeforeMultiply", "lotmult": "LotMultiplier", "grid": "GridStep",
+    "gridmult": "GridStepMultiplier", "dyngrid": "UseDynamicGrid", "gridatr": "GridATRMultiplier",
+    "gridmin": "GridMinPoints", "gridmax": "GridMaxPoints", "maxpend": "MaxPendingOrders", "maxspread": "MaxSpread",
+    "wavg": "UseWeightedAverage", "dyntp": "UseDynamicTP", "atrmult": "ATRMultiplier", "tpfixed": "AvgTakeProfit",
+    "tpmin": "TPMinPoints", "tpmax": "TPMaxPoints", "f_atr": "UseVolatilityFilter", "atrmin": "MinATRForVolatility",
+    "atrmax": "MaxATRForVolatility", "f_ema": "UsePriceEMAFilter", "f_vol": "VolumeFilterEnabledAtStart",
+    "volmin": "VolumeMinRatio", "volmax": "VolumeMaxRatio", "volbars": "VolumeBars", "f_lo": "UseLowerTFFilter",
+    "lotf": "LowerTimeframe", "lofast": "LowerFastEMA", "loslow": "LowerSlowEMA", "lobar": "LowerSignalBar",
+    "f_hi": "UseUpperTFFilter", "hitf": "UpperTimeframe", "hifast": "UpperFastEMA", "hislow": "UpperSlowEMA",
+    "hibar": "UpperSignalBar", "f_can": "UseUpperCandleFilter", "canbody": "UpperCandleMinBody",
+    "f_time": "TradingBlockEnabledAtStart", "t_start": "TradingBlockStartHour", "t_end": "TradingBlockEndHour",
+    "t_server": "TimeBlockUseServer", "ddthr": "DrawdownThreshold", "ddstop": "AutoStopOnDrawdown",
+    "emsl": "UseEmergencyStopLoss", "emslpct": "EmergencyStopLossPct", "sesslim": "UseSessionLossLimit",
+    "sesspct": "MaxSessionLossPct", "early": "UseEarlyGoalClose", "goalmax": "GoalMaxAmount",
+    "profnotif": "ProfitNotifyAmount", "dev": "Deviation", "retries": "MaxRetries", "n_filters": "NotifyFilters",
+    "n_progress": "NotifyProgress", "n_errors": "NotifyErrors", "ch_style": "ChartModernStyle", "ch_ema": "ChartShowEMA",
+    "ch_levels": "ChartShowLevels", "ch_panel": "ChartShowPanel", "news_block": "NewsPauseEnabledAtStart",
+}
+
+
+def set_value(key: str, raw: str) -> str:
+    """Valeur brute du bot → valeur d'input dans le .set."""
+    p = BY_KEY.get(key)
+    if p is None:
+        return raw
+    if p[3] == "bool":
+        return "true" if raw == "1" else "false"
+    if key in ("tf", "lotf", "hitf"):
+        try:
+            return _TF_PERIOD[int(raw)]
+        except (ValueError, IndexError):
+            return raw
+    return raw
+
+
+def overlay_set(data: bytes, values: dict[str, str]) -> bytes:
+    """Contenu d'un .set (UTF-16 LE + BOM) avec les valeurs du preset ; commentaires et autres inputs conservés."""
+    text = data[2:].decode("utf-16-le") if data[:2] == b"\xff\xfe" else data.decode("utf-8-sig", errors="replace")
+    want = {SET_INPUTS[k]: set_value(k, v) for k, v in values.items() if k in SET_INPUTS}
+    out, seen = [], set()
+    for line in text.split("\r\n"):
+        name = line.split("=", 1)[0].strip() if "=" in line and not line.lstrip().startswith(";") else ""
+        if name in want:
+            rest = line.split("=", 1)[1]
+            extra = rest[rest.index("||"):] if "||" in rest else ""          # champs d'optimisation éventuels
+            line = f"{name}={want[name]}{extra}"
+            seen.add(name)
+        out.append(line)
+    missing = [f"{n}={v}" for n, v in want.items() if n not in seen]
+    if missing:
+        while out and out[-1] == "":
+            out.pop()
+        out += ["; ══ Preset du bot ══"] + missing + [""]
+    return b"\xff\xfe" + "\r\n".join(out).encode("utf-16-le")
+
+
+def active_values(data_dir: Path) -> tuple[str, dict[str, str]] | None:
+    """(nom, valeurs) du preset ⭐ actif, ou None."""
+    st = PresetStore(Path(data_dir) / "presets.json")
+    return (st.active, st.presets[st.active]) if st.active else None
+
+
+def write_base_set(set_path: Path, values: dict[str, str]) -> bool:
+    """Écrit le preset dans le .set de BASE (les nouveaux comptes partent de ces valeurs). False si absent."""
+    p = Path(set_path)
+    if not p.is_file():
+        return False
+    new = overlay_set(p.read_bytes(), values)
+    if new != p.read_bytes():
+        tmp = p.with_suffix(".tmp")
+        tmp.write_bytes(new)
+        os.replace(tmp, p)
+    return True

@@ -86,6 +86,21 @@ def _same(a: Path, b: Path, ea: bool = False) -> bool:
     return (_norm_ea(ra) == _norm_ea(rb)) if ea else ra == rb
 
 
+def _active_preset(cfg: Config) -> dict[str, str] | None:
+    from .presets import active_values
+    a = active_values(cfg.paths.data)
+    return a[1] if a else None
+
+
+def _same_set(pkg: Path, base: Path, values: dict[str, str]) -> bool:
+    """.set du paquet + preset actif == .set de BASE ?"""
+    from .presets import overlay_set
+    try:
+        return overlay_set(pkg.read_bytes(), values) == base.read_bytes()
+    except OSError:
+        return False
+
+
 def _bot_sources(src: Path) -> list[Path]:
     return _bot_files(src / "bot")
 
@@ -144,8 +159,13 @@ def plan_update(cfg: Config, bot_root: Path) -> UpdatePlan | None:
     if (bot_root / "main.py").is_file():                              # fichiers retirés du dépôt : supprimés à l'installation
         plan.bot_remove = [str(p.relative_to(bot_root)).replace("\\", "/")
                            for p in _bot_files(bot_root) if p.relative_to(bot_root) not in pkg]
+    active = _active_preset(cfg)
     for p in _ea_sources(src):
         rel = p.relative_to(src / "ea")
+        if p.suffix.lower() == ".set" and active:                    # BASE porte le preset actif : on compare à l'identique
+            if not _same_set(p, cfg.paths.base / rel, active):
+                plan.ea_files.append(str(rel).replace("\\", "/"))
+            continue
         if not _same(p, cfg.paths.base / rel, ea=p.suffix.lower() in (".mq5", ".mqh")):
             plan.ea_files.append(str(rel).replace("\\", "/"))
     plan.requirements_changed = "requirements.txt" in plan.bot_files
@@ -174,8 +194,12 @@ def install_ea(cfg: Config, plan: UpdatePlan) -> str:
     Renvoie la version demandée ('' si aucune compilation à faire)."""
     base = cfg.paths.base
     src_changed = False
+    active = _active_preset(cfg)
     for rel in plan.ea_files:
         _copy(plan.source / "ea" / rel, base / rel)
+        if rel.lower().endswith(".set") and active:                   # le preset ⭐ actif reste dans le .set de BASE
+            from .presets import write_base_set
+            write_base_set(base / rel, active)
         src_changed = src_changed or rel.lower().endswith((".mq5", ".mqh"))
     if not src_changed:
         return ""

@@ -249,3 +249,35 @@ def test_github_plusieurs_publications_proposees_une_par_une_dans_l_ordre(tmp_pa
     r = gh.fetch(cfg, http, force=True, installed="c3")
     assert r.sha == "c4" and r.remaining == 0
     assert not gh.fetch(cfg, http, installed="c4").changed                 # à jour
+
+
+def _set(lines):
+    return b"\xff\xfe" + "\r\n".join(lines).encode("utf-16-le")
+
+
+def test_preset_actif_ecrit_dans_le_set_de_base_sans_proposer_de_mise_a_jour_en_boucle(tmp_path, cfg):
+    from core import presets as ps
+    bot_root = tmp_path / "inst"
+    src = make_pkg(tmp_path, cfg, bot_root)
+    pkg_set = src / "ea" / "MQL5" / "Presets" / "scalpx_v5.set"
+    pkg_set.write_bytes(_set(["; commentaire", "TradingTimeframe=5", "LotSize=0.01", "UseDynamicGrid=true", "MagicNumber=123456", ""]))
+    base_set = cfg.paths.base / "MQL5" / "Presets" / "scalpx_v5.set"
+    base_set.parent.mkdir(parents=True, exist_ok=True)
+    store = ps.PresetStore(cfg.paths.data / "presets.json")
+    store.put("Martin", {"tf": "2", "lot": "0.02", "dyngrid": "0", "news_min": "20"})
+    store.set_active("Martin")
+    plan = u.plan_update(cfg, bot_root)
+    assert "MQL5/Presets/scalpx_v5.set" in plan.ea_files
+    u.install_ea(cfg, plan)
+    txt = base_set.read_bytes()[2:].decode("utf-16-le")
+    assert "TradingTimeframe=15" in txt and "LotSize=0.02" in txt and "UseDynamicGrid=false" in txt
+    assert "; commentaire" in txt and "MagicNumber=123456" in txt and "news_min" not in txt
+    assert base_set.read_bytes()[:2] == b"\xff\xfe"
+    assert "MQL5/Presets/scalpx_v5.set" not in u.plan_update(cfg, bot_root).ea_files     # pas de nouvelle proposition
+
+
+def test_overlay_set_ajoute_un_input_absent_et_garde_l_optimisation():
+    from core import presets as ps
+    out = ps.overlay_set(_set(["FastEMA=10||10||1||30||N", ""]), {"fast": "12", "slow": "25"})
+    txt = out[2:].decode("utf-16-le")
+    assert "FastEMA=12||10||1||30||N" in txt and "SlowEMA=25" in txt

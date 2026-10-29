@@ -971,3 +971,25 @@ async def test_presets_centraux_creer_appliquer_modifier_controler(svc):
         assert await _until(lambda: "base" not in dash.store.presets and dash.store.active == "")
     finally:
         await ea.stop()
+
+
+@pytest.mark.asyncio
+async def test_nouveau_compte_recoit_le_preset_actif_et_le_set_de_base(svc):
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    a = seed(ctx_stack(svc), 81, "Demo-Server 1")
+    base_set = ctx.cfg.paths.base / "MQL5" / "Presets" / ctx.cfg.mt5.set_name
+    base_set.parent.mkdir(parents=True, exist_ok=True)
+    base_set.write_bytes(b"\xff\xfe" + "LotSize=0.01\r\nFastEMA=10\r\n".encode("utf-16-le"))
+    assert "Aucun preset actif" in await router.preset_for_new(a.id)
+    dash.store.put("Martin", {"lot": "0.03", "fast": "12", "tz": "2"})
+    dash.store.set_active("Martin")
+    assert "mis à jour" in router.sync_base_set()
+    assert "LotSize=0.03" in base_set.read_bytes()[2:].decode("utf-16-le")
+    ea.start()
+    await asyncio.sleep(0.3)
+    try:
+        line = await router.preset_for_new(a.id)
+        assert "Preset « Martin » appliqué" in line
+        assert ea.accounts[a.id]["params"]["lot"] == "0.03 lot" and ea.accounts[a.id]["params"]["tz"] == "UTC"
+    finally:
+        await ea.stop()

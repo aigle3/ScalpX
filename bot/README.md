@@ -59,6 +59,9 @@ Voir `LISEZMOI.txt` à la racine du dépôt : `INSTALL.bat` installe tout (BASE 
   réglage ; 📤 appliquer à tous les robots lancés, tout de suite (seules les différences sont envoyées, puis chaque robot
   est relu) : il devient le preset ⭐ actif. Toute modification du preset actif part aussitôt vers tous les robots ; un
   contrôle toutes les 5 min affiche 🟠 sur l'accueil les robots dont les réglages s'en écartent.
+  Le preset actif est aussi écrit dans le `.set` de BASE (y compris après une mise à jour de l'EA) : un nouveau compte
+  part de ces valeurs, puis le preset lui est appliqué juste après sa création (réglages sans input compris : fuseau,
+  alertes, délais des news) ; le message « ✅ Compte créé » le confirme.
 - **Capital insuffisant** : solde sous le seuil de reprise (125) → compte 🟠 sur l'accueil et alerte sonore (une fois,
   puis une autre quand le solde remonte). Dépôts et retraits : notifiés avec son.
 - **📈 Rapports** : rapport des 24 h (aussi chaque soir), courbe des soldes, export CSV.
