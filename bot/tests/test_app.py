@@ -96,6 +96,10 @@ def test_assemblage_complet(stack):
         groups = [g for g, _ in app.handlers]
         assert -1 in groups and len(app.handlers) >= 4
         assert {j[1] for j in app.job_queue.jobs} >= {"j_dash", "j_events", "j_status", "j_flush", "j_watchdog", "j_report"}
+        # chaque tâche : une seule exécution à la fois, retards fusionnés, tolérance de retard > 1 s (défaut APScheduler)
+        for j in app.job_queue.jobs:
+            kw = j[3]
+            assert kw and kw["max_instances"] == 1 and kw["coalesce"] is True and kw["misfire_grace_time"] >= 5, j
 
 
 def test_tous_les_prefixes_de_boutons_sont_captes():

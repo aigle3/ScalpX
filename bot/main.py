@@ -189,7 +189,7 @@ def main() -> int:
     if lock is None:
         log.critical("Un autre bot tourne déjà (verrou %s). Arrêt.", cfg.runtime.lock_port)
         return 3
-    from bot.app import build_application
+    from bot.app import JOB_KW, build_application
     app = build_application(cfg, lambda: make_ctx(cfg))
     quit_l = QuitListener(lock)
     stopping = STOPPING
@@ -202,7 +202,7 @@ def main() -> int:
             log.info("arrêt demandé (mise à jour ou nouveau bot) : arrêt propre")
             context.application.stop_running()
 
-    app.job_queue.run_repeating(j_quit, interval=1, first=1)
+    app.job_queue.run_repeating(j_quit, interval=1, first=1, job_kwargs=JOB_KW)
     log.info("ScalpX central démarré (%d chat autorisé)", len(cfg.allowed_chats))
     try:
         app.run_polling(allowed_updates=["message", "callback_query"], drop_pending_updates=False,

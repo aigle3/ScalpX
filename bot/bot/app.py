@@ -277,6 +277,11 @@ async def h_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 # ---- tâches périodiques
+# Réglages APScheduler de toutes les tâches : jamais deux exécutions en parallèle, les exécutions en retard sont fusionnées,
+# et un retard jusqu'à 5 s est toléré (défaut APScheduler : 1 s → tâche sautée au moindre blocage de la boucle).
+JOB_KW = {"coalesce": True, "max_instances": 1, "misfire_grace_time": 5}
+JOB_KW_DAILY = {**JOB_KW, "misfire_grace_time": 300}        # tâches quotidiennes : jamais ratées pour quelques secondes de retard
+
 async def j_presets(context: ContextTypes.DEFAULT_TYPE) -> None:
     await svc(context).router.check_presets()
 
@@ -446,17 +451,17 @@ def build_application(cfg: Config, ctx_factory) -> Application:
 
     jq = app.job_queue
     t = cfg.timing
-    jq.run_repeating(j_status, interval=t.status_interval_s, first=2)
-    jq.run_repeating(j_events, interval=t.events_interval_s, first=3)
-    jq.run_repeating(j_clean, interval=60, first=30)
-    jq.run_repeating(j_flush, interval=max(1, cfg.alerts.batch_window_s), first=4)
-    jq.run_repeating(j_presets, interval=300, first=90)  # robots conformes au preset ⭐ actif ?
-    jq.run_repeating(j_dash, interval=2, first=5)        # refresh() : toutes les refresh_s, republication après repost_s
-    jq.run_repeating(j_watchdog, interval=t.watchdog_interval_s, first=20)
-    jq.run_repeating(j_build, interval=20, first=40)
-    jq.run_repeating(j_update, interval=max(20, cfg.update.check_s), first=60)
-    jq.run_repeating(j_health, interval=60, first=15)
-    jq.run_daily(j_report, time=dtime(cfg.reports.daily_hour, 0))
-    jq.run_daily(j_prune, time=dtime(4, 0))
-    jq.run_daily(j_backup, time=dtime(cfg.backup.hour % 24, 0))
+    jq.run_repeating(j_status, interval=t.status_interval_s, first=2, job_kwargs=JOB_KW)
+    jq.run_repeating(j_events, interval=t.events_interval_s, first=3, job_kwargs=JOB_KW)
+    jq.run_repeating(j_clean, interval=60, first=30, job_kwargs=JOB_KW)
+    jq.run_repeating(j_flush, interval=max(1, cfg.alerts.batch_window_s), first=4, job_kwargs=JOB_KW)
+    jq.run_repeating(j_presets, interval=300, first=90, job_kwargs=JOB_KW)  # robots conformes au preset ⭐ actif ?
+    jq.run_repeating(j_dash, interval=2, first=5, job_kwargs=JOB_KW)        # refresh() : toutes les refresh_s, republication après repost_s
+    jq.run_repeating(j_watchdog, interval=t.watchdog_interval_s, first=20, job_kwargs=JOB_KW)
+    jq.run_repeating(j_build, interval=20, first=40, job_kwargs=JOB_KW)
+    jq.run_repeating(j_update, interval=max(20, cfg.update.check_s), first=60, job_kwargs=JOB_KW)
+    jq.run_repeating(j_health, interval=60, first=15, job_kwargs=JOB_KW)
+    jq.run_daily(j_report, time=dtime(cfg.reports.daily_hour, 0), job_kwargs=JOB_KW_DAILY)
+    jq.run_daily(j_prune, time=dtime(4, 0), job_kwargs=JOB_KW_DAILY)
+    jq.run_daily(j_backup, time=dtime(cfg.backup.hour % 24, 0), job_kwargs=JOB_KW_DAILY)
     return app

@@ -17,8 +17,8 @@ class filters:
     TEXT = COMMAND = _Flt()
 class _JQ:
     def __init__(self): self.jobs = []
-    def run_repeating(self, cb, interval, first=0): self.jobs.append(("rep", cb.__name__, interval))
-    def run_daily(self, cb, time): self.jobs.append(("daily", cb.__name__, time))
+    def run_repeating(self, cb, interval, first=0, job_kwargs=None): self.jobs.append(("rep", cb.__name__, interval, job_kwargs))
+    def run_daily(self, cb, time, job_kwargs=None): self.jobs.append(("daily", cb.__name__, time, job_kwargs))
 class Application:
     def __init__(self):
         self.handlers, self.bot_data, self.job_queue = [], {}, _JQ()
