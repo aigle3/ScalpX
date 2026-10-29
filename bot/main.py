@@ -212,6 +212,8 @@ def main() -> int:
     if lock is None:
         log.critical("Un autre bot tourne déjà (verrou %s). Arrêt.", cfg.runtime.lock_port)
         return 3
+    from core.selfwatch import clear_restarting
+    clear_restarting(ROOT)                          # redémarrage voulu terminé : la surveillance reprend normalement
     from bot.app import JOB_KW, build_application
     app = build_application(cfg, lambda: make_ctx(cfg))
     quit_l = QuitListener(lock)

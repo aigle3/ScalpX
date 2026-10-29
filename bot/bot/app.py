@@ -432,6 +432,12 @@ async def startup(app: Application) -> None:
     s: Services = app.bot_data["svc"]
     s.router.sync_base_set()                                        # preset ⭐ actif → .set de BASE
     try:
+        from core.selfwatch import ensure_watchdog
+        res = await asyncio.to_thread(ensure_watchdog, Path(__file__).resolve().parent.parent)
+        (log.info if res in ("ok", "hors Windows") else log.warning)("surveillance du bot (tâche ScalpX Watchdog) : %s", res)
+    except Exception:
+        log.exception("surveillance du bot : création de la tâche")
+    try:
         launched = await s.ctx.watchdog.startup_launch()
         await s.sender.reply_menu(s.chat_id, f"🤖 Bot {bot_version()} démarré · {len(launched)} terminal(aux) relancé(s).\n"
                                               f"Le bouton <b>{MENU_BUTTON}</b> (en bas) affiche le panneau.")

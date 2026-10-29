@@ -295,6 +295,8 @@ def restart_script(pid: int, wait_s: int = 300) -> str:
 def restart_bot(bot_root: Path) -> str:
     """Relance le bot avec le nouveau code. Le nouveau processus remplace l'ancien (verrou : QUIT).
     Tâche planifiée présente → elle est relancée après l'arrêt de celui-ci ; sinon nouveau processus détaché."""
+    from .selfwatch import mark_restarting
+    mark_restarting(bot_root)                     # la surveillance (tâche ScalpX Watchdog) laisse ce redémarrage se faire
     no_win = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     detached = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     has_task = os.name == "nt" and subprocess.run(["schtasks", "/query", "/tn", TASK], capture_output=True,

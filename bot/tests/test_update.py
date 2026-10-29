@@ -363,3 +363,38 @@ def test_relance_attend_la_fin_de_l_ancien_bot():
     sc = u.restart_script(4321)
     assert sc.startswith("Wait-Process -Id 4321 -Timeout 300") and f"schtasks /run /tn '{u.TASK}'" in sc
     assert sc.index("Wait-Process") < sc.index("schtasks /run") and "for ($i = 0; $i -lt 5" in sc
+
+
+def test_surveillance_du_bot_tache_et_marqueur(tmp_path):
+    from core import selfwatch as sw
+    root = tmp_path / "bot"
+    root.mkdir()
+    calls = []
+
+    class R:
+        def __init__(self, code=0):
+            self.returncode, self.stdout, self.stderr = code, "", ""
+
+    run = lambda args: (calls.append(args), R(0))[1]
+    assert sw.ensure_watchdog(root, run) == "watchdog.ps1 absent"
+    (root / "watchdog.ps1").write_text("x")
+    assert sw.ensure_watchdog(root, lambda a: R(1)) .startswith("pas de tâche")      # bot lancé à la main : rien
+    assert sw.ensure_watchdog(root, run) == "ok"
+    create = calls[-1]
+    assert create[:2] == ["schtasks", "/create"] and "/it" in create and create[create.index("/mo") + 1] == "2"
+    assert "watchdog.vbs" in create[-1] and (root / "watchdog.vbs").is_file()
+    assert str(root / "watchdog.ps1") in (root / "watchdog.vbs").read_text()
+    # redémarrage voulu : marqueur posé puis effacé par le nouveau bot
+    sw.mark_restarting(root)
+    assert sw.marker(root).is_file()
+    sw.clear_restarting(root)
+    sw.clear_restarting(root)
+    assert not sw.marker(root).exists()
+
+
+def test_script_de_surveillance_present_et_prudent():
+    from pathlib import Path
+    ps = (Path(__file__).resolve().parent.parent / "watchdog.ps1").read_bytes()
+    assert ps.startswith(b"\xef\xbb\xbf") and b"\r\n" in ps and b"\n" not in ps.replace(b"\r\n", b"")
+    t = ps.decode("utf-8-sig")
+    assert "restarting" in t and "-lt 300" in t and "$miss -lt 2" in t and "schtasks /run /tn $task" in t

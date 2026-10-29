@@ -35,6 +35,16 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - name: Syntaxe des scripts PowerShell (install.ps1, watchdog.ps1)
+        shell: powershell
+        run: |
+          $bad = 0
+          foreach ($f in Get-ChildItem -Path $env:GITHUB_WORKSPACE -Recurse -Filter *.ps1) {
+            $errs = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$errs) | Out-Null
+            foreach ($e in $errs) { Write-Output "::error file=$($f.Name)::$($e.Message) (ligne $($e.Extent.StartLineNumber))"; $bad++ }
+          }
+          if ($bad) { exit 1 }
       - name: Installer MetaTrader 5 (pour MetaEditor)
         shell: pwsh
         run: |
