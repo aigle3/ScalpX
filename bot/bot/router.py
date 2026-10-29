@@ -156,10 +156,12 @@ class Router:
             if message_id:
                 await self.sender.edit(self.chat_id, message_id, "💥 Historique des plantages effacé.", [[("✖ Fermer", "d:close")]])
             return ""
-        elif sub in ("log", "clog"):
-            from .system import log_path, tail
-            name = {"log": "bot.log", "clog": "compile.log"}[sub]
-            txt = tail(log_path(self.ctx, name), 40 if sub == "clog" else 25)
+        elif sub in ("log", "clog", "rlog", "wlog"):
+            from .system import BOT_ROOT, log_path, tail
+            name = {"log": "bot.log", "clog": "compile.log", "rlog": "restart.log", "wlog": "watchdog.log"}[sub]
+            # relance et surveillance : écrits par des scripts PowerShell, toujours dans le dossier du bot
+            path = BOT_ROOT / "data" / "logs" / name if sub in ("rlog", "wlog") else log_path(self.ctx, name)
+            txt = tail(path, 40 if sub == "clog" else 25)
             await self.sender.send(self.chat_id, f"📜 <b>{name}</b>\n" + (f"<pre>{esc(txt)}</pre>" if txt else "<i>vide ou absent</i>"),
                                    [[("✖ Fermer", "d:close")]], True)
             return ""
@@ -1057,10 +1059,51 @@ class Router:
         if mid:
             await self.sender.edit(self.chat_id, mid, "✅ <b>Mise à jour installée</b>\n" + "\n".join(out), None)
         if plan.bot_files or plan.bot_remove:
+            self.note_restart(mid, "mise à jour", "✅ <b>Mise à jour installée</b>\n" + "\n".join(out))
             how = await asyncio.to_thread(upd.restart_bot, bot_root)
             log.warning("mise à jour du bot installée : redémarrage (%s)", how)
             upd.STOP.set()
         return ""
+
+    # ------------------------------------------------------------------ suivi des redémarrages
+    def note_restart(self, mid, why: str, text: str = "") -> None:
+        """Avant un redémarrage voulu : le NOUVEAU bot complètera ce message (durée, relance par la surveillance ou non)."""
+        import json as _json
+        from core.version import bot_version
+        self.ctx.db.meta_set("restart_note", _json.dumps({"mid": mid or 0, "t": time.time(), "why": why,
+                                                         "from": bot_version(), "text": text}, ensure_ascii=False))
+
+    async def restart_report(self) -> None:
+        """Au démarrage : « ✅ Redémarré en N s » dans le message d'origine (ou un nouveau message s'il a disparu)."""
+        import json as _json
+        from core.version import bot_version
+        raw = self.ctx.db.meta_get("restart_note")
+        if not raw:
+            return
+        self.ctx.db.meta_set("restart_note", "")
+        try:
+            note = _json.loads(raw)
+            t0 = float(note.get("t", 0))
+        except (ValueError, TypeError, AttributeError):
+            return
+        dt = max(0, int(time.time() - t0))
+        took = f"{dt} s" if dt < 60 else f"{dt // 60} min {dt % 60:02d} s"
+        old, new = str(note.get("from") or "?"), bot_version()
+        ver = f"Bot {esc(old)} → <b>{esc(new)}</b>" if old != new else f"Bot <b>{esc(new)}</b>"
+        line = f"✅ <b>Redémarré en {took}</b> ({esc(str(note.get('why') or 'redémarrage'))}) · {ver}"
+        helped = watchdog_events_since(t0)
+        if helped:
+            line += "\n🛡 " + esc(helped)
+        elif dt > 120:
+            line += "\n⚠️ Plus long que prévu : 📜 Journaux → 🔄 Redémarrages pour le détail."
+        log.info("redémarrage terminé en %d s (%s)", dt, note.get("why"))
+        text = (str(note.get("text") or "") + "\n\n" if note.get("text") else "") + line
+        mid = int(note.get("mid") or 0)
+        if mid:
+            from .ui import EditResult
+            if await self.sender.edit(self.chat_id, mid, text, None) in (EditResult.OK, EditResult.SAME):
+                return
+        await self.sender.send(self.chat_id, line, None, True)
 
     async def check_updates_now(self) -> None:
         """Bouton ⬆ Mises à jour : vérifie GitHub tout de suite et propose l'installation, même si elle a été reportée."""
@@ -1110,7 +1153,8 @@ class Router:
         if self.ctx.deploy.running or self.building:
             await self.sender.send(self.chat_id, "⏳ Déploiement ou compilation en cours : redémarre après.", [[("✖ Fermer", "d:close")]], True)
             return
-        await self.sender.send(self.chat_id, "🔄 Redémarrage du bot… il revient dans environ 30 s.", None, True)
+        rmid = await self.sender.send(self.chat_id, "🔄 Redémarrage du bot… il revient dans environ 30 s.", None, True)
+        self.note_restart(rmid, "bouton Redémarrer", "🔄 Redémarrage du bot demandé.")
         how = await asyncio.to_thread(upd.restart_bot, _P(__file__).resolve().parent.parent)
         log.warning("redémarrage demandé depuis Telegram (%s)", how)
         upd.STOP.set()
@@ -1336,3 +1380,19 @@ class Router:
         label = inst.label if inst else iid
         self.ctx.db.add_incident(iid, kind, text)
         await self.notifier.emit(Notice(iid, label, kind, text, prio))
+
+
+def watchdog_events_since(t0: float, path=None) -> str:
+    """Interventions de la surveillance depuis t0 (data\\logs\\watchdog.log) : relance, arrêt forcé de l'ancien bot."""
+    from .system import BOT_ROOT, tail
+    txt = tail(path or BOT_ROOT / "data" / "logs" / "watchdog.log", 40)
+    out = []
+    for line in txt.splitlines():
+        try:
+            ts = time.mktime(time.strptime(line[:19], "%Y-%m-%d %H:%M:%S"))
+        except ValueError:
+            continue
+        msg = line[20:]
+        if ts >= t0 - 5 and ("relance" in msg or "arrêt forcé" in msg or "absent" in msg):
+            out.append(f"{line[11:19]} {msg}")
+    return ("surveillance : " + " · ".join(out[-3:])) if out else ""

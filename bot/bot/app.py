@@ -459,6 +459,7 @@ async def startup(app: Application) -> None:
         launched = await s.ctx.watchdog.startup_launch()
         await s.sender.reply_menu(s.chat_id, f"🤖 Bot {bot_version()} démarré · {len(launched)} terminal(aux) relancé(s).\n"
                                               f"Le bouton <b>{MENU_BUTTON}</b> (en bas) affiche le panneau.")
+        await s.router.restart_report()                            # « ✅ Redémarré en N s » dans le message de la mise à jour
         await s.dash.bring_down()
         if s.ctx.deploy.interrupted():
             await s.router.cmd_deployer()

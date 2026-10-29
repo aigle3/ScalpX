@@ -271,6 +271,7 @@ class Dashboard:
     def _render_logs(self) -> tuple[str, Keyboard]:
         kb: Keyboard = [
             [("📜 Bot", "d:log"), ("🧾 Compilation", "d:clog"), ("💥 Plantages", "d:crash")],
+            [("🔄 Redémarrages", "d:rlog"), ("🛡 Surveillance", "d:wlog")],
             [("⬅ Système", "d:sys")],
         ]
         return self._with_flash("📜 <b>Journaux</b>\n\nLes dernières lignes arrivent dans un message à part (✖ pour le fermer)."), kb

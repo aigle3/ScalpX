@@ -1313,3 +1313,34 @@ async def test_message_de_mise_a_jour_detaille_toutes_les_versions(svc, tmp_path
     text, kb = sender.msgs[router._upd_msg]
     assert "Bot 2.2.0 : suivant" in text and "• Bot 2.3.0 : truc" in text and "• EA 6.3.0 : machin" in text
     assert any(d == "upd:all" for row in kb for _, d in row)
+
+
+@pytest.mark.asyncio
+async def test_redemarrage_complete_par_le_nouveau_bot(svc, tmp_path):
+    """Avant : « redémarrage… » ; le nouveau bot complète le même message (durée, versions) et nettoie la note."""
+    import time as _t
+    from bot import router as rt
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    mid = await sender.send(1, "⏳ Installation…")
+    router.note_restart(mid, "mise à jour", "✅ <b>Mise à jour installée</b>")
+    note = json.loads(ctx.db.meta_get("restart_note"))
+    note["t"] -= 34
+    ctx.db.meta_set("restart_note", json.dumps(note))
+    await router.restart_report()
+    text = sender.msgs[mid][0]
+    assert "Mise à jour installée" in text and "Redémarré en 3" in text and "(mise à jour)" in text
+    assert ctx.db.meta_get("restart_note") == ""
+    await router.restart_report()                                   # une seule fois
+    # interventions de la surveillance citées
+    w = tmp_path / "watchdog.log"
+    now = _t.time()
+    w.write_text(_t.strftime("%Y-%m-%d %H:%M:%S", _t.localtime(now)) + " relance du bot (redémarrage voulu), essai 1\n"
+                 + _t.strftime("%Y-%m-%d %H:%M:%S", _t.localtime(now - 3600)) + " bot absent (1er constat)\n", encoding="utf-8")
+    got = rt.watchdog_events_since(now - 10, w)
+    assert "relance du bot" in got and "1er constat" not in got
+    # journaux de relance et de surveillance accessibles depuis Telegram
+    dash.goto("logs")
+    datas = [d for row in dash.render()[1] for _, d in row]
+    assert "d:rlog" in datas and "d:wlog" in datas
+    await router.on_callback("d:rlog")
+    assert "restart.log" in sender.sent[-1][1]
