@@ -62,6 +62,7 @@ class Alerts(BaseModel):
     expected_currency: str = "EUR"
     silent_mode: bool = False              # silencieux : seules les alertes critiques sonnent
     batch_window_s: int = 4                # regroupement des notifications
+    group_hold_s: int = 10                 # attente des messages identiques des autres comptes (une seule alerte pour tous)
 
 
 class Dashboard(BaseModel):

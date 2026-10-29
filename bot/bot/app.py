@@ -138,7 +138,8 @@ class Services:
         self.conf = Confirmations()
         self.dash = Dashboard(ctx, self.sender, self.chat_id, self.conf)
         self.sender.on_sent = self.dash.note_message
-        self.notifier = Notifier(self.sender, self.chat_id, cfg.alerts.silent_mode)
+        self.notifier = Notifier(self.sender, self.chat_id, cfg.alerts.silent_mode, hold_s=cfg.alerts.group_hold_s,
+                                 total=lambda: len(ctx.db.list()))
         self.router = Router(ctx, self.sender, self.chat_id, self.dash, self.conf, self.notifier)
         ctx.watchdog.alert = self.router.alert
         self.monitor = Monitor(cfg, ctx.db, ctx.status, EventReader(cfg.paths.common()), self.notifier.emit)

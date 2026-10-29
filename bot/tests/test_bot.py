@@ -1344,3 +1344,34 @@ async def test_redemarrage_complete_par_le_nouveau_bot(svc, tmp_path):
     assert "d:rlog" in datas and "d:wlog" in datas
     await router.on_callback("d:rlog")
     assert "restart.log" in sender.sent[-1][1]
+
+
+@pytest.mark.asyncio
+async def test_alertes_identiques_une_seule_pour_tout_le_systeme():
+    """4 comptes × 5 news à 13:30 → UN message « Tous les comptes » listant les 5 annonces ; un message propre à un compte reste à part."""
+    s = FakeSender()
+    n = Notifier(s, 1, hold_s=10, total=lambda: 4)
+    foot = "\n🕐 13:30 (heure de France)\n⚠️ Volatilité attendue, spreads élargis possibles.\n⛔ Filtre News actif : pas de nouvelle entrée."
+    news = ["🔴 USD · Core PCE m/m", "🔴 USD · Core PCE y/y", "🔴 USD · GDP q/q", "🔴 USD · GDP Sales q/q", "🔴 USD · Jobless Claims"]
+    for acc in ("37344723", "52030694", "52030697", "52030842"):
+        for x in news:
+            await n.emit(Notice(acc, acc, "NOTIF", "📰 NEWS DANS 1 h 00\n━━━━━━━━━━━━━━━━━━\n" + x + foot, 1))
+    await n.emit(Notice("52030694", "52030694", "NOTIF", "🎯 Objectif atteint", 1))
+    assert await n.flush() == 0                                    # attend les messages des autres comptes
+    for k in n._queued:
+        n._queued[k] -= 11
+    assert await n.flush() == 1
+    text = s.sent[-1][1]
+    assert text.count("📰 NEWS DANS 1 h 00") == 1 and all(x in text for x in news) and text.count("🕐 13:30") == 1
+    assert "🌐 Tous les comptes (4)" in text and "<b>52030694</b>\n🎯 Objectif atteint" in text
+    # 2 comptes sur 4 : nommés ; critique : part sans attendre
+    await n.emit(Notice("a", "A", "NOTIF", "⚠️ AUCUN TICK", 2))
+    await n.emit(Notice("b", "B", "NOTIF", "⚠️ AUCUN TICK", 2))
+    await n.emit(Notice("c", "C", "NOTIF", "💰 Solde 120.00\nfin", 2))
+    await n.emit(Notice("d", "D", "NOTIF", "💰 Solde 130.00\nfin", 2))       # titres proches, corps identiques : regroupés
+    await n.emit(Notice("c", "C", "NOTIF", "Capital\nsolde 120", 2))
+    await n.emit(Notice("d", "D", "NOTIF", "Capital\nsolde 130", 2))          # corps propres à chaque compte : séparés
+    assert await n.flush() == 1 and "👥 2 comptes : A, B" in s.sent[-1][1] and s.sent[-1][1].count("AUCUN TICK") == 1
+    last = s.sent[-1][1]
+    assert "👥 2 comptes : C, D" in last and last.count("Solde 1") == 1
+    assert "<b>C</b>\nCapital\nsolde 120" in last and "<b>D</b>\nCapital\nsolde 130" in last

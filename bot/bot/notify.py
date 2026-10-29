@@ -22,16 +22,80 @@ def transient(exc: Exception) -> bool:
     return isinstance(exc, (ConnectionError, TimeoutError)) or any(c.__name__ in RETRY_ON for c in type(exc).__mro__)
 
 
+NEWS_HEAD = "📰 NEWS DANS"
+
+
+def _merge_news(texts: list[Notice]) -> list[Notice]:
+    """Plusieurs annonces à la même heure (même en-tête, même heure, même pied) → UNE notification listant les annonces."""
+    out: list[Notice] = []
+    groups: dict[tuple, tuple[Notice, list[str]]] = {}
+    for n in texts:
+        lines = n.text.split("\n")
+        if not n.text.startswith(NEWS_HEAD) or len(lines) < 4:
+            out.append(n)
+            continue
+        key = (n.label, lines[0], lines[1], tuple(lines[3:]))        # en-tête, séparateur, 🕐 heure + pied
+        if key in groups:
+            g, items = groups[key]
+            if lines[2] not in items:
+                items.append(lines[2])
+            g.prio = max(g.prio, n.prio)
+            continue
+        g = Notice(n.iid, n.label, n.kind, n.text, n.prio, None, n.ts)
+        groups[key] = (g, [lines[2]])
+        out.append(g)
+    for key, (g, items) in groups.items():
+        g.text = "\n".join([key[1], key[2], *items, *key[3]])
+    return out
+
+
 class Notifier:
-    def __init__(self, sender: Sender, chat_id: int, silent_mode: bool = False) -> None:
+    def __init__(self, sender: Sender, chat_id: int, silent_mode: bool = False, hold_s: float = 0.0,
+                 total=None) -> None:
         self.sender, self.chat_id = sender, chat_id
         self.silent_mode = silent_mode
+        self.hold_s = hold_s                     # attente des messages identiques des autres comptes (EA non synchronisés)
+        self.total = total                       # nombre de comptes (callable) : « Tous les comptes » si tous ont le même
         self._pending: list[Notice] = []
+        self._queued: dict[int, float] = {}      # id(notice) → heure de mise en file
         self._retry: list[tuple[float, str, object, bool]] = []      # (premier échec, "text"/"photo", contenu, silencieux)
 
     async def emit(self, notice: Notice) -> None:
         """Met la notification en file ; elle partira au prochain flush (regroupement)."""
         self._pending.append(notice)
+        self._queued[id(notice)] = time.time()
+
+    def _group(self, texts: list[Notice]) -> list[Notice]:
+        """Même message sur plusieurs comptes (news, marché fermé, ticks, AutoTrading…) → UNE notification pour le système."""
+        import re
+        by_text: dict[str, list[Notice]] = {}
+        order: list[str] = []
+        for n in texts:
+            # titre : les nombres (délai « dans 59 min / 1 h 00 », « depuis 2 min ») peuvent différer d'une seconde entre
+            # les EA ; le reste du message doit être identique (un solde ou un montant propre au compte → pas regroupé)
+            head, _, body = n.text.partition("\n")
+            key = re.sub(r"\d+(?:[.,:]\d+)*", "#", head) + "\n" + body
+            while key in by_text and any(x.label == n.label for x in by_text[key]):
+                key += "\x00"                         # même compte : deux messages distincts, jamais fusionnés
+            if key not in by_text:
+                order.append(key)
+            by_text.setdefault(key, []).append(n)
+        out = []
+        for key in order:
+            ns = by_text[key]
+            t = ns[0].text
+            if len(ns) == 1:
+                out.append(ns[0])
+                continue
+            labels = list(dict.fromkeys(n.label for n in ns))
+            try:
+                total = int(self.total()) if self.total else 0
+            except Exception:
+                total = 0
+            who = f"🌐 Tous les comptes ({len(labels)})" if total and len(labels) >= total else \
+                f"👥 {len(labels)} comptes : " + ", ".join(labels[:6]) + (" …" if len(labels) > 6 else "")
+            out.append(Notice("*", who, ns[0].kind, t, max(n.prio for n in ns), None, min(n.ts for n in ns)))
+        return out
 
     @staticmethod
     def format(n: Notice) -> str:
@@ -80,7 +144,15 @@ class Notifier:
         sent = await self._send_retries() if self._retry else 0
         if not self._pending:
             return sent
+        now = time.time()
+        if self.hold_s > 0:
+            # un message non critique attend quelques secondes que les autres comptes envoient le même (regroupés)
+            ready = any(n.prio >= 2 or now - self._queued.get(id(n), 0) >= self.hold_s for n in self._pending)
+            if not ready:
+                return sent
         batch, self._pending = self._pending, []
+        for n in batch:
+            self._queued.pop(id(n), None)
         texts: list[Notice] = []
         seen: set[tuple[str, str]] = set()
         photos: list[Notice] = []
@@ -91,6 +163,7 @@ class Notifier:
             elif key not in seen:
                 seen.add(key)
                 texts.append(n)
+        texts = _merge_news(self._group(texts))
         items: list[tuple[str, object, bool]] = []
         if texts:
             silent = self._silent(texts)
