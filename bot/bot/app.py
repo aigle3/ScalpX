@@ -344,8 +344,11 @@ async def j_report(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def j_build(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Toutes les 20 s : version.txt changé → compilation auto ; nouvel .ex5 dans BASE → proposition de déploiement."""
+    from core.update import STOP
     s = svc(context)
     if s.ctx.deploy.running or s.router.building or s.router.installing:   # installation : version.txt pas encore écrit
+        return
+    if STOP.is_set():                     # le bot redémarre : la compilation sera faite par le nouveau (ne retarde pas l'arrêt)
         return
     req = pending_build(s.ctx.cfg, s.ctx.db)
     if req is not None:                                          # version.txt modifié → compilation automatique
@@ -362,6 +365,8 @@ async def j_update(context: ContextTypes.DEFAULT_TYPE) -> None:
     s = svc(context)
     cfg = s.ctx.cfg
     if not cfg.update.enabled or s.ctx.deploy.running or s.router.building or s.router.installing:
+        return
+    if upd.STOP.is_set():                 # redémarrage en cours : le nouveau bot vérifiera lui-même
         return
     loop = asyncio.get_running_loop()
     if cfg.update.github:

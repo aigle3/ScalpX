@@ -223,6 +223,8 @@ def main() -> int:
             stopping.set()                              # UNE seule demande d'arrêt (deux = boucle stoppée en plein arrêt)
             context.job.schedule_removal()
             log.info("arrêt demandé (mise à jour ou nouveau bot) : arrêt propre")
+            # filet : une tâche longue (compilation) ne doit pas retenir l'ancien bot indéfiniment
+            threading.Timer(90, lambda: (log.warning("arrêt propre trop long : arrêt forcé"), os._exit(0))).start()
             context.application.stop_running()
 
     app.job_queue.run_repeating(j_quit, interval=1, first=1, job_kwargs=JOB_KW)

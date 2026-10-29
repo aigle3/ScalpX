@@ -347,3 +347,11 @@ def test_paquet_github_chemins_hors_dossier_refuses(tmp_path):
     gh.extract_zip(buf.getvalue(), dest, {"sha": "1"})
     assert (dest / "bot" / "main.py").read_text() == "ok"
     assert not (tmp_path / "release.new2").exists() and not (tmp_path.parent / "evil.txt").exists()
+
+
+def test_relance_attend_la_fin_de_l_ancien_bot():
+    """La tâche planifiée n'accepte qu'une instance : la relance attend la fin de CE processus (plus de délai fixe de 20 s)."""
+    from core import update as u
+    sc = u.restart_script(4321)
+    assert sc.startswith("Wait-Process -Id 4321 -Timeout 300") and f"schtasks /run /tn '{u.TASK}'" in sc
+    assert sc.index("Wait-Process") < sc.index("schtasks /run") and "for ($i = 0; $i -lt 5" in sc

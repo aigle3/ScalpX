@@ -284,6 +284,14 @@ TASK = "ScalpX Bot"
 STOP = threading.Event()                  # positionné après une mise à jour du bot : main.py arrête proprement ce processus
 
 
+def restart_script(pid: int, wait_s: int = 300) -> str:
+    """Script PowerShell de relance : attend la fin du processus `pid` (au plus wait_s), puis lance la tâche ; si elle n'est
+    toujours pas en cours d'exécution 20 s plus tard, nouvel essai (jusqu'à 5)."""
+    return (f"Wait-Process -Id {int(pid)} -Timeout {int(wait_s)} -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3; "
+            f"for ($i = 0; $i -lt 5; $i++) {{ schtasks /run /tn '{TASK}' | Out-Null; Start-Sleep -Seconds 20; "
+            f"if ((schtasks /query /tn '{TASK}' /fo csv /nh) -match 'Running|En cours') {{ break }} }}")
+
+
 def restart_bot(bot_root: Path) -> str:
     """Relance le bot avec le nouveau code. Le nouveau processus remplace l'ancien (verrou : QUIT).
     Tâche planifiée présente → elle est relancée après l'arrêt de celui-ci ; sinon nouveau processus détaché."""
@@ -292,9 +300,10 @@ def restart_bot(bot_root: Path) -> str:
     has_task = os.name == "nt" and subprocess.run(["schtasks", "/query", "/tn", TASK], capture_output=True,
                                                   creationflags=no_win).returncode == 0
     if has_task:
-        # la tâche n'accepte qu'une instance : on la relance 20 s plus tard, une fois ce processus arrêté
-        subprocess.Popen(f'cmd /c ping -n 21 127.0.0.1 >nul & schtasks /run /tn "{TASK}"',
-                         creationflags=detached | no_win, close_fds=True)
+        # La tâche n'accepte qu'une instance (IgnoreNew) : elle n'est relancée qu'une fois CE processus terminé.
+        # Avant : relance fixe après 20 s, refusée si l'arrêt prenait plus longtemps (compilation en cours) → bot arrêté.
+        subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command",
+                          restart_script(os.getpid())], creationflags=detached | no_win, close_fds=True)
         return "task"
     exe = Path(sys.executable)
     if os.name == "nt" and exe.name.lower() == "python.exe" and (exe.with_name("pythonw.exe")).exists():
