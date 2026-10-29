@@ -149,7 +149,28 @@ SET_INPUTS = {
     "profnotif": "ProfitNotifyAmount", "dev": "Deviation", "retries": "MaxRetries", "n_filters": "NotifyFilters",
     "n_progress": "NotifyProgress", "n_errors": "NotifyErrors", "ch_style": "ChartModernStyle", "ch_ema": "ChartShowEMA",
     "ch_levels": "ChartShowLevels", "ch_panel": "ChartShowPanel", "news_block": "NewsPauseEnabledAtStart",
+    "sl_on": "ObjectifAutoCreneaux", "sl_pct": "ObjectifAutoPct", "sl_win": "ObjectifAutoFenetreMin",
+    "seuil_on": "ActiverSeuil500", "seuil_arret": "SeuilArret", "seuil_reprise": "SeuilReprise",
 }
+SLOTS_INPUT = "ObjectifAutoHeures"     # les 4 masques de créneaux (sl_m00..sl_m45) → un seul input texte « 3,6,9:30 »
+
+
+def slots_input(values: dict[str, str]) -> str | None:
+    """Masques du preset → valeur de ObjectifAutoHeures (« H » pour :00, « H:MM » sinon) ; None si le preset n'en a pas."""
+    if not any(k in values for k in cat.SLOT_KEYS):
+        return None
+    masks = []
+    for k in cat.SLOT_KEYS:
+        try:
+            masks.append(int(float(values.get(k, "0"))))
+        except ValueError:
+            masks.append(0)
+    return ",".join(str(x // 60) if x % 60 == 0 else f"{x // 60}:{x % 60:02d}" for x in cat.slots_of(masks))
+
+
+def human(p: tuple, raw: str) -> str:
+    """Valeur brute → texte pour un humain (les masques de créneaux deviennent des heures)."""
+    return cat.mask_text(p[0], raw) if p[0] in cat.SLOT_KEYS else display_of(p, raw)
 
 
 def set_value(key: str, raw: str) -> str:
@@ -171,6 +192,9 @@ def overlay_set(data: bytes, values: dict[str, str]) -> bytes:
     """Contenu d'un .set (UTF-16 LE + BOM) avec les valeurs du preset ; commentaires et autres inputs conservés."""
     text = data[2:].decode("utf-16-le") if data[:2] == b"\xff\xfe" else data.decode("utf-8-sig", errors="replace")
     want = {SET_INPUTS[k]: set_value(k, v) for k, v in values.items() if k in SET_INPUTS}
+    hours = slots_input(values)
+    if hours is not None:
+        want[SLOTS_INPUT] = hours
     out, seen = [], set()
     for line in text.split("\r\n"):
         name = line.split("=", 1)[0].strip() if "=" in line and not line.lstrip().startswith(";") else ""

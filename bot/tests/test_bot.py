@@ -19,6 +19,7 @@ from mt5.deploy import DeployManager
 from mt5.watchdog import Watchdog
 from storage.db import ARCHIVE, DEMARRE, Instance
 from tests.test_mt5 import PWD, seed
+from tests.conftest import DEFAULT_PARAMS as DEFAULT_PARAMS_T
 
 import json
 
@@ -1039,3 +1040,76 @@ async def test_nouveau_compte_recoit_le_preset_actif_et_le_set_de_base(svc):
         assert ea.accounts[a.id]["params"]["lot"] == "0.03 lot" and ea.accounts[a.id]["params"]["tz"] == "UTC"
     finally:
         await ea.stop()
+
+
+@pytest.mark.asyncio
+async def test_creneaux_par_boutons_sur_un_compte(svc):
+    """🕐 Créneaux : liste, ajout heure → minutes (pas de 15), retrait ; seul le masque concerné est envoyé, au seul compte."""
+    from bot import params_ui as pu
+    from core import params as cat
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    st = ctx_stack(svc)
+    a = seed(st, 81, "Demo-Server 1")
+    b = seed(st, 82, "Demo-Server 1")
+    ea.start()
+    await asyncio.sleep(0.3)
+    slots = {"sl_on": "✅", "sl_pct": "1.0 %", "sl_win": "10 min", "sl_m00": "1184328", "sl_m15": "0", "sl_m30": "0", "sl_m45": "0"}
+    try:
+        for i in (a, b):
+            ea.accounts.setdefault(i.id, {})["params"] = {**DEFAULT_PARAMS_T, **slots}
+        c = short(a.id)
+        # le groupe 🏆 Objectifs : bouton 🕐 Créneaux, masques cachés
+        await router.on_callback(f"p:{c}")
+        assert await _until(lambda: dash.params.cached(a.id).get("sl_m00") == "1184328")
+        await router.on_callback(f"p:{c}:g{cat.SLOT_GROUP}")
+        datas = [d for row in dash.render()[1] for _, d in row]
+        assert f"p:{c}:c" in datas and f"p:{c}:k{pu.find('sl_m00')}" not in datas
+        await router.on_callback(f"p:{c}:c")
+        text, kb = dash.render()
+        assert "03:00, 06:00, 09:00, 12:00, 17:00, 20:00" in text and "10 min" in text
+        assert f"p:{c}:cx180" in [d for row in kb for _, d in row]
+        # ➕ 09:30 : heure puis minutes (00/15/30/45)
+        await router.on_callback(f"p:{c}:ca")
+        assert len([d for row in dash.render()[1] for _, d in row if ":ch" in d]) == 24
+        await router.on_callback(f"p:{c}:ch9")
+        mins = [d for row in dash.render()[1] for _, d in row if ":cm9:" in d]
+        assert mins == [f"p:{c}:cm9:{m}" for m in (0, 15, 30, 45)]
+        await router.on_callback(f"p:{c}:cm9:30")
+        assert await _until(lambda: ea.accounts[a.id]["params"]["sl_m30"] == str(1 << 9))
+        assert await _until(lambda: "✅ Créneau 09:30 ajouté" in dash.render()[0])
+        assert ea.accounts[b.id]["params"]["sl_m30"] == "0"                      # l'autre compte n'est pas touché
+        # ✖ 03:00
+        await router.on_callback(f"p:{c}:cx180")
+        assert await _until(lambda: ea.accounts[a.id]["params"]["sl_m00"] == str(1184328 - (1 << 3)))
+        assert await _until(lambda: "✅ Créneau 03:00 retiré" in dash.render()[0])
+        assert "06:00, 09:00, 09:30, 12:00" in dash.render()[0]
+        # déjà présent / minutes invalides : rien n'est envoyé
+        await router.on_callback(f"p:{c}:cm9:30")
+        assert "existe déjà" in dash.render()[0]
+        await router.on_callback(f"p:{c}:cm9:20")
+        assert "invalide" in dash.render()[0]
+        # 12 créneaux maximum
+        ea.accounts[a.id]["params"]["sl_m15"] = str((1 << 24) - 1)
+        await router.on_callback(f"p:{c}:r")
+        assert await _until(lambda: dash.params.cached(a.id).get("sl_m15") == str((1 << 24) - 1))
+        await router.on_callback(f"p:{c}:ca")
+        assert "maximum" in dash.render()[0]
+    finally:
+        await ea.stop()
+
+
+
+@pytest.mark.asyncio
+async def test_liste_filtre_vide_bouton_voir_tous(svc):
+    """Filtre « Alertes » sans alerte : bouton 👥 Voir les N comptes, qui remet le filtre à Tous."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    st = ctx_stack(svc)
+    a = seed(st, 71, "Demo-Server 1")
+    write_statut(ctx, a.id)
+    dash.set_filter("alertes")
+    await router.on_callback("d:lst")
+    datas = [d for row in dash.render()[1] for _, d in row]
+    if f"a:{short(a.id)}" not in datas:
+        assert "d:fa" in datas
+        await router.on_callback("d:fa")
+    assert dash.flt == "all" and f"a:{short(a.id)}" in [d for row in dash.render()[1] for _, d in row]

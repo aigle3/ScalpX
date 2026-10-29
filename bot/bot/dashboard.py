@@ -120,7 +120,7 @@ class Dashboard:
             fl = self._flash_text()
             return ((f"{fl}\n\n" if fl else "") + system_text(self.ctx, self.vps(self.ctx.cfg.paths.data)),
                     system_kb(bool(self.ctx.db.meta_get("update_pending")), upd.backup_version(BOT_ROOT)))
-        if kind in ("prm", "prg", "prp"):
+        if kind in ("prm", "prg", "prp", "prc", "prh", "prq"):
             sid = self.screen[1]
             if sid.startswith(pui.PREFIX):                  # réglages d'un preset (gardé par le bot)
                 name = sid[len(pui.PREFIX):]
@@ -191,6 +191,8 @@ class Dashboard:
         page_views, self.page, pages = render.paginate(filtered, self.page, self.ctx.cfg.dashboard.page_size)
         text = render.list_text(page_views, len(views), self.page, pages, self.flt, self.sort)
         kb: Keyboard = [[(f"{v.health.icon} {v.inst.label[:24]}", f"a:{short(v.inst.id)}")] for v in page_views]
+        if not filtered and views:                       # filtre vide (ex. « Alertes » quand tout va bien) : retour en un geste
+            kb.append([(f"👥 Voir les {len(views)} comptes", "d:fa")])
         kb.append([(f"🔎 {FILTER_LABELS[self.flt]}", "d:fc"), (f"↕ {SORT_LABELS[self.sort]}", "d:sc")])
         if pages > 1:
             kb.append([("◀", f"d:p:{self.page - 1}"), (f"{self.page + 1}/{pages}", "d:r"), ("▶", f"d:p:{self.page + 1}")])

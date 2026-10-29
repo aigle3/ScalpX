@@ -75,6 +75,16 @@ PARAMS = [
     ("early", "Clôture anticipée", 7, "bool", 0.0, 1.0, 1.0, "", []),
     ("goalmax", "Plafond d'objectif (montant)", 7, "dbl", 1.0, 100000.0, 5.0, "", []),
     ("profnotif", "Alerte profit cumulé", 7, "dbl", 0.0, 10000.0, 1.0, "", []),
+    ("sl_on", "Objectif auto aux créneaux", 7, "bool", 0.0, 1.0, 1.0, "", []),
+    ("sl_pct", "Objectif auto : gain", 7, "dbl", 0.1, 20.0, 0.1, " %", []),
+    ("sl_win", "Fenêtre de lancement", 7, "int", 5.0, 15.0, 5.0, " min", []),
+    ("sl_m00", "Créneaux à l'heure pile (:00)", 7, "int", 0.0, 16777215.0, 1.0, "", []),
+    ("sl_m15", "Créneaux à :15", 7, "int", 0.0, 16777215.0, 1.0, "", []),
+    ("sl_m30", "Créneaux à :30", 7, "int", 0.0, 16777215.0, 1.0, "", []),
+    ("sl_m45", "Créneaux à :45", 7, "int", 0.0, 16777215.0, 1.0, "", []),
+    ("seuil_on", "Clôture anticipée au seuil", 7, "bool", 0.0, 1.0, 1.0, "", []),
+    ("seuil_arret", "Seuil d'arrêt", 7, "dbl", 10.0, 1000000.0, 10.0, "", []),
+    ("seuil_reprise", "Seuil de reprise", 7, "dbl", 0.0, 999990.0, 5.0, "", []),
     ("dev", "Déviation max", 8, "int", 0.0, 500.0, 5.0, " pts", []),
     ("retries", "Nouvelles tentatives", 8, "int", 0.0, 5.0, 1.0, "", []),
     ("n_filters", "Alertes globales des filtres", 9, "bool", 0.0, 1.0, 1.0, "", []),
@@ -94,3 +104,49 @@ PARAMS = [
     ("news_after", "Filtre News : blocage après l'annonce", 3, "int", 0.0, 180.0, 5.0, " min", []),
     ("vac_risk", "Mode vacances : plafond de risque", 6, "dbl", 0.5, 50.0, 0.5, " %", []),
 ]
+
+
+# ---------------------------------------------------------------- créneaux d'objectif automatique
+# L'EA garde les créneaux dans 4 masques de 24 bits, un par minute (00, 15, 30, 45) : le bit h = un créneau à h:MM.
+SLOT_KEYS = ("sl_m00", "sl_m15", "sl_m30", "sl_m45")
+SLOT_MINUTES = (0, 15, 30, 45)
+HIDDEN = frozenset(SLOT_KEYS)          # pas de bouton « nombre » : ils se règlent dans l'écran 🕐 Créneaux
+MAX_SLOTS = 12                         # au-delà, le panneau du graphique devient illisible
+SLOT_GROUP = 7                         # 🏆 Objectifs
+
+
+def slots_of(masks: list[int]) -> list[int]:
+    """4 masques → créneaux en minutes depuis minuit, triés."""
+    return sorted(h * 60 + SLOT_MINUTES[i] for i, m in enumerate(masks) for h in range(24) if int(m) >> h & 1)
+
+
+def masks_of(slots) -> list[int]:
+    """Créneaux (minutes depuis minuit) → 4 masques ; les minutes hors 00/15/30/45 sont ignorées."""
+    out = [0, 0, 0, 0]
+    for s in slots:
+        h, m = divmod(int(s), 60)
+        if 0 <= h < 24 and m in SLOT_MINUTES:
+            out[SLOT_MINUTES.index(m)] |= 1 << h
+    return out
+
+
+def slot_text(slot: int) -> str:
+    return f"{slot // 60:02d}:{slot % 60:02d}"
+
+
+def slots_text(masks: list[int]) -> str:
+    s = slots_of(masks)
+    return ", ".join(slot_text(x) for x in s) if s else "aucun"
+
+
+def mask_text(key: str, raw: str) -> str:
+    """Valeur d'un masque → texte lisible (« 03:00, 06:00 ») ; autre clé ou valeur illisible : inchangée."""
+    if key not in SLOT_KEYS:
+        return raw
+    try:
+        m = int(float(raw))
+    except (TypeError, ValueError):
+        return raw
+    masks = [0, 0, 0, 0]
+    masks[SLOT_KEYS.index(key)] = m
+    return slots_text(masks)

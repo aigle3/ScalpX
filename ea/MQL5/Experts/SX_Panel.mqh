@@ -165,17 +165,17 @@ string ResumeMsg(color &col)
 {
    col = PC_TEXT;
    datetime ns = NextSlot();
-   string slot = !ObjectifAutoCreneaux ? "créneaux désactivés" :
+   string slot = !PBool(P_SL_ON) ? "créneaux désactivés" :
                  (ns > 0 ? SlotLabel(ns) + " (dans " + Countdown(ns) + ")" : "aucun créneau configuré");
    double bal = AccountInfoDouble(ACCOUNT_BALANCE);
    if(g_maint)        { col = PC_ORANGE; return "Maintenance : le trading reprend sur ordre du bot central."; }
    if(g_phase500)     { col = PC_ORANGE; return "Clôture 500 en cours : fermeture des positions puis vérification du solde."; }
    if(g_state == ST_ARRET)
-   { col = PC_RED; return "Seuil " + F0(SeuilArret) + " atteint : reprise automatique après retrait (solde entre " + F0(SeuilReprise) + " et " + F0(SeuilArret) + ")."; }
+   { col = PC_RED; return "Seuil " + F0(PDbl(P_SEUIL_ARRET)) + " atteint : reprise automatique après retrait (solde entre " + F0(PDbl(P_SEUIL_REPRISE)) + " et " + F0(PDbl(P_SEUIL_ARRET)) + ")."; }
    if(g_state == ST_PAUSE) { col = PC_BLUE; return "Pause : le trading reprend avec la commande REPRISE (bot ou bouton Démarrer)."; }
    if(!g_goalActive)
    {
-      if(bal < SeuilReprise) { col = PC_RED; return "Solde sous " + F0(SeuilReprise) + " " + Cur() + " : aucune nouvelle série ne sera lancée."; }
+      if(bal < PDbl(P_SEUIL_REPRISE)) { col = PC_RED; return "Solde sous " + F0(PDbl(P_SEUIL_REPRISE)) + " " + Cur() + " : aucune nouvelle série ne sera lancée."; }
       col = PC_ORANGE;
       return "Aucun objectif : le trading reprend au prochain créneau, " + slot + ".";
    }
@@ -314,11 +314,11 @@ void PanelUpdate()
    //--- PLANNING : prochain créneau, compte à rebours, reprise du trading
    // [ARCHI] début
    datetime ns = NextSlot();
-   bool slotsOn = (ObjectifAutoCreneaux && g_hoursN > 0);
+   bool slotsOn = (PBool(P_SL_ON) && g_slotsN > 0);
    PText("p_t", xl, y, "PLANNING", PC_DIM, 8);
    PText("p_tr", xr, y, "Heure EA " + TimeToString(LocalNow(), TIME_MINUTES | TIME_SECONDS), PC_DIM, 8, 1);
    y += 15;
-   PText("p_1", xl, y, "Prochain objectif +" + F1(ObjectifAutoPct) + " %", PC_TEXT, 9);
+   PText("p_1", xl, y, "Prochain objectif +" + F1(PDbl(P_SL_PCT)) + " %", PC_TEXT, 9);
    PText("p_1r", xr, y, slotsOn ? SlotLabel(ns) : "créneaux désactivés", slotsOn ? PC_ORANGE : PC_DIM, 9, 1, "Segoe UI Semibold");
    y += 16;
    PText("p_2", xl, y, "Compte à rebours", PC_TEXT, 9);
@@ -328,28 +328,37 @@ void PanelUpdate()
    string rm = ResumeMsg(rc);
    int nl = PWrap("p_m", xl, y, rm, rc, 9, 52, 3);
    y += nl * 15 + 4;
+   static int s_chips = 0;                              // nombre de pastilles dessinées au rafraîchissement précédent
+   int wantChips = slotsOn ? g_slotsN : 0;
+   for(int i = wantChips; i < s_chips; i++)             // créneau retiré (ou désactivé) : on efface les pastilles en trop
+   {
+      ObjectDelete(0, PNM("p_c" + IntegerToString(i)));
+      ObjectDelete(0, PNM("p_ct" + IntegerToString(i)));
+   }
+   s_chips = wantChips;
    if(slotsOn)
    {
-      int perRow = MathMin(g_hoursN, 8);
+      int perRow = MathMin(g_slotsN, 6);
       int cw = (iw - (perRow - 1) * 4) / perRow;
       MqlDateTime lt;
       TimeToStruct(LocalNow(), lt);
       bool weekday = (lt.day_of_week >= 1 && lt.day_of_week <= 5);
+      int nowMin = lt.hour * 60 + lt.min, win = SlotWindow();
       bool nextMarked = false;
-      for(int i = 0; i < g_hoursN; i++)
+      for(int i = 0; i < g_slotsN; i++)
       {
          int cx = i % perRow, row = i / perRow;
          int px = xl + cx * (cw + 4), py = y + row * 22;
-         bool passed = weekday && (g_hours[i] < lt.hour || (g_hours[i] == lt.hour && lt.min >= ObjectifAutoFenetreMin));
+         bool passed = weekday && (nowMin >= g_slots[i] + win);        // fenêtre terminée
          bool isNext = (!passed && !nextMarked && weekday) || (!weekday && i == 0 && !nextMarked);
          if(isNext) nextMarked = true;
          color fill = isNext ? PC_ORANGE : C'24,34,58';
          color tcol = isNext ? C'10,14,24' : (passed ? PC_GREY : PC_TEXT);
          PRect("p_c" + IntegerToString(i), px, py, cw, 18, fill, isNext ? PC_ORANGE : PC_BORDER);
-         PText("p_ct" + IntegerToString(i), px + cw / 2, py + 3, StringFormat("%02dh", g_hours[i]), tcol, 8, 2, isNext ? "Segoe UI Semibold" : "Segoe UI");
+         PText("p_ct" + IntegerToString(i), px + cw / 2, py + 3, SlotText(g_slots[i]), tcol, 8, 2, isNext ? "Segoe UI Semibold" : "Segoe UI");
       }
-      y += ((g_hoursN - 1) / perRow + 1) * 22;
-      PText("p_n", xl, y, "Lun–ven · créneau sauté si un objectif est en cours", PC_DIM, 8);
+      y += ((g_slotsN - 1) / perRow + 1) * 22;
+      PText("p_n", xl, y, "Lun–ven · fenêtre " + IntegerToString(win) + " min · sauté si objectif en cours", PC_DIM, 8);
       y += 14;
    }
    y += 8;
@@ -401,7 +410,7 @@ void PanelUpdate()
       PText("a_3r", xr, y, "Marge " + (ml > 0 ? F0(ml) + " %" : "—"), PC_TEXT, 9, 1);
       y += 20;
       // [ARCHI] début : progression vers le seuil d'arrêt (500) et seuil minimal (125)
-      double lo = SeuilReprise, hi = SeuilArret;
+      double lo = PDbl(P_SEUIL_REPRISE), hi = PDbl(P_SEUIL_ARRET);
       double frac = (hi > lo) ? (bal - lo) / (hi - lo) : 0.0;
       color pc = (bal < lo) ? PC_RED : (bal >= hi ? PC_ORANGE : PC_BLUE);
       PText("a_p", xl, y, "Vers " + F0(hi) + " " + Cur() + " · cycle " + IntegerToString(g_cycle), PC_TEXT, 9);

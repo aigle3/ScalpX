@@ -291,3 +291,22 @@ def test_presets_reglages_supprimes_de_l_ea_ignores(tmp_path):
     st = ps.PresetStore(f)
     assert st.presets["Martin"] == {"lot": "0.01"} and st.active == "Martin"     # « autoresume » (EA < 6.0.0) retiré
     assert ps.differences({"lot": "0.01", "autoresume": "20"}, {"lot": "0.01"}) == {}
+
+
+def test_creneaux_masques_et_input_du_set():
+    """Créneaux : 4 masques (minutes 00/15/30/45) ↔ minutes depuis minuit ↔ input ObjectifAutoHeures du .set."""
+    from core import params as cat, presets as ps
+    m = cat.masks_of([180, 360, 570, 765, 1230, 61])                 # 61 = 01:01 : minutes invalides, ignoré
+    assert m == [1 << 3 | 1 << 6, 0, 1 << 9 | 1 << 20, 1 << 12]
+    assert cat.slots_of(m) == [180, 360, 570, 765, 1230]
+    assert cat.slots_text(m) == "03:00, 06:00, 09:30, 12:45, 20:30" and cat.slots_text([0, 0, 0, 0]) == "aucun"
+    assert cat.mask_text("sl_m30", str(1 << 9)) == "09:30" and cat.mask_text("lot", "0.01") == "0.01"
+    vals = {"sl_m00": str(m[0]), "sl_m15": "0", "sl_m30": str(m[2]), "sl_m45": str(m[3]), "sl_win": "10", "seuil_arret": "600"}
+    assert ps.slots_input(vals) == "3,6,9:30,12:45,20:30" and ps.slots_input({"lot": "0.01"}) is None
+    txt = ps.overlay_set(_set(["ObjectifAutoHeures=3,6,9,12,17,20", "ObjectifAutoFenetreMin=5", ""]), vals)[2:].decode("utf-16-le")
+    assert "ObjectifAutoHeures=3,6,9:30,12:45,20:30" in txt and "ObjectifAutoFenetreMin=10" in txt and "SeuilArret=600" in txt
+    assert "sl_m00" not in txt
+    # valeurs par défaut de l'EA (3,6,9,12,17,20) : le masque :00 vaut 1184328
+    assert cat.masks_of([h * 60 for h in (3, 6, 9, 12, 17, 20)])[0] == 1184328
+    p = ps.BY_KEY["sl_m00"]
+    assert ps.human(p, "1184328") == "03:00, 06:00, 09:00, 12:00, 17:00, 20:00" and ps.human(ps.BY_KEY["sl_win"], "10") == "10 min"

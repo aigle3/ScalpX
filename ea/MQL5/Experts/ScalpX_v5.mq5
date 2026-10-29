@@ -17,7 +17,7 @@
 //|   SX_Panel.mqh     panneau d'informations dynamique              |
 //+------------------------------------------------------------------+
 #property copyright   "ScalpX"
-#property version     "6.01"
+#property version     "6.02"
 #property description "ScalpX v6.1.0 — EMA 10/20 + grille ATR + TP commun + filtres multi-timeframe, pilotage par bot central (fichiers)"
 
 // [SEUIL500] début : TEST UNIQUEMENT (test B-3 de la checklist). Décommenter pour simuler un glissement de 2.0 (devise du compte)
@@ -123,10 +123,10 @@ input group "══ Architecture multi-comptes (v5) ══"
 input bool   ActiverSeuil500 = true;                  // Clôture anticipée à SeuilArret (solde + flottant de l'EA)
 input double SeuilArret = 500.0;                      // Seuil d'arrêt (devise du compte)
 input double SeuilReprise = 125.0;                    // Solde minimum pour trader / reprendre après retrait (devise du compte)
-input bool   ObjectifAutoCreneaux = true;             // Objectif automatique aux créneaux horaires
+input bool   ObjectifAutoCreneaux = true;             // Objectif automatique aux créneaux horaires (valeur de départ : modifiable ensuite depuis le bot)
 input double ObjectifAutoPct = 1.0;                   // Objectif automatique : gain en % du solde au créneau
-input string ObjectifAutoHeures = "3,6,9,12,17,20";   // Créneaux (heures du fuseau réglé dans l'EA), lundi à vendredi
-input int    ObjectifAutoFenetreMin = 5;              // Fenêtre de lancement après l'heure pile (min) ; au-delà : créneau perdu
+input string ObjectifAutoHeures = "3,6,9,12,17,20";   // Créneaux de départ : « H » ou « H:MM » (MM = 00, 15, 30 ou 45), séparés par des virgules ; lundi à vendredi, heures du fuseau réglé dans l'EA
+input int    ObjectifAutoFenetreMin = 10;             // Fenêtre de lancement après l'heure du créneau (5, 10 ou 15 min) ; au-delà : créneau perdu
 input bool   FermerAutresGraphiques = true;              // Ferme les autres graphiques du terminal au démarrage (un compte = un graphique)
 // [ARCHI] fin
 

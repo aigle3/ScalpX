@@ -123,6 +123,9 @@ class Router:
         elif sub in ("lst", "act", "rpt", "logs", "gterm"):
             self.dash.goto(sub)
             self.dash.silent = self.notifier.silent_mode
+        elif sub == "fa":                                   # tous les comptes (filtre remis à « Tous »)
+            self.dash.goto("lst")
+            self.dash.set_filter("all")
         elif sub == "fc":                                   # filtre suivant
             i = FILTERS.index(self.dash.flt) if self.dash.flt in FILTERS else 0
             self.dash.set_filter(FILTERS[(i + 1) % len(FILTERS)])
@@ -252,6 +255,21 @@ class Router:
             if sub == "r" or not ui.fresh(inst.id):
                 self.dash.flash("⏳ Lecture des paramètres…")
                 self._bg(self._prm_fetch(inst))
+        elif sub == "c":                                                # 🕐 créneaux
+            self.dash.goto("prc", inst.id)
+            if not ui.fresh(inst.id):
+                self._bg(self._prm_fetch(inst))
+        elif sub == "ca":                                               # ➕ choix de l'heure
+            if len(pu.cat.slots_of(ui.masks(inst.id) or [0, 0, 0, 0])) >= pu.cat.MAX_SLOTS:
+                self.dash.flash(f"⚠️ {pu.cat.MAX_SLOTS} créneaux maximum : retires-en un d'abord.")
+            else:
+                self.dash.goto("prh", inst.id)
+        elif sub.startswith("ch") and sub[2:].isdigit() and int(sub[2:]) < 24:
+            self.dash.goto("prq", inst.id, int(sub[2:]))
+        elif sub.startswith("cm") and sub[2:].isdigit() and len(p) > 3 and p[3].isdigit():
+            self._slot_change(inst, int(sub[2:]) * 60 + int(p[3]), add=True)
+        elif sub.startswith("cx") and sub[2:].isdigit():
+            self._slot_change(inst, int(sub[2:]), add=False)
         elif sub[0] == "g" and sub[1:].isdigit():
             self.dash.goto("prg", inst.id, int(sub[1:]))
         elif sub[0] == "k" and sub[1:].isdigit():
@@ -285,15 +303,46 @@ class Router:
         await self.dash.refresh(force=True)
         return ""
 
+    def _slot_change(self, inst, slot: int, add: bool) -> None:
+        """Ajoute ou retire un créneau : un seul masque (celui de ses minutes) est envoyé, sur le robot, tous les robots ou le preset."""
+        cat = pu.cat
+        masks = self.dash.params.masks(inst.id)
+        h, m = divmod(slot, 60)
+        if masks is None:
+            self.dash.flash("⚠️ Créneaux inconnus : touche 🔃 Relire.")
+            return
+        if not (0 <= h < 24 and m in cat.SLOT_MINUTES):
+            self.dash.flash("❌ Créneau invalide.")
+            return
+        slots = cat.slots_of(masks)
+        t = cat.slot_text(slot)
+        self.dash.goto("prc", inst.id)
+        if add and slot in slots:
+            self.dash.flash(f"ℹ️ Le créneau {t} existe déjà.")
+            return
+        if not add and slot not in slots:
+            self.dash.flash(f"ℹ️ Le créneau {t} n'existe plus.")
+            return
+        if add and len(slots) >= cat.MAX_SLOTS:
+            self.dash.flash(f"⚠️ {cat.MAX_SLOTS} créneaux maximum : retires-en un d'abord.")
+            return
+        mi = cat.SLOT_MINUTES.index(m)
+        new = masks[mi] | (1 << h) if add else masks[mi] & ~(1 << h)
+        cached = self.dash.params.vals.get(inst.id)
+        if cached:                                     # cache mis à jour tout de suite : deux touches rapides ne s'écrasent pas
+            cached[1][cat.SLOT_KEYS[mi]] = str(new)
+        self._bg(self._prm_apply(inst, pu.find(cat.SLOT_KEYS[mi]), str(new),
+                                 f"Créneau {t} {'ajouté' if add else 'retiré'}"))
+
     async def _prm_fetch(self, inst) -> None:
         ok = await self.dash.params.fetch(inst)
         self.dash.flash("" if ok else f"❌ Lecture impossible : {self.dash.params.last_error}.", 25.0 if not ok else 0.1)
         await self.dash.refresh(force=True)
 
-    async def _prm_apply(self, inst, idx: int, value: str) -> None:
-        self.dash.flash(f"⏳ {pu.cat.PARAMS[idx][0]} = {value}…")
+    async def _prm_apply(self, inst, idx: int, value: str, shown: str = "") -> None:
+        self.dash.flash(f"⏳ {shown or pu.cat.PARAMS[idx][0] + ' = ' + value}…")
         await self.dash.refresh(force=True)
-        self.dash.flash(await self.dash.params.set_value(inst, idx, value))
+        self.dash.flash(await self.dash.params.set_value(inst, idx, value, shown))
         await self.dash.refresh(force=True)
 
     async def on_text(self, text: str) -> None:

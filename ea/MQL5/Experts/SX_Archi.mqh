@@ -34,8 +34,8 @@ bool     g_capSent      = false;       // CAPITAL_INSUFFISANT déjà émis
 long     g_evSeq        = 0;
 ulong    g_phaseRetryMs = 0;
 ulong    g_termCloseAt  = 0;           // fermeture du terminal demandée (ms)
-int      g_hours[];                    // heures des créneaux (triées)
-int      g_hoursN       = 0;
+int      g_slots[];                    // créneaux d'objectif : minutes depuis minuit (triées)
+int      g_slotsN       = 0;
 long     g_lastSlotKey  = 0;
 string   g_evPend[];                   // événements non écrits (fichier verrouillé), réessayés au tick suivant
 string   g_badName[];                  // commandes illisibles (compteur d'échecs)
@@ -395,53 +395,80 @@ bool PeutTrader()
    if(!g_archiOn) return true;                       // Strategy Tester : jamais de blocage
    if(g_maint) return false;
    if(g_state != ST_ACTIF) return false;
-   if(!ActiverSeuil500) return true;
+   if(!PBool(P_SEUIL_ON)) return true;
    if(g_phase500) return false;
-   if(AccountInfoDouble(ACCOUNT_BALANCE) + 0.005 >= SeuilArret) return false;
+   if(AccountInfoDouble(ACCOUNT_BALANCE) + 0.005 >= PDbl(P_SEUIL_ARRET)) return false;
    return true;
 }
 
 //+------------------------------------------------------------------+
 //| Créneaux d'objectif automatique                                  |
+//| Réglage = 4 masques de 24 bits (P_SL_M00..P_SL_M45, un par       |
+//| minute 00/15/30/45) : le bit h = un créneau à l'heure h.         |
 //+------------------------------------------------------------------+
 void SlotsParse()
 {
-   ArrayResize(g_hours, 0);
-   g_hoursN = 0;
-   string parts[];
-   int n = StringSplit(ObjectifAutoHeures, ',', parts);
-   for(int i = 0; i < n; i++)
+   ArrayResize(g_slots, 0);
+   g_slotsN = 0;
+   for(int h = 0; h < 24; h++)                         // ordre croissant : heure puis minutes
+      for(int mi = 0; mi < 4; mi++)
+         if((PInt(P_SL_M00 + mi) & (1 << h)) != 0)
+         {
+            ArrayResize(g_slots, g_slotsN + 1);
+            g_slots[g_slotsN] = h * 60 + mi * 15;
+            g_slotsN++;
+         }
+}
+
+string SlotText(const int slot) { return StringFormat("%02d:%02d", slot / 60, slot % 60); }
+
+int SlotWindow() { return PInt(P_SL_WIN); }          // 5 à 15 min : jamais de chevauchement (créneaux espacés de 15 min minimum)
+
+// clé d'un créneau du jour : un créneau n'est lancé qu'une seule fois
+long SlotKey(const MqlDateTime &d, const int slot)
+{
+   return ((((long)d.year * 100 + d.mon) * 100 + d.day) * 100 + slot / 60) * 100 + slot % 60;
+}
+
+// créneau dont la fenêtre est ouverte maintenant (lundi à vendredi) ; -1 si aucun
+int OpenSlot(const MqlDateTime &d)
+{
+   if(d.day_of_week < 1 || d.day_of_week > 5) return -1;
+   int now = d.hour * 60 + d.min, win = SlotWindow();
+   for(int k = 0; k < g_slotsN; k++)
+      if(now >= g_slots[k] && now < g_slots[k] + win) return g_slots[k];
+   return -1;
+}
+
+// Masques modifiés (bot, preset) : relit les créneaux. Un créneau ajouté PENDANT sa fenêtre n'est pas lancé
+// aussitôt : il est compté comme consommé pour aujourd'hui (pas de lancement surprise à l'ajout).
+void SlotsRefresh()
+{
+   MqlDateTime d;
+   TimeToStruct(LocalNow(), d);
+   int before = OpenSlot(d);
+   SlotsParse();
+   int after = OpenSlot(d);
+   if(after >= 0 && after != before)
    {
-      string p = parts[i];
-      StringTrimLeft(p); StringTrimRight(p);
-      if(!AllDigits(p)) continue;
-      int h = (int)StringToInteger(p);
-      if(h < 0 || h > 23) continue;
-      bool dup = false;
-      for(int k = 0; k < g_hoursN; k++) if(g_hours[k] == h) dup = true;
-      if(dup) continue;
-      ArrayResize(g_hours, g_hoursN + 1);
-      g_hours[g_hoursN] = h;
-      g_hoursN++;
+      g_lastSlotKey = SlotKey(d, after);
+      GlobalVariableSet(GVN("slotkey"), (double)g_lastSlotKey);
    }
-   for(int a = 0; a < g_hoursN - 1; a++)               // tri croissant
-      for(int b = a + 1; b < g_hoursN; b++)
-         if(g_hours[b] < g_hours[a]) { int t = g_hours[a]; g_hours[a] = g_hours[b]; g_hours[b] = t; }
 }
 
 // prochain créneau (heure du fuseau de l'EA), lundi à vendredi ; 0 si aucun
 datetime NextSlot()
 {
-   if(g_hoursN == 0) return 0;
+   if(g_slotsN == 0) return 0;
    datetime now = LocalNow();
    for(int day = 0; day < 8; day++)
    {
       MqlDateTime b;
       TimeToStruct(now + (datetime)(day * 86400), b);
       if(b.day_of_week < 1 || b.day_of_week > 5) continue;
-      for(int k = 0; k < g_hoursN; k++)
+      for(int k = 0; k < g_slotsN; k++)
       {
-         b.hour = g_hours[k]; b.min = 0; b.sec = 0;
+         b.hour = g_slots[k] / 60; b.min = g_slots[k] % 60; b.sec = 0;
          datetime t = StructToTime(b);
          if(t > now) return t;
       }
@@ -458,22 +485,18 @@ string NextSlotText()
 
 void SlotTick()
 {
-   if(!ObjectifAutoCreneaux || g_hoursN == 0) return;
+   if(!PBool(P_SL_ON) || g_slotsN == 0) return;
    if(g_state != ST_ACTIF || g_maint || g_phase500) return;
    MqlDateTime d;
    TimeToStruct(LocalNow(), d);
-   if(d.day_of_week < 1 || d.day_of_week > 5) return;
-   int win = (ObjectifAutoFenetreMin < 1) ? 1 : ObjectifAutoFenetreMin;
-   if(d.min >= win) return;
-   bool isSlot = false;
-   for(int k = 0; k < g_hoursN; k++) if(g_hours[k] == d.hour) isSlot = true;
-   if(!isSlot) return;
-   long key = (((long)d.year * 100 + d.mon) * 100 + d.day) * 100 + d.hour;
+   int sl = OpenSlot(d);
+   if(sl < 0) return;
+   long key = SlotKey(d, sl);
    if(key == g_lastSlotKey) return;
    g_lastSlotKey = key;                                    // le créneau est consommé, jamais rattrapé
    GlobalVariableSet(GVN("slotkey"), (double)key);
 
-   string slot = StringFormat("%02d:00", d.hour);
+   string slot = SlotText(sl);
    if(g_goalActive)
    {
       EvTyped("CRENEAU_SAUTE", 0, "⏭ Créneau " + slot + " sauté : l'objectif précédent n'est pas terminé.",
@@ -481,13 +504,13 @@ void SlotTick()
       return;
    }
    double bal = AccountInfoDouble(ACCOUNT_BALANCE);
-   if(bal + 0.005 < SeuilReprise)
+   if(bal + 0.005 < PDbl(P_SEUIL_REPRISE))
    {
-      EvTyped("CRENEAU_SAUTE", 1, "⏭ Créneau " + slot + " sauté : solde " + NumS(bal) + " < " + NumS(SeuilReprise) + " " + Cur() + ".",
+      EvTyped("CRENEAU_SAUTE", 1, "⏭ Créneau " + slot + " sauté : solde " + NumS(bal) + " < " + NumS(PDbl(P_SEUIL_REPRISE)) + " " + Cur() + ".",
               "{\"creneau\":\"" + slot + "\",\"raison\":\"solde_insuffisant\"}");
       return;
    }
-   if(ActiverSeuil500 && bal + 0.005 >= SeuilArret) return;
+   if(PBool(P_SEUIL_ON) && bal + 0.005 >= PDbl(P_SEUIL_ARRET)) return;
    if(!g_configOK)
    {
       EvTyped("CRENEAU_SAUTE", 1, "⏭ Créneau " + slot + " sauté : paramètres non validés (commande VALIDER).",
@@ -495,7 +518,7 @@ void SlotTick()
       return;
    }
    string msg;
-   if(!GoalSetFromArg("+" + DoubleToString(ObjectifAutoPct, 2) + "%", msg))
+   if(!GoalSetFromArg("+" + DoubleToString(PDbl(P_SL_PCT), 2) + "%", msg))
    {
       EvTyped("CRENEAU_SAUTE", 1, "⏭ Créneau " + slot + " : objectif impossible (" + msg + ").",
               "{\"creneau\":\"" + slot + "\",\"raison\":\"objectif_refuse\"}");
@@ -508,7 +531,7 @@ void SlotTick()
    g_failCount = 0;
    g_nextTradeMs = 0;
    GlobalVariablesFlush();
-   EvTyped("OBJECTIF_AUTO", 1, "🎯 Créneau " + slot + " : objectif +" + DoubleToString(ObjectifAutoPct, 2) + " % lancé.\n" + msg,
+   EvTyped("OBJECTIF_AUTO", 1, "🎯 Créneau " + slot + " : objectif +" + DoubleToString(PDbl(P_SL_PCT), 2) + " % lancé.\n" + msg,
            "{\"creneau\":\"" + slot + "\",\"cible\":" + NumS(g_goalTarget) + ",\"depart\":" + NumS(g_goalInit) + "}");
 }
 
@@ -532,17 +555,17 @@ void ToArret500(const string reason, bool emit)
    SetState(ST_ARRET, false);
    if(emit)
       EvTyped("ARRET_500", 2,
-              "🏁 " + NumS(SeuilArret) + " ATTEINTS — ARRÊT\n━━━━━━━━━━━━━━━━━━\n💰 Solde : " + NumS(bal) + " " + Cur() +
-              "\n💸 À retirer : " + NumS(bal - SeuilReprise) + " " + Cur() + " (pour laisser " + NumS(SeuilReprise) + ")\n" + reason,
-              "{\"solde\":" + NumS(bal) + ",\"a_retirer\":" + NumS(bal - SeuilReprise) + ",\"cycle\":" + IntegerToString(g_cycle) + "}");
+              "🏁 " + NumS(PDbl(P_SEUIL_ARRET)) + " ATTEINTS — ARRÊT\n━━━━━━━━━━━━━━━━━━\n💰 Solde : " + NumS(bal) + " " + Cur() +
+              "\n💸 À retirer : " + NumS(bal - PDbl(P_SEUIL_REPRISE)) + " " + Cur() + " (pour laisser " + NumS(PDbl(P_SEUIL_REPRISE)) + ")\n" + reason,
+              "{\"solde\":" + NumS(bal) + ",\"a_retirer\":" + NumS(bal - PDbl(P_SEUIL_REPRISE)) + ",\"cycle\":" + IntegerToString(g_cycle) + "}");
 }
 
 // Solde final < seuil après la clôture : on continue jusqu'au seuil (objectif « balance cible »)
 void ContinueTo500(double bal)
 {
-   if(g_goalActive && g_goalTarget >= SeuilArret) { g_enabled = true; return; }
+   if(g_goalActive && g_goalTarget >= PDbl(P_SEUIL_ARRET)) { g_enabled = true; return; }
    string msg;
-   if(GoalSetFromArg("=" + DoubleToString(SeuilArret, 2), msg))
+   if(GoalSetFromArg("=" + DoubleToString(PDbl(P_SEUIL_ARRET), 2), msg))
    {
       g_enabled = true;
       g_stoppedManually = false;
@@ -552,13 +575,13 @@ void ContinueTo500(double bal)
       g_nextTradeMs = 0;
       GlobalVariablesFlush();
    }
-   else Log("Reprise vers " + F2(SeuilArret) + " impossible : " + msg);
+   else Log("Reprise vers " + F2(PDbl(P_SEUIL_ARRET)) + " impossible : " + msg);
 }
 
 bool BalanceReached500(double bal)
 {
    int dg = (int)AccountInfoInteger(ACCOUNT_CURRENCY_DIGITS);
-   return bal + 0.5 * MathPow(10.0, -dg) >= SeuilArret;
+   return bal + 0.5 * MathPow(10.0, -dg) >= PDbl(P_SEUIL_ARRET);
 }
 
 // Séquence de clôture : même mécanisme que le 1 % (CloseAllFast), puis vérification du solde final.
@@ -570,7 +593,7 @@ void Close500Sequence()
    {
       g_phase500 = true;
       EvTyped("CLOTURE_500_LANCEE", 2,
-              "🔒 CLÔTURE ANTICIPÉE À " + NumS(SeuilArret) + " LANCÉE\n━━━━━━━━━━━━━━━━━━\n💰 Solde : " + NumS(bal0) +
+              "🔒 CLÔTURE ANTICIPÉE À " + NumS(PDbl(P_SEUIL_ARRET)) + " LANCÉE\n━━━━━━━━━━━━━━━━━━\n💰 Solde : " + NumS(bal0) +
               " | flottant EA : " + Sgn(fl0) + " = " + NumS(bal0 + fl0) + " " + Cur(),
               "{\"solde\":" + NumS(bal0) + ",\"flottant\":" + NumS(fl0) + ",\"total\":" + NumS(bal0 + fl0) + "}");
    }
@@ -599,22 +622,22 @@ void Close500Sequence()
    {
       ToArret500("", false);
       EvTyped("CLOTURE_500_OK", 2,
-              "🏁 CLÔTURE À " + NumS(SeuilArret) + " TERMINÉE\n━━━━━━━━━━━━━━━━━━\n💰 Solde final : " + NumS(bal) + " " + Cur() +
-              " (écart " + Sgn(bal - SeuilArret) + ")\n💸 À retirer : " + NumS(bal - SeuilReprise) + " " + Cur() + " (pour laisser " + NumS(SeuilReprise) + ")",
-              "{\"solde\":" + NumS(bal) + ",\"ecart\":" + NumS(bal - SeuilArret) + ",\"a_retirer\":" + NumS(bal - SeuilReprise) + ",\"cycle\":" + IntegerToString(g_cycle) + "}");
+              "🏁 CLÔTURE À " + NumS(PDbl(P_SEUIL_ARRET)) + " TERMINÉE\n━━━━━━━━━━━━━━━━━━\n💰 Solde final : " + NumS(bal) + " " + Cur() +
+              " (écart " + Sgn(bal - PDbl(P_SEUIL_ARRET)) + ")\n💸 À retirer : " + NumS(bal - PDbl(P_SEUIL_REPRISE)) + " " + Cur() + " (pour laisser " + NumS(PDbl(P_SEUIL_REPRISE)) + ")",
+              "{\"solde\":" + NumS(bal) + ",\"ecart\":" + NumS(bal - PDbl(P_SEUIL_ARRET)) + ",\"a_retirer\":" + NumS(bal - PDbl(P_SEUIL_REPRISE)) + ",\"cycle\":" + IntegerToString(g_cycle) + "}");
       return;
    }
    EvTyped("CLOTURE_500_SOUS_SEUIL", 2,
-           "↩️ CLÔTURE TERMINÉE SOUS " + NumS(SeuilArret) + "\n━━━━━━━━━━━━━━━━━━\n💰 Solde final : " + NumS(bal) + " " + Cur() +
-           "\n📉 Il manque : " + NumS(SeuilArret - bal) + " " + Cur() + "\n▶️ Le trading reprend jusqu'à atteindre " + NumS(SeuilArret) + ".",
-           "{\"solde\":" + NumS(bal) + ",\"manque\":" + NumS(SeuilArret - bal) + "}");
+           "↩️ CLÔTURE TERMINÉE SOUS " + NumS(PDbl(P_SEUIL_ARRET)) + "\n━━━━━━━━━━━━━━━━━━\n💰 Solde final : " + NumS(bal) + " " + Cur() +
+           "\n📉 Il manque : " + NumS(PDbl(P_SEUIL_ARRET) - bal) + " " + Cur() + "\n▶️ Le trading reprend jusqu'à atteindre " + NumS(PDbl(P_SEUIL_ARRET)) + ".",
+           "{\"solde\":" + NumS(bal) + ",\"manque\":" + NumS(PDbl(P_SEUIL_ARRET) - bal) + "}");
    ContinueTo500(bal);
 }
 
 // Appelé à chaque tick, juste après GoalTick() (même endroit et même fréquence que le 1 %)
 void Seuil500Tick()
 {
-   if(!g_archiOn || !ActiverSeuil500) return;
+   if(!g_archiOn || !PBool(P_SEUIL_ON)) return;
    if(g_closing) return;
    double bal = AccountInfoDouble(ACCOUNT_BALANCE);
 
@@ -628,7 +651,7 @@ void Seuil500Tick()
    {
       if(st_posCount > 0)
       {
-         if(bal + st_floating + 0.005 >= SeuilArret) Close500Sequence();
+         if(bal + st_floating + 0.005 >= PDbl(P_SEUIL_ARRET)) Close500Sequence();
       }
       else if(BalanceReached500(bal))
          ToArret500("", true);                             // clôture normale qui dépasse le seuil, ou plantage pendant la clôture
@@ -644,8 +667,8 @@ void Seuil500Tick()
          ulong now = GetTickCount64();
          if(now - lastCancel > 1000) { lastCancel = now; CancelPendingFast(); }
       }
-      if(bal + 0.005 >= SeuilArret) return;                // en attente de retrait
-      if(bal + 0.005 >= SeuilReprise)
+      if(bal + 0.005 >= PDbl(P_SEUIL_ARRET)) return;                // en attente de retrait
+      if(bal + 0.005 >= PDbl(P_SEUIL_REPRISE))
       {
          g_cycle++;
          CapitalFlag(false);
@@ -660,7 +683,7 @@ void Seuil500Tick()
       {
          CapitalFlag(true);
          EvTyped("CAPITAL_INSUFFISANT", 2,
-                 "⚠️ CAPITAL INSUFFISANT\n━━━━━━━━━━━━━━━━━━\n💰 Solde : " + NumS(bal) + " " + Cur() + " < " + NumS(SeuilReprise) +
+                 "⚠️ CAPITAL INSUFFISANT\n━━━━━━━━━━━━━━━━━━\n💰 Solde : " + NumS(bal) + " " + Cur() + " < " + NumS(PDbl(P_SEUIL_REPRISE)) +
                  " : le robot reste à l'arrêt (ARRET_500).",
                  "{\"solde\":" + NumS(bal) + "}");
       }
@@ -734,9 +757,9 @@ void StatutWrite()
    j += ",\"objectif_depart\":" + NumS(g_goalActive ? g_goalInit : 0.0);
    j += ",\"objectif_cible\":" + NumS(g_goalActive ? g_goalTarget : 0.0);
    j += ",\"objectif_progression\":" + NumS(GoalProgressPct());
-   j += ",\"seuil_arret\":" + NumS(SeuilArret);
-   j += ",\"seuil_reprise\":" + NumS(SeuilReprise);
-   j += ",\"seuil500_actif\":" + BoolS(ActiverSeuil500);
+   j += ",\"seuil_arret\":" + NumS(PDbl(P_SEUIL_ARRET));
+   j += ",\"seuil_reprise\":" + NumS(PDbl(P_SEUIL_REPRISE));
+   j += ",\"seuil500_actif\":" + BoolS(PBool(P_SEUIL_ON));
    j += ",\"prochain_creneau\":\"" + (ns > 0 ? TimeToString(ns, TIME_DATE | TIME_MINUTES) : "") + "\"";
    j += ",\"raison_blocage\":\"" + JsonEsc(g_blockReason) + "\"";
    j += ",\"trading_autorise\":" + BoolS(g_blockReason == "");
@@ -802,7 +825,7 @@ bool CmdReprise(string &msg)
 {
    if(g_state == ST_ARRET)
    {
-      msg = "Compte en ARRET_500 : la reprise est automatique après le retrait (solde entre " + NumS(SeuilReprise) + " et " + NumS(SeuilArret) + ").";
+      msg = "Compte en ARRET_500 : la reprise est automatique après le retrait (solde entre " + NumS(PDbl(P_SEUIL_REPRISE)) + " et " + NumS(PDbl(P_SEUIL_ARRET)) + ").";
       return false;
    }
    g_stoppedManually = false;
@@ -1103,8 +1126,21 @@ void ArchiInit()
    if(!g_archiOn) return;
    StateLoad();
    StateSave();
+   // 6.2.0 : fenêtre de lancement portée de 5 à 10 min. Une seule fois par compte : l'ancienne valeur par défaut (5) passe à 10 ;
+   // toute autre valeur, ou un réglage fait ensuite depuis le bot, est conservé.
+   if(!GlobalVariableCheck(GVN("mig_fenetre10")))
+   {
+      GlobalVariableSet(GVN("mig_fenetre10"), 1);
+      if(PInt(P_SL_WIN) == 5) { g_pVal[P_SL_WIN] = 10; SaveParams(); Log("Fenêtre de lancement des créneaux portée de 5 à 10 min"); }
+      GlobalVariablesFlush();
+   }
    SlotsParse();
    g_lastSlotKey = GlobalVariableCheck(GVN("slotkey")) ? (long)GlobalVariableGet(GVN("slotkey")) : 0;
+   if(g_lastSlotKey > 0 && g_lastSlotKey < 10000000000)   // clé d'avant 6.2.0 (AAAAMMJJHH) → AAAAMMJJHHMM : créneau déjà consommé gardé
+   {
+      g_lastSlotKey *= 100;
+      GlobalVariableSet(GVN("slotkey"), (double)g_lastSlotKey);
+   }
    // un redémarrage pendant une phase de clôture n'est pas persisté : la condition est simplement réévaluée au premier tick
    if(g_state == ST_PAUSE) { g_stoppedManually = true; GlobalVariableSet(GVN("stopped"), 1); g_enabled = false; }
    string cur = AccountInfoString(ACCOUNT_CURRENCY);

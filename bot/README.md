@@ -52,6 +52,7 @@ Voir `LISEZMOI.txt` à la racine du dépôt : `INSTALL.bat` installe tout (BASE 
 - **⚡ Actions — tous les comptes lancés à la fois** : ⏸ pause (immédiate ou programmée), ▶ tout reprendre, **🎯 Objectif (tous)**,
   **⚙️ Paramètres (tous)** (lecture sur le 1er compte, réglage envoyé à chacun), **🧰 Commandes (tous)**, **🖥 Terminaux (tous)** (redémarrer, lancer, arrêter, réduire les fenêtres),
   🚀 déployer l'EA, ➕ nouveau compte, 🔕 mode silencieux. Toujours avec confirmation et un résumé par compte.
+- **🕐 Créneaux d'objectif automatique** (⚙️ Paramètres → 🏆 Objectifs → 🕐 Créneaux, sur un compte, tous les comptes ou un preset) : liste des créneaux (✖ pour retirer), ➕ Ajouter = heure (0 à 23) puis minutes (00, 15, 30, 45), 12 au maximum ; activation, gain en % et fenêtre de lancement (5 / 10 / 15 min) ; seuils d'arrêt et de reprise dans 🏆 Objectifs ;
 - **🎯 Objectif immédiat** (hors créneaux horaires) : +0,5 / 1 / 2 / 3 / 5 / 10 %, ou ✏️ 10 (€), +3%, =1250 (solde cible) ;
   le bot envoie `OBJECTIF` puis `DEMARRER` : la série démarre tout de suite et s'arrête à l'objectif.
 - **💾 Presets** (⚡ Actions, ou 🧰 Commandes EA) : gardés par le bot (`data\presets.json`), communs à tous les robots.

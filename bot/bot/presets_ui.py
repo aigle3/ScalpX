@@ -170,8 +170,8 @@ def compare_text(name: str, values: dict[str, str], results: list) -> str:
             p = ps.BY_KEY.get(k)
             if p is None:
                 continue
-            old = ps.display_of(p, cur[k]) if k in cur else "?"
-            lines.append(f"   • {esc(p[1])} : {esc(old)} → <b>{esc(ps.display_of(p, diff[k]))}</b>")
+            old = ps.human(p, cur[k]) if k in cur else "?"
+            lines.append(f"   • {esc(p[1])} : {esc(old)} → <b>{esc(ps.human(p, diff[k]))}</b>")
     text = "\n".join(lines)
     return text if len(text) <= 3900 else text[:3850] + "\n… (liste tronquée)"
 

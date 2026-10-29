@@ -3,7 +3,7 @@
 //| Noyau : variables globales, registre de paramètres (tous les     |
 //| réglages sont modifiables à chaud), persistance, presets.        |
 //+------------------------------------------------------------------+
-#define SX_VERSION   "6.1.0"
+#define SX_VERSION   "6.2.0"
 #define SX_PREFIX    "SX4_"
 #define SX_MAXQ      40
 
@@ -29,6 +29,9 @@ enum ENUM_PID
    P_DDTHR, P_DDSTOP, P_EMSL, P_EMSLPCT, P_SESSLIM, P_SESSPCT,
    // Objectifs
    P_EARLY, P_GOALMAX, P_PROFNOTIF,
+   // [ARCHI] début : objectifs automatiques aux créneaux (P_SL_M00..P_SL_M45 = 4 masques consécutifs) et seuils 500 / 125
+   P_SL_ON, P_SL_PCT, P_SL_WIN, P_SL_M00, P_SL_M15, P_SL_M30, P_SL_M45, P_SEUIL_ON, P_SEUIL_ARRET, P_SEUIL_REPRISE,
+   // [ARCHI] fin
    // Exécution
    P_DEVIATION, P_RETRIES,
    // Notifications
@@ -254,6 +257,41 @@ void Reg(int id, string key, string name, int grp, int type, double def,
    g_pFlag[id] = flag;
 }
 
+// [ARCHI] début : créneaux d'objectif automatique. Réglage = 4 masques de 24 bits (un par minute : 00, 15, 30, 45) ;
+// le bit h d'un masque = un créneau à l'heure h. L'input ObjectifAutoHeures ne sert que de valeur de départ.
+int SlotNum(string s)
+{
+   StringTrimLeft(s); StringTrimRight(s);
+   int n = StringLen(s);
+   if(n == 0 || n > 2) return -1;
+   for(int i = 0; i < n; i++)
+   {
+      ushort c = StringGetCharacter(s, i);
+      if(c < '0' || c > '9') return -1;
+   }
+   return (int)StringToInteger(s);
+}
+
+// « 3,6,9:30,12:45 » → masques ; les éléments invalides (heure hors 0-23, minutes autres que 00/15/30/45) sont ignorés
+void SlotsMasksFromText(const string txt, int &mk[])
+{
+   ArrayInitialize(mk, 0);
+   string parts[];
+   int n = StringSplit(txt, ',', parts);
+   for(int i = 0; i < n; i++)
+   {
+      string hm[];
+      int k = StringSplit(parts[i], ':', hm);
+      if(k < 1 || k > 2) continue;
+      int h = SlotNum(hm[0]);
+      int m = (k == 2) ? SlotNum(hm[1]) : 0;
+      if(h < 0 || h > 23) continue;
+      if(m != 0 && m != 15 && m != 30 && m != 45) continue;
+      mk[m / 15] |= (1 << h);
+   }
+}
+// [ARCHI] fin
+
 void InitParams()
 {
    g_groupName[G_SIGNAL]  = "📐 Signal & timeframe";
@@ -402,6 +440,31 @@ void InitParams()
    Reg(P_PROFNOTIF, "profnotif", "Alerte profit cumulé", G_GOAL, PT_DBL, ProfitNotifyAmount, 0, 10000, 1, "",
        "Notifie à chaque fois que le profit cumulé des trades fermés atteint ce montant (0 = désactivé).");
 
+   // [ARCHI] début : objectifs automatiques aux créneaux et seuils 500 / 125 (valeurs de départ = inputs, modifiables à chaud)
+   int slotMk[4];
+   SlotsMasksFromText(ObjectifAutoHeures, slotMk);
+   Reg(P_SL_ON, "sl_on", "Objectif auto aux créneaux", G_GOAL, PT_BOOL, ObjectifAutoCreneaux ? 1 : 0, 0, 1, 1, "",
+       "Activé : un objectif est lancé automatiquement à chaque créneau libre (lundi à vendredi). Désactivé : aucun lancement automatique, objectifs manuels seulement.");
+   Reg(P_SL_PCT, "sl_pct", "Objectif auto : gain", G_GOAL, PT_DBL, ObjectifAutoPct, 0.1, 20.0, 0.1, " %",
+       "Gain visé à chaque créneau, en % du solde au moment du lancement.");
+   Reg(P_SL_WIN, "sl_win", "Fenêtre de lancement", G_GOAL, PT_INT, MathMax(5, MathMin(15, ObjectifAutoFenetreMin)), 5, 15, 5, " min",
+       "Délai pendant lequel un créneau peut encore être lancé après son heure (5, 10 ou 15 min). Passé ce délai, le créneau est perdu : il n'est jamais rattrapé.");
+   Reg(P_SL_M00, "sl_m00", "Créneaux à l'heure pile (:00)", G_GOAL, PT_INT, slotMk[0], 0, 16777215, 1, "",
+       "Heures des créneaux à :00 (un bit par heure, 0 à 23). Se règle avec l'écran Créneaux du bot.");
+   Reg(P_SL_M15, "sl_m15", "Créneaux à :15", G_GOAL, PT_INT, slotMk[1], 0, 16777215, 1, "",
+       "Heures des créneaux à :15 (un bit par heure, 0 à 23). Se règle avec l'écran Créneaux du bot.");
+   Reg(P_SL_M30, "sl_m30", "Créneaux à :30", G_GOAL, PT_INT, slotMk[2], 0, 16777215, 1, "",
+       "Heures des créneaux à :30 (un bit par heure, 0 à 23). Se règle avec l'écran Créneaux du bot.");
+   Reg(P_SL_M45, "sl_m45", "Créneaux à :45", G_GOAL, PT_INT, slotMk[3], 0, 16777215, 1, "",
+       "Heures des créneaux à :45 (un bit par heure, 0 à 23). Se règle avec l'écran Créneaux du bot.");
+   Reg(P_SEUIL_ON, "seuil_on", "Clôture anticipée au seuil", G_GOAL, PT_BOOL, ActiverSeuil500 ? 1 : 0, 0, 1, 1, "",
+       "Activé : dès que solde + flottant de l'EA atteint le seuil d'arrêt, tout est fermé et le compte attend un retrait.");
+   Reg(P_SEUIL_ARRET, "seuil_arret", "Seuil d'arrêt", G_GOAL, PT_DBL, SeuilArret, 10, 1000000, 10, "",
+       "Solde (devise du compte) à partir duquel le robot ferme tout et s'arrête en attendant un retrait. Doit rester supérieur au seuil de reprise.");
+   Reg(P_SEUIL_REPRISE, "seuil_reprise", "Seuil de reprise", G_GOAL, PT_DBL, SeuilReprise, 0, 999990, 5, "",
+       "Solde minimum (devise du compte) pour trader et pour reprendre après un retrait. Doit rester inférieur au seuil d'arrêt.");
+   // [ARCHI] fin
+
    // --- Exécution
    Reg(P_DEVIATION, "dev", "Déviation max", G_EXEC, PT_INT, Deviation, 0, 500, 5, " pts",
        "Écart de prix toléré à l'exécution des ordres au marché.");
@@ -541,6 +604,10 @@ bool ValidateParam(int id, double &v, string &err)
       case P_TPMAX:  if(v < g_pVal[P_TPMIN]) { err = "TP max doit être supérieur ou égal à TP min (" + IntegerToString(PInt(P_TPMIN)) + ")"; return false; } break;
       case P_GRIDMIN: if(v >= g_pVal[P_GRIDMAX]) { err = "Grille min doit être inférieure à grille max (" + IntegerToString(PInt(P_GRIDMAX)) + ")"; return false; } break;
       case P_GRIDMAX: if(v <= g_pVal[P_GRIDMIN]) { err = "Grille max doit être supérieure à grille min (" + IntegerToString(PInt(P_GRIDMIN)) + ")"; return false; } break;
+      // [ARCHI] début
+      case P_SEUIL_ARRET: if(v <= g_pVal[P_SEUIL_REPRISE]) { err = "Le seuil d'arrêt doit être supérieur au seuil de reprise (" + F0(g_pVal[P_SEUIL_REPRISE]) + ")"; return false; } break;
+      case P_SEUIL_REPRISE: if(v >= g_pVal[P_SEUIL_ARRET]) { err = "Le seuil de reprise doit être inférieur au seuil d'arrêt (" + F0(g_pVal[P_SEUIL_ARRET]) + ")"; return false; } break;
+      // [ARCHI] fin
       case P_GRID:
       {
          long sl = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
@@ -552,6 +619,8 @@ bool ValidateParam(int id, double &v, string &err)
 }
 
 // Effets de bord après modification
+void SlotsRefresh();   // [ARCHI] défini dans SX_Archi.mqh : relit les masques de créneaux
+
 void ApplyParamEffects(int id)
 {
    int fl = g_pFlag[id];
@@ -559,6 +628,7 @@ void ApplyParamEffects(int id)
    if((fl & PF_TP) != 0)   { g_tpSig = -1; }
    if((fl & PF_CHART) != 0 || id == P_CH_STYLE) { ChartRefreshAll(true); }
    if(id == P_TF) { g_lastEmaBar = 0; }
+   if(id >= P_SL_M00 && id <= P_SL_M45) { SlotsRefresh(); }   // [ARCHI] créneaux modifiés
 }
 
 void SaveParams();
@@ -615,6 +685,7 @@ int LoadParamsFrom(string fname)
 void ResetParamsToDefaults()
 {
    for(int i = 0; i < P_COUNT; i++) g_pVal[i] = g_pDef[i];
+   SlotsRefresh();   // [ARCHI]
    SaveParams();
 }
 
@@ -668,6 +739,7 @@ bool PresetLoad(string name)
    RebuildIndicators();
    g_tpSig = -1;
    ChartRefreshAll(true);
+   SlotsRefresh();   // [ARCHI]
    SaveParams();
    return true;
 }
