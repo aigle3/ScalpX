@@ -475,6 +475,14 @@ async def startup(app: Application) -> None:
     s: Services = app.bot_data["svc"]
     s.router.sync_base_set()                                        # preset ⭐ actif → .set de BASE
     try:
+        from core import presets as cps
+        name = cps.ensure_recommended(s.dash.store, bool(s.ctx.db.meta_get("preset_conseille_v1")))
+        if name:
+            s.ctx.db.meta_set("preset_conseille_v1", name)
+            log.info("preset « %s » ajouté (réglages conseillés, non activé)", name)
+    except Exception:
+        log.exception("preset conseillé : ajout impossible")
+    try:
         from core.selfwatch import ensure_watchdog
         res = await asyncio.to_thread(ensure_watchdog, Path(__file__).resolve().parent.parent)
         (log.info if res in ("ok", "hors Windows") else log.warning)("surveillance du bot (tâche ScalpX Watchdog) : %s", res)

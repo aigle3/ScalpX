@@ -155,6 +155,8 @@ class Dashboard:
             return self._render_logs()
         if kind == "flt":
             return self._render_filters(now)
+        if kind == "sst":
+            return self._render_slot_stats(now)
         if kind == "wdr":
             return self._render_withdrawals(now)
         if kind == "gterm":
@@ -244,11 +246,27 @@ class Dashboard:
         kb.append([("🔃 Actualiser", "d:wdr"), ("⬅ Accueil", "d:home")])
         return self._with_flash(text), kb
 
+    SST_DAYS = (7, 30, 90)
+
+    def _render_slot_stats(self, now: float) -> tuple[str, Keyboard]:
+        from core import slotstats
+        days = getattr(self, "sst_days", 30)
+        db = self.ctx.db
+        evs = [e for e in db.events_since(int(now) - days * 86400)
+               if e["type"] in ("OBJECTIF_AUTO", "CRENEAU_SAUTE", "OBJECTIF_ATTEINT", "CLOTURE_500_OK", "ARRET_500", "NOTIF")]
+        stats = slotstats.compute(evs)
+        views = self.ctx.views()
+        cur = next((v.st.devise for v in views if v.st and v.st.devise), "")
+        text = render.slot_stats_text(stats, days, len(views), cur)
+        kb: Keyboard = [[(("• " if d == days else "") + f"{d} j", f"d:sst:{d}") for d in self.SST_DAYS],
+                        [("⬅ Rapports", "d:rpt"), ("🏠 Accueil", "d:home")]]
+        return self._with_flash(text), kb
+
     def _render_reports(self) -> tuple[str, Keyboard]:
         text = "📈 <b>Rapports</b>\n\nLe rapport quotidien arrive aussi tout seul chaque soir."
         kb: Keyboard = [
             [("📝 Rapport des 24 h", "d:rep"), ("📈 Courbe des soldes", "d:chart")],
-            [("📤 Export CSV", "d:exp")],
+            [("🕐 Stats par créneau", "d:sst"), ("📤 Export CSV", "d:exp")],
             [("⬅ Accueil", "d:home")],
         ]
         return self._with_flash(text), kb

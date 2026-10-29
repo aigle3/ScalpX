@@ -124,6 +124,10 @@ class Router:
         elif sub == "pos":
             self._bg(self._positions_detail())
             return ""
+        elif sub == "sst":                                  # 🕐 statistiques par créneau (7 / 30 / 90 jours)
+            if len(p) > 2 and p[2].isdigit() and int(p[2]) in self.dash.SST_DAYS:
+                self.dash.sst_days = int(p[2])
+            self.dash.goto("sst")
         elif sub in ("lst", "act", "rpt", "logs", "gterm", "wdr"):
             self.dash.goto(sub)
             self.dash.silent = self.notifier.silent_mode

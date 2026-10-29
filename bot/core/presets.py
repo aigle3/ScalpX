@@ -126,6 +126,31 @@ class PresetStore:
         self.save()
 
 
+# ---------------------------------------------------------------- preset « conseille » (ajouté une fois, jamais imposé)
+RECOMMENDED_NAME = "conseille"
+# créneaux 2:00, 4:00, 6:00, 11:00, 20:00 (bits de l'heure, minute :00) ; objectif 0,5 % ; grille plus large et plus douce.
+# SL d'urgence, drawdown et limite de session : NON modifiés (repris du preset ⭐ actif s'il y en a un).
+RECOMMENDED = {"sl_on": "1", "sl_pct": "0.5", "sl_m00": str(sum(1 << h for h in (2, 4, 6, 11, 20))), "sl_m15": "0",
+               "sl_m30": "0", "sl_m45": "0", "dyngrid": "1", "gridatr": "0.7", "gridmin": "200", "lotmult": "1.2",
+               "maxpend": "12"}
+
+
+def ensure_recommended(store: "PresetStore", done: bool) -> str:
+    """Ajoute le preset « conseille » (copie du preset ⭐ actif + RECOMMENDED) si ce n'est pas déjà fait. Renvoie son nom
+    ou "" ; il n'est NI activé NI appliqué (c'est l'utilisateur qui choisit)."""
+    if done:
+        return ""
+    name = RECOMMENDED_NAME
+    i = 2
+    while name in store.presets:
+        name = f"{RECOMMENDED_NAME}{i}"
+        i += 1
+    base = dict(store.presets.get(store.active, {})) if store.active else {}
+    base.update(RECOMMENDED)
+    store.put(name, base)
+    return name
+
+
 # ---------------------------------------------------------------- .set de BASE (point de départ des nouveaux comptes)
 # réglage du bot → input de l'EA (nom dans le .set). Les réglages sans input (fuseau, alertes, news : délais) ne
 # peuvent pas aller dans le .set : ils sont envoyés au nouveau robot juste après sa création.

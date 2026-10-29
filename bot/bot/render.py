@@ -244,6 +244,53 @@ def _home_order(v: AccountView):
     return (v.health.icon != "🔴", v.health.icon != "🟠", not goal, -frac, v.inst.label.lower())
 
 
+def slot_stats_text(stats: dict, days: int, n_accounts: int, cur: str) -> str:
+    """🕐 Statistiques par créneau : essais, taux de réussite, net, durée moyenne, pire drawdown ; verdict."""
+    from core.slotstats import slot_key, total
+    head = [f"🕐 <b>Statistiques par créneau</b> — {days} derniers jours",
+            f"<i>{n_accounts} compte(s) · heures du fuseau de l'EA</i>", ""]
+    rows = [s for s in stats.values() if s.launched or s.skipped]
+    if not rows:
+        return "\n".join(head + ["Aucun objectif de créneau sur la période.",
+                                 "<i>Les statistiques se remplissent à chaque créneau lancé.</i>"])
+    rows.sort(key=lambda s: slot_key(s.slot))
+    t = total(stats)
+    be = t.avg_loss / (t.avg_loss + t.avg_gain) if t.losses and t.avg_gain > 0 else None
+
+    def line(s) -> str:
+        rate = f"{s.rate * 100:>3.0f}%" if s.rate is not None else "  — "
+        dur = f"{s.avg_minutes:>4.0f}m" if s.durations else "    —"
+        dd = f"{s.worst_dd:>4.1f}%" if s.dds else "    —"
+        warn = " ⚠" if s.lost and be is not None and s.rate is not None and s.rate < be else ""
+        return f"{s.slot:>5} {s.launched:>3} {rate} {s.net:>+8.2f} {dur} {dd}{warn}"
+
+    table = [f"{'Heure':>5} {'N':>3} {'Réus':>4} {'Net':>8} {'Durée':>5} {'DDmax':>5}"] + [line(s) for s in rows] + ["─" * 36, line(t)]
+    out = head + ["<pre>" + esc("\n".join(table)) + "</pre>"]
+    out.append(f"✅ {t.won} réussi(s) · 🚨 {t.lost} stop loss d'urgence · ⏳ {t.open} en cours / interrompu(s)")
+    if t.gains or t.losses:
+        out.append(f"Gain moyen {money(t.avg_gain, cur, True)}" +
+                   (f" · perte moyenne (SL) {money(-t.avg_loss, cur, True)}" if t.losses else ""))
+    if be is not None:
+        ok = t.rate is not None and t.rate >= be
+        out.append(f"Seuil de rentabilité : <b>{be * 100:.0f} %</b> de réussite → "
+                   + ("✅ atteint" if ok else "❌ <b>pas atteint</b>") + f" ({t.rate * 100:.0f} %)")
+    done = [s for s in rows if s.done >= 3]
+    if done:
+        best = max(done, key=lambda s: s.net)
+        worst = min(done, key=lambda s: s.net)
+        out.append(f"🏆 Meilleur : <b>{best.slot}</b> ({money(best.net, cur, True)})"
+                   + (f" · 👎 Pire : <b>{worst.slot}</b> ({money(worst.net, cur, True)})" if worst is not best and worst.net < 0 else ""))
+    extra = []
+    if t.skipped:
+        extra.append(f"{t.skipped} créneau(x) sauté(s)")
+    if t.session_stops:
+        extra.append(f"{t.session_stops} limite(s) de perte de session")
+    if extra:
+        out.append("ℹ️ " + " · ".join(extra))
+    out.append("<i>N = objectifs lancés ; ⚠ = sous le seuil de rentabilité. Il faut 2 à 3 semaines pour juger un créneau.</i>")
+    return "\n".join(out)
+
+
 def home_text(views: list[AccountView], t: Totals, vps: dict[str, float], cur: str, bot_v: str, ea_v: str,
               update_pending: bool, data_age_s: float | None, now: float, max_lines: int = 8,
               extra_alerts: list[str] | None = None) -> str:

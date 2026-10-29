@@ -117,3 +117,51 @@ def test_accueil_comptes_du_plus_avance_au_moins_avance():
     txt = render.home_text(vs, totals(vs), {}, "EUR", "2", "6", False, 1.0, time.time())
     pre = txt.split("<pre>")[1].split("</pre>")[0].splitlines()
     assert [l.split()[1] for l in pre] == ["22", "44", "11", "33"]
+
+
+def _ev(iid, ts, typ, text):
+    return {"iid": iid, "ts": ts, "type": typ, "text": text}
+
+
+def test_stats_par_creneau():
+    from core import slotstats
+    won = lambda p, dd: (f"🎯 OBJECTIF ATTEINT\n💰 Solde départ : 200.00 EUR\n✅ Profit : +{p} EUR (+0.50 %)\n"
+                         f"⏱️ Durée : 30 min\n📉 Drawdown max : {dd} %")
+    sl = "🚨 STOP LOSS D'URGENCE DÉCLENCHÉ\n━━━━━━━━━━━━━━━━━━\n❌ Perte à l'instant : 30.00 EUR (25.0 %)"
+    evs = [
+        _ev("a", 1000, "OBJECTIF_AUTO", "🎯 Créneau 2:00 : objectif +0.50 % lancé."),
+        _ev("b", 1001, "OBJECTIF_AUTO", "🎯 Créneau 2:00 : objectif +0.50 % lancé."),
+        _ev("a", 2800, "OBJECTIF_ATTEINT", won("1.00", "3.5")),
+        _ev("b", 4000, "NOTIF", "⛔ LIMITE DE PERTE DE SESSION ATTEINTE\n📉 Perte : 20 EUR"),
+        _ev("b", 5000, "NOTIF", sl),
+        _ev("a", 9000, "OBJECTIF_AUTO", "🎯 Créneau 17:30 : objectif +0.50 % lancé."),
+        _ev("a", 9600, "OBJECTIF_ATTEINT", won("1.20", "8.0")),
+        _ev("b", 9000, "CRENEAU_SAUTE", "⏭ Créneau 17:30 sauté : solde 100 < 125 EUR."),
+        _ev("a", 20000, "OBJECTIF_AUTO", "🎯 Créneau 2:00 : objectif +0.50 % lancé."),     # encore en cours
+        _ev("c", 20000, "OBJECTIF_ATTEINT", won("9.99", "1")),                              # objectif manuel : ignoré
+    ]
+    st = slotstats.compute(evs)
+    s2, s17 = st["2:00"], st["17:30"]
+    assert (s2.launched, s2.won, s2.lost, s2.open, s2.session_stops) == (3, 1, 1, 1, 1)
+    assert s2.gains == [1.0] and s2.losses == [30.0] and s2.durations == [1800, 3999] and s2.dds == [3.5]
+    assert (s17.launched, s17.won, s17.skipped, s17.worst_dd) == (1, 1, 1, 8.0)
+    txt = render.slot_stats_text(st, 30, 2, "EUR")
+    assert txt.index(" 2:00") < txt.index("17:30")
+    assert "✅ 2 réussi(s) · 🚨 1 stop loss d'urgence · ⏳ 1 en cours" in txt
+    assert "Seuil de rentabilité : <b>96 %</b>" in txt and "pas atteint" in txt
+    assert "1 créneau(x) sauté(s) · 1 limite(s) de perte de session" in txt
+    assert "Aucun objectif de créneau" in render.slot_stats_text({}, 7, 1, "EUR")
+
+
+def test_preset_conseille_ajoute_une_fois_sans_toucher_au_sl(tmp_path):
+    from core import presets as cps
+    st = cps.PresetStore(tmp_path / "presets.json")
+    st.put("perso", {"emsl": "1", "emslpct": "25", "ddstop": "0", "lotmult": "1.4", "sl_pct": "1.0"})
+    st.set_active("perso")
+    name = cps.ensure_recommended(st, False)
+    v = st.presets[name]
+    assert name == "conseille" and st.active == "perso"                                 # ajouté, pas activé
+    assert (v["emsl"], v["emslpct"], v["ddstop"]) == ("1", "25", "0")                   # SL / drawdown : ceux du preset actif
+    assert (v["lotmult"], v["sl_pct"], v["gridatr"], v["gridmin"], v["maxpend"]) == ("1.2", "0.5", "0.7", "200", "12")
+    assert cps.slots_input(v) == "2,4,6,11,20"
+    assert cps.ensure_recommended(st, True) == "" and len(st.presets) == 2
