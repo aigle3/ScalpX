@@ -35,6 +35,7 @@ class Router:
         self._tasks: set[asyncio.Task] = set()
         self._dep_msg: int | None = None
         self.building = False
+        self.installing = False                 # installation d'une mise à jour en cours (copie des fichiers hors de la boucle)
         self.awaiting_preset: tuple[str, str] | None = None   # (compte modèle, preset remplacé) : nom attendu (texte)
         self.awaiting_goal: str | None = None               # compte (ou ALL_ID) dont on attend l'objectif (message texte)
         self._dep_sel: set[str] = set()
@@ -911,19 +912,34 @@ class Router:
             return ""
         if self.ctx.deploy.running or self.building:
             return "Déploiement ou compilation en cours : réessaie après."
+        if self.installing:                     # double appui sur « Installer » : une seule installation
+            return "Installation déjà en cours…"
+        self.installing = True
+        try:
+            return await self._upd_install(mid)
+        finally:
+            self.installing = False
+
+    async def _upd_install(self, mid) -> str:
+        """Installe la mise à jour proposée. Copies et relance hors de la boucle du bot : le tableau de bord et les autres
+        tâches continuent pendant l'installation (mêmes étapes, même ordre qu'avant)."""
+        from core import update as upd
+        from pathlib import Path as _P
         bot_root = _P(__file__).resolve().parent.parent
-        plan = upd.plan_update(self.ctx.cfg, bot_root)
+        plan = await asyncio.to_thread(upd.plan_update, self.ctx.cfg, bot_root)
         if plan is None or plan.empty:
             if mid:
                 await self.sender.edit(self.chat_id, mid, "✅ Déjà à jour.", None)
             return ""
         out = []
+        log.info("installation de la mise à jour %s : %d fichier(s) du bot, %d de l'EA", plan.stamp,
+                 len(plan.bot_files) + len(plan.bot_remove), len(plan.ea_files))
         try:
             if plan.ea_files:
-                ver = upd.install_ea(self.ctx.cfg, plan)
+                ver = await asyncio.to_thread(upd.install_ea, self.ctx.cfg, plan)
                 out.append(f"📈 EA copié dans BASE" + (f" — compilation v{esc(ver)} dans quelques secondes" if ver else " (.set seulement)"))
             if plan.bot_files or plan.bot_remove:
-                upd.install_bot(plan, bot_root)
+                await asyncio.to_thread(upd.install_bot, plan, bot_root)
                 if plan.requirements_changed:
                     ok, err = await asyncio.get_running_loop().run_in_executor(None, upd.pip_install, bot_root)
                     out.append("📦 Bibliothèques " + ("installées" if ok else "NON installées : " + esc(err)))
@@ -943,7 +959,7 @@ class Router:
         if mid:
             await self.sender.edit(self.chat_id, mid, "✅ <b>Mise à jour installée</b>\n" + "\n".join(out), None)
         if plan.bot_files or plan.bot_remove:
-            how = upd.restart_bot(bot_root)
+            how = await asyncio.to_thread(upd.restart_bot, bot_root)
             log.warning("mise à jour du bot installée : redémarrage (%s)", how)
             upd.STOP.set()
         return ""

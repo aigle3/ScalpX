@@ -328,3 +328,55 @@ def test_env_example_healthcheck_en_commentaire():
     assert "HEALTHCHECK_URL" not in parse_env(txt)
     actif = txt.replace("# HEALTHCHECK_URL=", "HEALTHCHECK_URL=")
     assert parse_env(actif)["HEALTHCHECK_URL"].startswith("https://")
+
+
+@pytest.mark.asyncio
+async def test_monitor_un_evenement_mal_forme_n_arrete_pas_les_suivants(stack):
+    """Une donnée illisible (cycle non numérique) est journalisée ; les événements suivants et les autres comptes sont traités."""
+    cfg, db, procs, status, cmdq, mgr, ea = stack
+    db.add_instance(Instance("1_a", 1, "a", "Alpha", str(cfg.paths.instances / "1_a"), 1, "5.0", DEMARRE))
+    db.add_instance(Instance("2_b", 2, "b", "Beta", str(cfg.paths.instances / "2_b"), 1, "5.0", DEMARRE))
+    from core.events import EventReader
+    got = []
+
+    async def emit(n):
+        got.append(n)
+
+    mon = Monitor(cfg, db, status, EventReader(cfg.paths.common()), emit)
+    ea.event("1_a", "REPRISE_RETRAIT", "🟢 reprise", 2, {"solde": 125.4, "cycle": "x"}, 1)     # cycle illisible
+    ea.event("1_a", "NOTIF", "suite", 1, None, 2)
+    ea.event("2_b", "NOTIF", "autre compte", 1, None, 1)
+    assert await mon.poll_events() == 3
+    assert [n.text for n in got] == ["suite", "autre compte"]
+    # statut illisible pour un compte : les autres comptes continuent d'être échantillonnés
+    from core.fsio import atomic_write
+    now = int(time.time())
+    atomic_write(status.path("2_b"), json.dumps({"id": "2_b", "etat": "ACTIF", "solde": 200.0, "ts": now, "devise": "EUR"}))
+    orig = mon._check_capital
+    mon._check_capital = lambda inst, st: (_ for _ in ()).throw(RuntimeError("boum")) if inst.id == "1_a" else orig(inst, st)
+    atomic_write(status.path("1_a"), json.dumps({"id": "1_a", "etat": "ACTIF", "solde": 100.0, "ts": now, "devise": "EUR"}))
+    mon.poll_status()
+    assert [r["iid"] for r in db.balances("2_b", 0)] == ["2_b"]
+
+
+def test_base_en_journal_wal_et_sauvegarde(tmp_path: Path):
+    db = Database(tmp_path / "x.db")
+    assert db._all("PRAGMA journal_mode")[0][0].lower() == "wal"
+    db.meta_set("k", "v")
+    db.backup_to(tmp_path / "copie.db")
+    assert Database(tmp_path / "copie.db").meta_get("k") == "v"
+
+
+def test_filtre_des_secrets_dans_les_traces():
+    import logging
+    import main
+    f = main.SecretFilter("123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef", "github_pat_SECRET1234567890", "https://hc-ping.com/uuid-1234")
+    try:
+        raise RuntimeError("POST https://api.telegram.org/bot123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef/getUpdates github_pat_SECRET1234567890")
+    except RuntimeError:
+        import sys
+        rec = logging.LogRecord("x", logging.ERROR, __file__, 1, "ping %s Password=abc", ("https://hc-ping.com/uuid-1234",), sys.exc_info())
+    assert f.filter(rec)
+    out = logging.Formatter().format(rec)
+    assert "ABCDEFGHIJ" not in out and "SECRET123" not in out and "uuid-1234" not in out and "abc" not in out.split("Password=")[1][:3]
+    assert "<token>" in out and "Traceback" in out and "RuntimeError" in out

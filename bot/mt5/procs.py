@@ -12,6 +12,7 @@ from typing import Protocol
 import psutil
 
 log = logging.getLogger(__name__)
+FAST_NAMES = os.name == "nt"        # ailleurs (Linux) le nom peut être tronqué : chemin lu pour chaque processus
 
 
 def norm_path(p: str | Path) -> str:
@@ -33,21 +34,42 @@ class PsutilProcesses:
     def __init__(self, window_opts=None, win_api=None) -> None:
         self._running: set[str] = set()
         self._running_at = 0.0
+        self._names: set[str] = set()                 # noms d'exécutables suivis (terminal64.exe)
         self.window_opts = window_opts                # mt5.window.WindowOptions : rangement de la fenêtre à l'ouverture
         self.win_api = win_api
 
-    def _running_exes(self) -> set[str]:
+    @staticmethod
+    def _exe_of(p: psutil.Process, names: set[str]) -> str | None:
+        """Chemin de l'exécutable si le NOM du processus est suivi. Le nom est quasi gratuit sous Windows, alors que lire
+        le chemin ouvre chaque processus : on ne le lit plus que pour les terminaux (même résultat, parcours bien plus rapide).
+        Nom illisible : chemin lu comme avant."""
+        name = (p.info.get("name") or "").lower()
+        if FAST_NAMES and name and name not in names:              # Windows : nom du processus = nom de l'exécutable
+            return None
+        try:
+            return p.exe() or None
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
+            return None
+
+    def _running_exes(self, name: str = "") -> set[str]:
         now = time.monotonic()
+        if name and name not in self._names:
+            self._names.add(name)
+            self._running_at = 0.0                     # nouveau nom suivi : parcours complet tout de suite
         if now - self._running_at > self.CACHE_S:
+            t0 = time.monotonic()
             exes: set[str] = set()
-            for p in psutil.process_iter(["exe"]):
+            for p in psutil.process_iter(["name"]):
                 try:
-                    pe = p.info.get("exe")
+                    pe = self._exe_of(p, self._names)
                     if pe:
                         exes.add(norm_path(pe))
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
             self._running, self._running_at = exes, now
+            dt = time.monotonic() - t0
+            if dt > 1.0:
+                log.warning("parcours des processus lent : %.1f s", dt)
         return self._running
 
     def _invalidate(self) -> None:
@@ -55,10 +77,11 @@ class PsutilProcesses:
 
     def find(self, exe: Path) -> list[psutil.Process]:
         target = norm_path(exe)
+        names = {Path(exe).name.lower()}
         found: list[psutil.Process] = []
-        for p in psutil.process_iter(["exe", "name"]):
+        for p in psutil.process_iter(["name"]):
             try:
-                pe = p.info.get("exe")
+                pe = self._exe_of(p, names)
                 if pe and norm_path(pe) == target:
                     found.append(p)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -66,7 +89,7 @@ class PsutilProcesses:
         return found
 
     def is_running(self, exe: Path) -> bool:
-        return norm_path(exe) in self._running_exes()
+        return norm_path(exe) in self._running_exes(Path(exe).name.lower())
 
     def launch(self, exe: Path, ini: Path | None = None) -> int:
         """Lance `terminal64.exe /portable [/config:ini]` détaché, dans le dossier de l'instance."""

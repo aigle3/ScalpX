@@ -239,11 +239,31 @@ bool JLooksValid(const string raw)
 //+------------------------------------------------------------------+
 //| Fichiers (Common\Files, UTF-8 sans BOM, écriture atomique)       |
 //+------------------------------------------------------------------+
+int g_ioErr = 0;                       // dernière erreur d'écriture d'un fichier d'échange (journal Experts)
+
+// Échec d'écriture d'un fichier d'échange avec le bot : noté dans le journal Experts (au plus une ligne par minute et par sorte),
+// sans quoi un statut jamais écrit fait croire au bot que l'EA est muet, sans trace côté MT5.
+void IoWarn(const string what)
+{
+   static string kinds[];
+   static ulong  lastMs[];
+   static int    skipped[];
+   int k = -1, n = ArraySize(kinds);
+   for(int i = 0; i < n; i++) if(kinds[i] == what) { k = i; break; }
+   if(k < 0) { ArrayResize(kinds, n + 1); ArrayResize(lastMs, n + 1); ArrayResize(skipped, n + 1); k = n; kinds[k] = what; lastMs[k] = 0; skipped[k] = 0; }
+   ulong now = GetTickCount64();
+   if(lastMs[k] > 0 && now - lastMs[k] < 60000) { skipped[k]++; return; }
+   Log("Écriture impossible : " + what + " (erreur " + IntegerToString(g_ioErr) + ")" +
+       (skipped[k] > 0 ? " ; " + IntegerToString(skipped[k]) + " autre(s) échec(s) depuis le dernier message" : ""));
+   lastMs[k] = now;
+   skipped[k] = 0;
+}
+
 bool AFileWrite(const string name, const string content)
 {
    string tmp = name + ".tmp";
    int h = FileOpen(tmp, FILE_WRITE | FILE_BIN | FILE_COMMON);
-   if(h == INVALID_HANDLE) return false;
+   if(h == INVALID_HANDLE) { g_ioErr = GetLastError(); return false; }
    uchar a[];
    StringToCharArray(content, a, 0, WHOLE_ARRAY, CP_UTF8);
    int n = ArraySize(a);
@@ -252,6 +272,7 @@ bool AFileWrite(const string name, const string content)
    FileClose(h);
    if(!FileMove(tmp, FILE_COMMON, name, FILE_COMMON | FILE_REWRITE))
    {
+      g_ioErr = GetLastError();
       FileDelete(tmp, FILE_COMMON);
       return false;
    }
@@ -277,7 +298,7 @@ bool AFileRead(const string name, string &out)
 bool AFileAppend(const string name, const string line)
 {
    int h = FileOpen(name, FILE_READ | FILE_WRITE | FILE_BIN | FILE_COMMON | FILE_SHARE_READ | FILE_SHARE_WRITE);
-   if(h == INVALID_HANDLE) return false;
+   if(h == INVALID_HANDLE) { g_ioErr = GetLastError(); return false; }
    FileSeek(h, 0, SEEK_END);
    uchar a[];
    StringToCharArray(line + "\n", a, 0, WHOLE_ARRAY, CP_UTF8);
@@ -315,6 +336,7 @@ void EvPush(const string line)
    {
       for(int i = 1; i < n; i++) g_evPend[i - 1] = g_evPend[i];
       n--;
+      IoWarn("événements (fichier inaccessible, 200 en attente : le plus ancien est abandonné)");
    }
    ArrayResize(g_evPend, n + 1);
    g_evPend[n] = line;
@@ -782,7 +804,7 @@ void StatutWrite()
    j += ",\"ts\":" + IntegerToString((long)TimeGMT());
    j += ",\"ts_iso\":\"" + IsoNow() + "\"";
    j += "}";
-   AFileWrite(FileId("statut", ".json"), j);
+   if(!AFileWrite(FileId("statut", ".json"), j)) IoWarn("statut");
 }
 
 //+------------------------------------------------------------------+
@@ -988,7 +1010,7 @@ void AckWrite(long n, const string cmd, bool ok, const string msg)
    string j = "{\"id\":\"" + g_aid + "\",\"n\":" + IntegerToString(n) +
               ",\"cmd\":\"" + JsonEsc(cmd) + "\",\"ok\":" + BoolS(ok) +
               ",\"message\":\"" + JsonEsc(msg) + "\",\"ts\":" + IntegerToString((long)TimeGMT()) + "}";
-   AFileWrite(FileId("ack", "") + "_" + IntegerToString(n) + ".json", j);
+   if(!AFileWrite(FileId("ack", "") + "_" + IntegerToString(n) + ".json", j)) IoWarn("réponse à la commande " + cmd);
 }
 
 void BadMark(const string name, bool bad)

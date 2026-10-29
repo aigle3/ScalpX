@@ -79,9 +79,17 @@ class Database:
     def __init__(self, path: Path | str) -> None:
         self.path = str(path)
         self._lock = threading.RLock()
-        self._cx = sqlite3.connect(self.path, check_same_thread=False)
+        self._cx = sqlite3.connect(self.path, check_same_thread=False, timeout=10)
         self._cx.row_factory = sqlite3.Row
         with self._lock:
+            try:
+                # journal WAL : chaque écriture (solde, événement, méta) ne force plus deux synchronisations disque,
+                # les lectures ne bloquent pas les écritures ; NORMAL reste sûr en WAL (au pire la dernière écriture
+                # est perdue sur coupure de courant, la base n'est jamais corrompue)
+                self._cx.execute("PRAGMA journal_mode=WAL")
+                self._cx.execute("PRAGMA synchronous=NORMAL")
+            except sqlite3.DatabaseError:
+                pass                                            # système de fichiers sans WAL : mode par défaut
             self._cx.executescript(SCHEMA)
             self._cx.commit()
 

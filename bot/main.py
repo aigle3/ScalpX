@@ -30,20 +30,33 @@ from storage.db import Database                    # noqa: E402
 
 
 class SecretFilter(logging.Filter):
-    """Masque le token Telegram et tout « Password=… » dans les logs."""
+    """Masque le token Telegram, le jeton GitHub, l'URL de surveillance et tout « Password=… » dans les logs,
+    y compris dans les traces d'erreur (une erreur réseau de Telegram contient l'URL, donc le token)."""
 
-    def __init__(self, token: str) -> None:
+    def __init__(self, token: str, *others: str) -> None:
         super().__init__()
         self.token = token
+        self.secrets = [(s, "<secret>") for s in others if s and len(s) >= 8]
         self.pw = re.compile(r"(?i)(password\s*[=:]\s*)\S+")
 
-    def filter(self, record: logging.LogRecord) -> bool:
-        msg = record.getMessage()
+    def clean(self, text: str) -> str:
         if self.token:
-            msg = msg.replace(self.token, "<token>")
-        msg = self.pw.sub(r"\1***", msg)
-        record.msg, record.args = msg, ()
+            text = text.replace(self.token, "<token>")
+        for s, rep in self.secrets:
+            text = text.replace(s, rep)
+        return self.pw.sub(r"\1***", text)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg, record.args = self.clean(record.getMessage()), ()
+        if record.exc_info:                                         # trace formatée ici, nettoyée, puis gardée telle quelle
+            record.exc_text = self.clean(logging.Formatter().formatException(record.exc_info))
+            record.exc_info = None
+        elif record.exc_text:
+            record.exc_text = self.clean(record.exc_text)
         return True
+
+
+SECRETS: SecretFilter | None = None        # le filtre actif, aussi pour crash.log (écrit sans passer par logging)
 
 
 def setup_logging(cfg: Config, console: bool) -> None:
@@ -55,10 +68,20 @@ def setup_logging(cfg: Config, console: bool) -> None:
     handlers: list[logging.Handler] = [logging.handlers.RotatingFileHandler(logdir / "bot.log", maxBytes=2_000_000, backupCount=5, encoding="utf-8")]
     if console:
         handlers.append(logging.StreamHandler())
+    global SECRETS
+    SECRETS = SecretFilter(cfg.token, cfg.github_token, cfg.healthcheck_url)
     for h in handlers:
         h.setFormatter(fmt)
-        h.addFilter(SecretFilter(cfg.token))
+        h.addFilter(SECRETS)
         root.addHandler(h)
+
+    # erreurs jamais vues jusqu'ici : sous pythonw il n'y a pas de console, une exception dans un fil était perdue
+    def _thread_hook(args: threading.ExceptHookArgs) -> None:
+        if args.exc_type is SystemExit:
+            return
+        logging.getLogger("main").error("erreur dans le fil %s", getattr(args.thread, "name", "?"),
+                                        exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+    threading.excepthook = _thread_hook
     for noisy in ("httpx", "httpcore", "telegram", "apscheduler"):
         logging.getLogger(noisy).setLevel(logging.WARNING)       # httpx journalise l'URL (qui contient le token)
 
@@ -237,6 +260,8 @@ def _crash() -> int:
     """Trace de l'exception en cours dans crash.log et bot.log."""
     import traceback
     txt = traceback.format_exc()
+    if SECRETS is not None:
+        txt = SECRETS.clean(txt)
     try:
         d = ROOT / "data" / "logs"
         d.mkdir(parents=True, exist_ok=True)

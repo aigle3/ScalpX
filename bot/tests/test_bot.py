@@ -1113,3 +1113,52 @@ async def test_liste_filtre_vide_bouton_voir_tous(svc):
         assert "d:fa" in datas
         await router.on_callback("d:fa")
     assert dash.flt == "all" and f"a:{short(a.id)}" in [d for row in dash.render()[1] for _, d in row]
+
+
+@pytest.mark.asyncio
+async def test_notification_ratee_renvoyee_au_passage_suivant():
+    """Coupure réseau : la notification n'est plus perdue, elle part au passage suivant (une seule fois, dans l'ordre)."""
+    class Flaky(FakeSender):
+        down = True
+
+        async def send(self, chat_id, text, kb=None, silent=False):
+            if self.down:
+                raise ConnectionError("réseau coupé")
+            return await super().send(chat_id, text, kb, silent)
+
+    class BadRequest(Exception):
+        pass
+
+    s = Flaky()
+    n = Notifier(s, 1)
+    await n.emit(Notice("1_a", "Alpha", "CLOTURE_500_OK", "🏁 fini", 2))
+    assert await n.flush() == 0 and s.sent == []
+    await n.emit(Notice("1_a", "Alpha", "NOTIF", "suite", 1))
+    assert await n.flush() == 0                                   # toujours coupé : rien de perdu
+    s.down = False
+    assert await n.flush() == 2
+    assert [t for _, t, _, _ in s.sent] == ["<b>Alpha</b>\n🏁 fini", "<b>Alpha</b>\nsuite"]
+    assert s.sent[0][3] is False                                  # critique : toujours avec son
+    assert await n.flush() == 0 and len(s.sent) == 2
+    # erreur définitive (message refusé, fichier absent) : pas de nouvel essai ; échecs au-delà de 30 min : abandon
+    import time as _t
+    from telegram.error import NetworkError, TimedOut
+    n._keep(_t.time(), "text", "x", True, BadRequest("bad"))
+    n._keep(_t.time(), "photo", "x", True, FileNotFoundError("x"))
+    n._keep(0, "text", "x", True, ConnectionError("x"))
+    assert n._retry == []
+    n._keep(_t.time(), "text", "a", True, TimedOut("t"))
+    n._keep(_t.time(), "text", "b", True, NetworkError("n"))
+    assert [x[2] for x in n._retry] == ["a", "b"]
+    n._retry = []
+    # ordre strict : le 1er morceau échoue → le reste du lot et le lot suivant attendent derrière lui
+    s.down = True
+    await n.emit(Notice("1_a", "Alpha", "NOTIF", "un", 1))
+    await n.emit(Notice("2_b", "Beta", "NOTIF", "deux", 1))
+    await n.flush()
+    await n.emit(Notice("1_a", "Alpha", "NOTIF", "trois", 1))
+    await n.flush()
+    s.down = False
+    s.sent.clear()
+    await n.flush()
+    assert [t for _, t, _, _ in s.sent] == ["<b>Alpha</b>\nun\n\n<b>Beta</b>\ndeux", "<b>Alpha</b>\ntrois"]

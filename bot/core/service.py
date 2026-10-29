@@ -5,6 +5,7 @@ regroupe et envoie. Aucune connexion aux comptes MT5.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -96,21 +97,27 @@ class Monitor:
     def poll_status(self, now: float | None = None) -> None:
         now = now if now is not None else time.time()
         for inst in self.db.list():
-            st = self.status.read(inst.id)
-            if st is None:
-                continue
-            if st.etat == "ARRET_500":
-                self._last_arret_balance[inst.id] = st.solde
-            self._last_state[inst.id] = st.etat
-            if st.devise and st.devise != inst.currency:
-                self.db.set_currency(inst.id, st.devise)
-            if st.age_s(now) < self.cfg.timing.heartbeat_stale_s:
-                self._check_capital(inst, st)
-            if st.version and st.version != inst.ea_version:
-                self.db.set_version(inst.id, st.version, "heartbeat")
-            if now - self._last_sample.get(inst.id, 0) >= 60 and st.age_s(now) < self.cfg.timing.heartbeat_stale_s * 4:
-                self._last_sample[inst.id] = now
-                self.db.add_balance(inst.id, st.solde, st.equity, st.flottant_ea, st.cycle, st.etat, int(now))
+            try:
+                self._poll_one_status(inst, now)
+            except Exception:                            # un compte en erreur ne bloque jamais les autres
+                log.exception("statut de %s : erreur de traitement", inst.id)
+
+    def _poll_one_status(self, inst, now: float) -> None:
+        st = self.status.read(inst.id)
+        if st is None:
+            return
+        if st.etat == "ARRET_500":
+            self._last_arret_balance[inst.id] = st.solde
+        self._last_state[inst.id] = st.etat
+        if st.devise and st.devise != inst.currency:
+            self.db.set_currency(inst.id, st.devise)
+        if st.age_s(now) < self.cfg.timing.heartbeat_stale_s:
+            self._check_capital(inst, st)
+        if st.version and st.version != inst.ea_version:
+            self.db.set_version(inst.id, st.version, "heartbeat")
+        if now - self._last_sample.get(inst.id, 0) >= 60 and st.age_s(now) < self.cfg.timing.heartbeat_stale_s * 4:
+            self._last_sample[inst.id] = now
+            self.db.add_balance(inst.id, st.solde, st.equity, st.flottant_ea, st.cycle, st.etat, int(now))
 
     def _check_capital(self, inst, st) -> None:
         """Solde sous le seuil de reprise : une alerte sonore à l'entrée, une à la sortie (état mémorisé en base)."""
@@ -136,22 +143,35 @@ class Monitor:
         while self._pending:
             await self.emit(self._pending.pop(0))
         for inst in self.db.list():
-            for ev in self.events.drain(inst.id):
+            try:
+                # lecture des fichiers hors de la boucle : un fichier verrouillé par l'EA (nouvelles tentatives espacées)
+                # ne fige plus le bot (tableau de bord, boutons, autres tâches)
+                evs = await asyncio.to_thread(self.events.drain, inst.id)
+            except Exception:
+                log.exception("événements de %s : lecture impossible", inst.id)
+                continue
+            for ev in evs:
                 n += 1
-                self.db.add_event(inst.id, ev.ts or int(time.time()), ev.type, ev.prio, ev.texte)
-                self._track(inst.id, ev)
-                notice = event_to_notice(ev, inst.label, self.cfg.paths.common())
-                if notice is not None and ev.type == "ARRET_EA":
-                    reason = ev.data.get("raison", -1) if isinstance(ev.data, dict) else -1
-                    try:
-                        closing = int(self.db.meta_get(f"closing_{inst.id}") or 0)
-                    except ValueError:
-                        closing = 0
-                    when = ev.ts or int(time.time())
-                    notice.text = explain_stop(int(reason), abs(when - closing) < 180)
-                if notice is not None:
-                    await self.emit(notice)
+                try:
+                    await self._handle_event(inst, ev)
+                except Exception:                        # un événement mal formé n'empêche pas de traiter les suivants
+                    log.exception("événement %s de %s : erreur de traitement (%r)", ev.type, inst.id, (ev.texte or "")[:200])
         return n
+
+    async def _handle_event(self, inst, ev: Evenement) -> None:
+        self.db.add_event(inst.id, ev.ts or int(time.time()), ev.type, ev.prio, ev.texte)
+        self._track(inst.id, ev)
+        notice = event_to_notice(ev, inst.label, self.cfg.paths.common())
+        if notice is not None and ev.type == "ARRET_EA":
+            reason = ev.data.get("raison", -1) if isinstance(ev.data, dict) else -1
+            try:
+                closing = int(self.db.meta_get(f"closing_{inst.id}") or 0)
+            except ValueError:
+                closing = 0
+            when = ev.ts or int(time.time())
+            notice.text = explain_stop(int(reason), abs(when - closing) < 180)
+        if notice is not None:
+            await self.emit(notice)
 
     def _track(self, iid: str, ev: Evenement) -> None:
         d = ev.data if isinstance(ev.data, dict) else {}

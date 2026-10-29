@@ -73,6 +73,7 @@ class CommandQueue:
                 return CmdResult(ack.ok, ack.message, False, n)
             await asyncio.sleep(poll)
         safe_remove(self.cmd_path(iid, n))      # l'EA ne l'a pas lue : on ne la laisse pas traîner
+        log.warning("commande %s → %s : pas de réponse de l'EA en %.0f s", cmd.upper(), iid, timeout)
         return CmdResult(False, "Pas de réponse de l'EA (terminal arrêté ou occupé ?)", True, n)
 
     def cleanup_orphans(self, max_age_s: float = 600.0) -> int:

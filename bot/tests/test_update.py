@@ -310,3 +310,40 @@ def test_creneaux_masques_et_input_du_set():
     assert cat.masks_of([h * 60 for h in (3, 6, 9, 12, 17, 20)])[0] == 1184328
     p = ps.BY_KEY["sl_m00"]
     assert ps.human(p, "1184328") == "03:00, 06:00, 09:00, 12:00, 17:00, 20:00" and ps.human(ps.BY_KEY["sl_win"], "10") == "10 min"
+
+
+def test_detection_processus_filtre_par_nom(monkeypatch):
+    """Windows : seul le chemin des processus du bon nom est lu (parcours rapide), même résultat."""
+    from mt5 import procs as pr
+
+    class P:
+        def __init__(self, name, exe):
+            self.info, self._exe, self.read = {"name": name}, exe, 0
+
+        def exe(self):
+            self.read += 1
+            return self._exe
+
+    ps = [P("svchost.exe", "/w/svchost.exe"), P("terminal64.exe", "/mt5/a/terminal64.exe"), P(None, "/mt5/b/terminal64.exe")]
+    monkeypatch.setattr(pr, "FAST_NAMES", True)
+    monkeypatch.setattr(pr.psutil, "process_iter", lambda attrs=None: iter(ps))
+    p = pr.PsutilProcesses()
+    assert p.is_running("/mt5/a/terminal64.exe") and p.is_running("/mt5/b/terminal64.exe")
+    assert not p.is_running("/mt5/c/terminal64.exe")
+    assert ps[0].read == 0 and ps[1].read >= 1                        # svchost : chemin jamais lu
+    assert [x._exe for x in p.find("/mt5/a/terminal64.exe")] == ["/mt5/a/terminal64.exe"]
+
+
+def test_paquet_github_chemins_hors_dossier_refuses(tmp_path):
+    import io
+    import zipfile
+    from core import github as gh
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("o-r-1/bot/main.py", "ok")
+        z.writestr("o-r-1/../release.new2/evil.txt", "x")          # voisin dont le nom commence pareil
+        z.writestr("o-r-1/../../evil.txt", "x")
+    dest = tmp_path / "release"
+    gh.extract_zip(buf.getvalue(), dest, {"sha": "1"})
+    assert (dest / "bot" / "main.py").read_text() == "ok"
+    assert not (tmp_path / "release.new2").exists() and not (tmp_path.parent / "evil.txt").exists()

@@ -81,13 +81,15 @@ def extract_zip(data: bytes, dest: Path, info: dict) -> None:
     for d in (tmp, old):
         shutil.rmtree(d, ignore_errors=True)
     tmp.mkdir(parents=True)
+    root = tmp.resolve()
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         for m in z.infolist():
             parts = m.filename.split("/", 1)
             if len(parts) < 2 or not parts[1] or m.is_dir():
                 continue
             target = (tmp / parts[1]).resolve()
-            if not str(target).startswith(str(tmp.resolve())):        # chemin hors du dossier : ignoré
+            if root not in target.parents:                            # chemin hors du dossier (même « release.new2\… ») : ignoré
+                log.warning("paquet GitHub : chemin refusé %r", m.filename)
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             with z.open(m) as src, open(target, "wb") as out:

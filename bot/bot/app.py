@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, Update
 from telegram.constants import ParseMode
-from telegram.error import BadRequest, Conflict, Forbidden, RetryAfter, TelegramError
+from telegram.error import BadRequest, Conflict, Forbidden, NetworkError, RetryAfter, TelegramError
 from telegram.ext import (Application, ApplicationBuilder, ApplicationHandlerStop, CallbackQueryHandler,
                           ContextTypes, ConversationHandler, Defaults, MessageHandler, TypeHandler, filters)
 
@@ -273,13 +273,39 @@ async def h_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     if isinstance(err, RetryAfter):
         log.warning("Flood Telegram : attendre %s s", err.retry_after)
         return
-    log.error("erreur non gérée : %s: %s", type(err).__name__, err)
+    if isinstance(err, NetworkError):                    # coupure réseau (polling) : une ligne, sans trace, comme avant
+        log.error("erreur non gérée : %s: %s", type(err).__name__, err)
+        return
+    where = ""
+    if isinstance(update, Update) and update.callback_query is not None:
+        where = f" (bouton {update.callback_query.data!r})"
+    elif getattr(context, "job", None) is not None:
+        where = f" (tâche {getattr(context.job, 'name', '?')})"
+    log.error("erreur non gérée%s : %s: %s", where, type(err).__name__, err,
+              exc_info=(type(err), err, err.__traceback__) if err is not None else None)
 
 
 # ---- tâches périodiques
 # Réglages APScheduler de toutes les tâches : jamais deux exécutions en parallèle, les exécutions en retard sont fusionnées,
 # et un retard jusqu'à 5 s est toléré (défaut APScheduler : 1 s → tâche sautée au moindre blocage de la boucle).
 JOB_KW = {"coalesce": True, "max_instances": 1, "misfire_grace_time": 5}
+SLOW_JOB_S = 1.0          # au-delà, la tâche est signalée dans bot.log (elle a retenu la boucle : cause des « missed by »)
+
+
+def timed(fn):
+    """Mesure une tâche périodique et journalise celles qui durent plus de SLOW_JOB_S (diagnostic, aucun effet sinon)."""
+    import functools
+
+    @functools.wraps(fn)
+    async def run(context):
+        t0 = time.monotonic()
+        try:
+            return await fn(context)
+        finally:
+            dt = time.monotonic() - t0
+            if dt > SLOW_JOB_S:
+                log.warning("tâche %s lente : %.1f s", fn.__name__, dt)
+    return run
 JOB_KW_DAILY = {**JOB_KW, "misfire_grace_time": 300}        # tâches quotidiennes : jamais ratées pour quelques secondes de retard
 
 async def j_presets(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -319,7 +345,7 @@ async def j_report(context: ContextTypes.DEFAULT_TYPE) -> None:
 async def j_build(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Toutes les 20 s : version.txt changé → compilation auto ; nouvel .ex5 dans BASE → proposition de déploiement."""
     s = svc(context)
-    if s.ctx.deploy.running or s.router.building:
+    if s.ctx.deploy.running or s.router.building or s.router.installing:   # installation : version.txt pas encore écrit
         return
     req = pending_build(s.ctx.cfg, s.ctx.db)
     if req is not None:                                          # version.txt modifié → compilation automatique
@@ -335,7 +361,7 @@ async def j_update(context: ContextTypes.DEFAULT_TYPE) -> None:
     from core import github as gh, update as upd
     s = svc(context)
     cfg = s.ctx.cfg
-    if not cfg.update.enabled or s.ctx.deploy.running or s.router.building:
+    if not cfg.update.enabled or s.ctx.deploy.running or s.router.building or s.router.installing:
         return
     loop = asyncio.get_running_loop()
     if cfg.update.github:
@@ -451,17 +477,17 @@ def build_application(cfg: Config, ctx_factory) -> Application:
 
     jq = app.job_queue
     t = cfg.timing
-    jq.run_repeating(j_status, interval=t.status_interval_s, first=2, job_kwargs=JOB_KW)
-    jq.run_repeating(j_events, interval=t.events_interval_s, first=3, job_kwargs=JOB_KW)
-    jq.run_repeating(j_clean, interval=60, first=30, job_kwargs=JOB_KW)
-    jq.run_repeating(j_flush, interval=max(1, cfg.alerts.batch_window_s), first=4, job_kwargs=JOB_KW)
-    jq.run_repeating(j_presets, interval=300, first=90, job_kwargs=JOB_KW)  # robots conformes au preset ⭐ actif ?
-    jq.run_repeating(j_dash, interval=2, first=5, job_kwargs=JOB_KW)        # refresh() : toutes les refresh_s, republication après repost_s
-    jq.run_repeating(j_watchdog, interval=t.watchdog_interval_s, first=20, job_kwargs=JOB_KW)
-    jq.run_repeating(j_build, interval=20, first=40, job_kwargs=JOB_KW)
-    jq.run_repeating(j_update, interval=max(20, cfg.update.check_s), first=60, job_kwargs=JOB_KW)
-    jq.run_repeating(j_health, interval=60, first=15, job_kwargs=JOB_KW)
-    jq.run_daily(j_report, time=dtime(cfg.reports.daily_hour, 0), job_kwargs=JOB_KW_DAILY)
-    jq.run_daily(j_prune, time=dtime(4, 0), job_kwargs=JOB_KW_DAILY)
-    jq.run_daily(j_backup, time=dtime(cfg.backup.hour % 24, 0), job_kwargs=JOB_KW_DAILY)
+    jq.run_repeating(timed(j_status), interval=t.status_interval_s, first=2, job_kwargs=JOB_KW)
+    jq.run_repeating(timed(j_events), interval=t.events_interval_s, first=3, job_kwargs=JOB_KW)
+    jq.run_repeating(timed(j_clean), interval=60, first=30, job_kwargs=JOB_KW)
+    jq.run_repeating(timed(j_flush), interval=max(1, cfg.alerts.batch_window_s), first=4, job_kwargs=JOB_KW)
+    jq.run_repeating(timed(j_presets), interval=300, first=90, job_kwargs=JOB_KW)  # robots conformes au preset ⭐ actif ?
+    jq.run_repeating(timed(j_dash), interval=2, first=5, job_kwargs=JOB_KW)        # refresh() : toutes les refresh_s, republication après repost_s
+    jq.run_repeating(timed(j_watchdog), interval=t.watchdog_interval_s, first=20, job_kwargs=JOB_KW)
+    jq.run_repeating(timed(j_build), interval=20, first=40, job_kwargs=JOB_KW)
+    jq.run_repeating(timed(j_update), interval=max(20, cfg.update.check_s), first=60, job_kwargs=JOB_KW)
+    jq.run_repeating(timed(j_health), interval=60, first=15, job_kwargs=JOB_KW)
+    jq.run_daily(timed(j_report), time=dtime(cfg.reports.daily_hour, 0), job_kwargs=JOB_KW_DAILY)
+    jq.run_daily(timed(j_prune), time=dtime(4, 0), job_kwargs=JOB_KW_DAILY)
+    jq.run_daily(timed(j_backup), time=dtime(cfg.backup.hour % 24, 0), job_kwargs=JOB_KW_DAILY)
     return app

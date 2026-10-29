@@ -102,7 +102,8 @@ class InstanceManager:
             self.cmdq.send(inst.id, "FERMER_TERMINAL")
             if await self.wait_exit(inst, self.cfg.timing.stop_wait_s):
                 return "propre"
-        self.procs.kill(self.exe(inst))
+        n = await asyncio.to_thread(self.procs.kill, self.exe(inst))   # attente de fin (jusqu'à 10 s) hors de la boucle du bot
+        log.warning("terminal %s arrêté de force (%d processus)", inst.id, n or 0)
         await self.wait_exit(inst, 10)
         return "kill"
 
