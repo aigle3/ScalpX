@@ -17,7 +17,7 @@
 //|   SX_Panel.mqh     panneau d'informations dynamique              |
 //+------------------------------------------------------------------+
 #property copyright   "ScalpX"
-#property version     "6.04"
+#property version     "6.05"
 #property description "ScalpX v6.1.0 — EMA 10/20 + grille ATR + TP commun + filtres multi-timeframe, pilotage par bot central (fichiers)"
 
 // [SEUIL500] début : TEST UNIQUEMENT (test B-3 de la checklist). Décommenter pour simuler un glissement de 2.0 (devise du compte)
@@ -406,5 +406,6 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
 {
    if(id == CHARTEVENT_CLICK) PanelOnClickXY((int)lparam, (int)dparam);   // [ARCHI] 6.4.0 : panneau sur canevas
    else if(id == CHARTEVENT_OBJECT_CLICK) PanelOnClick(sparam);
+   else if(id == CHARTEVENT_CHART_CHANGE) { g_panelMs = 0; PanelUpdate(); }   // [ARCHI] taille du graphique changée : panneau adapté
 }
 //+------------------------------------------------------------------+

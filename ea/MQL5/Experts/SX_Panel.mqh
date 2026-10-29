@@ -143,6 +143,17 @@ void CvText(int x, int y, string txt, color col, int sz = 9, int al = 0, bool bo
    TextOut(txt, x, y, flags, g_px, g_cvW, g_cvH, A(col), COLOR_FORMAT_ARGB_NORMALIZE);
 }
 
+int CvTextW(string txt, int sz = 9, bool bold = false);
+
+// texte raccourci (…) pour tenir dans maxW pixels
+string Fit(string txt, int sz, int maxW, bool bold = false)
+{
+   if(CvTextW(txt, sz, bold) <= maxW) return txt;
+   int n = StringLen(txt);
+   while(n > 1 && CvTextW(StringSubstr(txt, 0, n) + "…", sz, bold) > maxW) n--;
+   return StringSubstr(txt, 0, n) + "…";
+}
+
 int CvTextW(string txt, int sz = 9, bool bold = false)
 {
    TextSetFont("Segoe UI", -sz * 10, bold ? FW_SEMIBOLD : FW_NORMAL);
@@ -361,7 +372,7 @@ bool PanelOnClick(string name) { return StringFind(name, PNM("")) == 0; }
 //| Renvoient le y sous la carte. La hauteur de la carte vient de la |
 //| passe de mesure (tableau g_cardH, une case par section).         |
 //+------------------------------------------------------------------+
-int g_cardH[6] = { 120, 90, 150, 80, 150, 40 };
+int g_cardH[7] = { 120, 90, 150, 80, 150, 300, 40 };
 
 int CardBegin(int k, int x, int y, int w) { CvCard(x, y, w, g_cardH[k], PC_CARD, PC_BORDER); return y + 10; }
 int CardEnd(int k, int y0, int y)        { y += 4; g_cardH[k] = y - y0; return y; }
@@ -539,7 +550,7 @@ int DrawSeries(int x, int w, int y0)
    return CardEnd(3, y0, y);
 }
 
-int DrawMarket(int x, int w, int y0)
+int DrawMarket(int x, int w, int y0, bool chips = true)
 {
    int cx = x + 12, cr = x + w - 12, cw = w - 24;
    int y = CardBegin(4, x, y0, w);
@@ -551,6 +562,7 @@ int DrawMarket(int x, int w, int y0)
    CvRow(cx, cr, y, "ATR " + F0(mk_atrPts) + " pts" + (PBool(P_F_ATR) ? "  [" + F0(PDbl(P_ATRMIN)) + "–" + F0(PDbl(P_ATRMAX)) + "]" : ""),
          "Spread " + F0(mk_spread) + " / " + IntegerToString(PInt(P_MAXSPREAD)), (mk_spread > PInt(P_MAXSPREAD)) ? PC_RED : PC_TEXT);
    y += 22;
+   if(!chips) { y -= 4; return CardEnd(4, y0, y); }
    CvText(cx, y, "FILTRES", PC_DIM, 8, 0, true);
    CvText(cr, y, FbBlockedCount() == 0 ? "tous au vert" : IntegerToString(FbBlockedCount()) + " bloquant(s)", FbBlockedCount() == 0 ? PC_GREEN : PC_RED, 8, 1, true);
    y += 18;
@@ -573,11 +585,78 @@ int DrawMarket(int x, int w, int y0)
    return CardEnd(4, y0, y);
 }
 
+
+//--- détail d'un filtre : valeur actuelle, règle, état (même lecture que l'ATR « 787 pts [250–800] »)
+void FilterDetail(int i, string &value, string &rule)
+{
+   string sig = (mk_fast > mk_slow) ? "achat" : ((mk_fast < mk_slow) ? "vente" : "aucun");
+   switch(i)
+   {
+      case 0: value = F0(mk_atrPts) + " pts"; rule = "plage " + F0(PDbl(P_ATRMIN)) + "–" + F0(PDbl(P_ATRMAX)) + " pts"; break;
+      case 1: value = "prix " + PX(mk_bid) + " · EMA" + IntegerToString(PInt(P_FAST)) + " " + PX(mk_fast);
+              rule = "prix du côté du signal (" + sig + ") de l'EMA rapide"; break;
+      case 2: value = F0(mk_volRatio * 100) + " % de la moyenne"; rule = "plage " + F0(PDbl(P_VOLMIN) * 100) + "–" + F0(PDbl(P_VOLMAX) * 100) + " %"; break;
+      case 3: value = FbTrend(mk_loF, mk_loS) + " (" + PX(mk_loF) + " / " + PX(mk_loS) + ")"; rule = "dans le sens du signal (" + sig + ")"; break;
+      case 4: value = FbTrend(mk_hiF, mk_hiS) + " (" + PX(mk_hiF) + " / " + PX(mk_hiS) + ")"; rule = "dans le sens du signal (" + sig + ")"; break;
+      case 5: value = (mk_candleDir > 0 ? "▲ haussière" : (mk_candleDir < 0 ? "▼ baissière" : "– neutre")) + ", corps " + F0(MathAbs(mk_candleBody)) + " pts";
+              rule = "corps ≥ " + F0(mk_candleMin) + " pts, dans le sens du signal"; break;
+      case 6: value = "il est " + TimeToString(LocalNow(), TIME_MINUTES); rule = "pas d'entrée de " + IntegerToString(PInt(P_T_START)) + "h à " + IntegerToString(PInt(P_T_END)) + "h"; break;
+      case 7:
+      {
+         string nx = NewsNextText();
+         value = g_newsBlock ? g_newsWhy : (nx != "" ? "prochaine : " + nx : "aucune dans les 24 h");
+         rule = "pas d'entrée " + IntegerToString(PInt(P_NEWS_BEFORE)) + " min avant à " + IntegerToString(PInt(P_NEWS_AFTER)) + " min après";
+         break;
+      }
+      default: value = F0(mk_spread) + " pts"; rule = "maximum " + IntegerToString(PInt(P_MAXSPREAD)) + " pts"; break;
+   }
+}
+
+int DrawFilters(int x, int w, int y0, bool detailed = true)
+{
+   int cx = x + 12, cr = x + w - 12, cw = w - 24;
+   int y = CardBegin(5, x, y0, w);
+   int nb = FbBlockedCount();
+   CvSection(cx, y, "FILTRES");
+   CvText(cr, y, nb == 0 ? "tous au vert : entrée possible" : IntegerToString(nb) + " bloquant(s)", nb == 0 ? PC_GREEN : PC_RED, 8, 1, true);
+   y += 20;
+   for(int k = 0; k < FB_N; k++)
+   {
+      int i = FbOrder(k);
+      bool on = FbOn(i), ok = FbOK(i);
+      color c = !on ? PC_GREY : (ok ? PC_GREEN : PC_RED);
+      string value, rule;
+      FilterDetail(i, value, rule);
+      string why = (on && !ok) ? FbWhy(i) : "";
+      int rh = 42 + (detailed ? 16 : 0) + (why != "" ? 16 : 0);
+      CvRound(cx, y, cw, rh - 6, 8, A(c, (uchar)(on ? (ok ? 26 : 40) : 14)));
+      CvRound(cx, y, 4, rh - 6, 2, A(c));
+      CvDot(cx + 16, y + 11, 4, c);
+      CvText(cx + 28, y + 3, FbName(i), on ? PC_TEXT : PC_DIM, 9, 0, true);
+      string st = !on ? "désactivé" : (ok ? "OK" : "BLOQUE");
+      int sw = CvTextW(st, 8, true) + 16;
+      CvPill(cr - 6 - sw, y + 3, sw, 17, st, c, on && !ok);
+      int tw = cw - 40;
+      int ly = y + 20;
+      if(on) { CvText(cx + 28, ly, Fit(value, 8, tw), PC_TEXT, 8); ly += 16; }
+      if(detailed || !on) { CvText(cx + 28, ly, Fit("règle : " + rule, 8, tw), PC_DIM, 8); ly += 16; }
+      if(why != "") CvText(cx + 28, ly, Fit(why, 8, tw, true), PC_RED, 8, 0, true);
+      if(!on && !detailed) rh = 42;
+      y += rh;
+   }
+   return CardEnd(5, y0, y - 4);
+}
+
 //+------------------------------------------------------------------+
 //| Dessin complet (une passe de mesure, puis une passe de dessin).  |
 //| Grand écran : deux colonnes ; réduit (–) : une colonne.          |
 //+------------------------------------------------------------------+
-int PanelWidth() { return g_panelCompact ? 380 : 740; }
+int PanelWidth()
+{
+   if(g_panelCompact) return 380;
+   int cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS) - PN_X - 70;   // laisse l'échelle des prix visible
+   return MathMax(740, MathMin(2400, cw));                                  // toute la largeur utile
+}
 
 int PanelDraw()
 {
@@ -628,17 +707,34 @@ int PanelDraw()
       y = DrawPlanning(xl, iw, y) + 10;
       y = DrawGoal(xl, iw, y) + 10;
    }
+   else if(W >= 1040)
+   {
+      // trois colonnes : planning / objectif / série · compte / marché · filtres en détail
+      int gap = 12, cw = (iw - 2 * gap) / 3;
+      int xa = xl, xb = xl + cw + gap, xc = xl + 2 * (cw + gap);
+      int ya = DrawPlanning(xa, cw, y) + 10;
+      ya = DrawGoal(xa, cw, ya) + 10;
+      ya = DrawSeries(xa, cw, ya) + 10;
+      int yb = DrawAccount(xb, cw, y) + 10;
+      yb = DrawMarket(xb, cw, yb, false) + 10;
+      int yc = DrawFilters(xc, cw, y) + 10;
+      y = MathMax(ya, MathMax(yb, yc));
+   }
    else
    {
+      // deux colonnes (graphique étroit) : planning / objectif / série · compte / marché / filtres en détail
       int gap = 12, cw = (iw - gap) / 2;
       int xa = xl, xb = xl + cw + gap;
       int ya = DrawPlanning(xa, cw, y) + 10;
       ya = DrawGoal(xa, cw, ya) + 10;
       ya = DrawSeries(xa, cw, ya) + 10;
       int yb = DrawAccount(xb, cw, y) + 10;
-      yb = DrawMarket(xb, cw, yb) + 10;
+      yb = DrawMarket(xb, cw, yb, false) + 10;
+      yb = DrawFilters(xb, cw, yb, false) + 10;
       y = MathMax(ya, yb);
-
+   }
+   if(!g_panelCompact)
+   {
       //--- Session (toute la largeur)
       int tot = g_sesWins + g_sesLosses;
       CvText(xl + 2, y, "SESSION", PC_DIM, 8, 0, true);

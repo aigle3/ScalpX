@@ -35,6 +35,10 @@ jobs:
           Start-Process "$mt\MetaEditor64.exe" -ArgumentList @('/portable', "/compile:`"$mt\MQL5\Experts\ScalpX_v5.mq5`"", "/log:`"$env:RUNNER_TEMP\c.log`"") -Wait
           Get-Content "$env:RUNNER_TEMP\c.log" -Encoding Unicode | Select-Object -Last 3
           Test-Path "$mt\MQL5\Experts\ScalpX_v5.ex5"
+      - name: Écran 1920×1080
+        shell: pwsh
+        continue-on-error: true
+        run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
       - name: Lancer MT5 avec l'EA, masquer les panneaux, captures
         shell: pwsh
         env:
