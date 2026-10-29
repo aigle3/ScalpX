@@ -109,3 +109,11 @@ def test_menu_retraits_et_rappel():
     assert render.withdraw_reminder([b, c], {}, now) is None
     empty = render.withdraw_text([c], [], 0.0, 0.0, {}, "EUR", now, {})
     assert "Aucun compte à 500" in empty and "aucun retrait enregistré" in empty
+
+
+def test_accueil_comptes_du_plus_avance_au_moins_avance():
+    vs = [view(n, objectif_actif=False, ea_demarre=False, solde=b, solde_plus_flottant_ea=b, seuil_arret=500)
+          for n, b in ((11, 150.0), (22, 290.0), (33, 125.0), (44, 228.0))]
+    txt = render.home_text(vs, totals(vs), {}, "EUR", "2", "6", False, 1.0, time.time())
+    pre = txt.split("<pre>")[1].split("</pre>")[0].splitlines()
+    assert [l.split()[1] for l in pre] == ["22", "44", "11", "33"]

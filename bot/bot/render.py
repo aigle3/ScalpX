@@ -232,6 +232,18 @@ def withdraw_reminder(views: list[AccountView], since: dict[str, int], now: floa
     return "\n".join(lines)
 
 
+def _home_order(v: AccountView):
+    """Ordre de l'accueil : alertes d'abord, puis comptes en objectif, puis du plus avancé au moins avancé (barre affichée)."""
+    st = v.st
+    if st is None:
+        frac, goal = -1.0, False
+    elif st.objectif_actif:
+        frac, goal = max(0.0, min(st.objectif_progression, 100.0)) / 100, True
+    else:
+        frac, goal = st.progress500(), False
+    return (v.health.icon != "🔴", v.health.icon != "🟠", not goal, -frac, v.inst.label.lower())
+
+
 def home_text(views: list[AccountView], t: Totals, vps: dict[str, float], cur: str, bot_v: str, ea_v: str,
               update_pending: bool, data_age_s: float | None, now: float, max_lines: int = 8,
               extra_alerts: list[str] | None = None) -> str:
@@ -275,7 +287,7 @@ def home_text(views: list[AccountView], t: Totals, vps: dict[str, float], cur: s
         lim = f"{ref.seuil_arret:.0f}" if ref is not None and ref.seuil_arret > 0 else "500"
         nxt = f" · prochain créneau {_hhmm(ref.prochain_creneau)}" if ref is not None and ref.prochain_creneau else ""
         lines.append(f"🏁 <b>Progression vers {lim}</b>{nxt}")
-    shown = sorted(views, key=lambda v: (v.health.icon != "🔴", v.health.icon != "🟠", v.inst.label.lower()))[:max_lines]
+    shown = sorted(views, key=_home_order)[:max_lines]
     lines.append("<pre>" + "\n".join(esc(home_line(v)) for v in shown) + "</pre>")
     if len(views) > max_lines:
         lines.append(f"… et {len(views) - max_lines} autre(s) : 👥 Comptes")
