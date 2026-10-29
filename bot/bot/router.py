@@ -283,14 +283,15 @@ class Router:
         elif sub[0] == "t" and sub[1:].isdigit():                      # bascule oui/non
             idx = int(sub[1:])
             cur = pu.bool_of(ui.cached(inst.id).get(pu.cat.PARAMS[idx][0], ""))
-            if cur is None:
-                self.dash.flash("⚠️ Valeur inconnue : touche 🔃 Relire.")
+            if cur is None:                                             # pas encore de valeur (preset plus ancien) : choix explicite
+                self.dash.goto("prp", inst.id, idx)
+                self.dash.flash("Choisis ✅ Activer ou ❌ Désactiver.")
             else:
                 self._bg(self._prm_apply(inst, idx, "0" if cur else "1"))
         elif sub[0] == "s" and sub[1:].isdigit() and len(p) > 3:       # − / + n pas
             idx = int(sub[1:])
             prm = pu.cat.PARAMS[idx]
-            cur = pu.num_of(ui.cached(inst.id).get(prm[0], ""))
+            cur = pu.num_of(ui.cached(inst.id).get(prm[0], "") or pu.cat.DEFAULTS.get(prm[0], ""))   # sans valeur : défaut de l'EA
             try:
                 n = int(p[3])
             except ValueError:
@@ -377,7 +378,8 @@ class Router:
         if self.awaiting:
             iid, idx = self.awaiting
             self.awaiting = None
-            inst = act.target(self.ctx, iid)
+            # preset : sa cible « preset:… » n'est pas un compte (avant : valeur refusée « envoie un nombre » pour un preset)
+            inst = pui.PresetTarget(iid[len(pui.PREFIX):]) if iid.startswith(pui.PREFIX) else act.target(self.ctx, iid)
             prm = pu.cat.PARAMS[idx]
             num = pu.num_of(text)
             if inst is None or num is None or prm[3] not in ("int", "dbl"):

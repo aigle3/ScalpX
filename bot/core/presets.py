@@ -162,7 +162,7 @@ def slots_input(values: dict[str, str]) -> str | None:
     masks = []
     for k in cat.SLOT_KEYS:
         try:
-            masks.append(int(float(values.get(k, "0"))))
+            masks.append(int(float(values.get(k, cat.DEFAULTS.get(k, "0")))))   # absent : défaut de l'EA (comme à l'écran)
         except ValueError:
             masks.append(0)
     return ",".join(str(x // 60) if x % 60 == 0 else f"{x // 60}:{x % 60:02d}" for x in cat.slots_of(masks))

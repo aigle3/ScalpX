@@ -113,6 +113,10 @@ SLOT_MINUTES = (0, 15, 30, 45)
 HIDDEN = frozenset(SLOT_KEYS)          # pas de bouton « nombre » : ils se règlent dans l'écran 🕐 Créneaux
 MAX_SLOTS = 12                         # au-delà, le panneau du graphique devient illisible
 SLOT_GROUP = 7                         # 🏆 Objectifs
+# Valeurs par défaut de l'EA (inputs) des réglages ajoutés en 6.2.0 : point de départ quand un preset plus ancien
+# ne les contient pas encore (rien n'est enregistré tant qu'on ne les modifie pas)
+DEFAULTS = {"sl_on": "1", "sl_pct": "1.0", "sl_win": "10", "sl_m00": "1184328", "sl_m15": "0", "sl_m30": "0", "sl_m45": "0",
+            "seuil_on": "1", "seuil_arret": "500", "seuil_reprise": "125"}
 
 
 def slots_of(masks: list[int]) -> list[int]:

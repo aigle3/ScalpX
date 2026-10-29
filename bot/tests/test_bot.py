@@ -1375,3 +1375,34 @@ async def test_alertes_identiques_une_seule_pour_tout_le_systeme():
     last = s.sent[-1][1]
     assert "👥 2 comptes : C, D" in last and last.count("Solde 1") == 1
     assert "<b>C</b>\nCapital\nsolde 120" in last and "<b>D</b>\nCapital\nsolde 130" in last
+
+
+@pytest.mark.asyncio
+async def test_preset_ancien_reglages_absents_modifiables(svc):
+    """Preset créé avant l'EA 6.2.0 : saisie d'un nombre acceptée, oui/non explicite, créneaux partant des valeurs par défaut."""
+    from bot import params_ui as pu, presets_ui as pui
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    dash.store.put("Martin", {"lot": "0.01", "goalmax": "50"})
+    c = pui.code_of("Martin")
+    iid = pui.PREFIX + "Martin"
+    await router.on_callback(f"p:{c}")
+    assert await _until(lambda: dash.params.cached(iid).get("goalmax") == "50")
+    # saisie libre d'un nombre (avant : « envoie un nombre » refusé pour un preset)
+    i_arr = pu.find("seuil_arret")
+    await router.on_callback(f"p:{c}:w{i_arr}")
+    await router.on_text("600")
+    assert await _until(lambda: dash.store.presets["Martin"].get("seuil_arret") == "600")
+    # oui/non absent : écran avec ✅ / ❌
+    i_on = pu.find("sl_on")
+    await router.on_callback(f"p:{c}:t{i_on}")
+    datas = [d for row in dash.render()[1] for _, d in row]
+    assert f"p:{c}:e{i_on}:1" in datas and f"p:{c}:e{i_on}:0" in datas
+    await router.on_callback(f"p:{c}:e{i_on}:0")
+    assert await _until(lambda: dash.store.presets["Martin"].get("sl_on") == "0")
+    # créneaux : partent des créneaux par défaut ; le .set garde les autres heures
+    await router.on_callback(f"p:{c}:c")
+    assert "03:00, 06:00, 09:00, 12:00, 17:00, 20:00" in dash.render()[0]
+    await router.on_callback(f"p:{c}:cm9:30")
+    assert await _until(lambda: dash.store.presets["Martin"].get("sl_m30") == str(1 << 9))
+    from core import presets as ps
+    assert ps.slots_input(dash.store.presets["Martin"]) == "3,6,9,9:30,12,17,20"

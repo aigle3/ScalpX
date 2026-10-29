@@ -159,11 +159,12 @@ class ParamsUI:
                 f"⚠️ {head} : preset enregistré, {len(members) - len(bad)}/{len(members)} robot(s) ; échec : {esc(', '.join(bad[:5]))}")
 
     def masks(self, iid: str) -> list[int] | None:
-        """Les 4 masques de créneaux lus sur le robot (ou le preset) ; None si l'un d'eux est inconnu."""
+        """Les 4 masques de créneaux lus sur le robot (ou le preset) ; None si l'un d'eux est inconnu.
+        Preset plus ancien que l'EA 6.2.0 : créneaux par défaut de l'EA (enregistrés au premier changement)."""
         vals = self.cached(iid)
         out = []
         for k in cat.SLOT_KEYS:
-            v = num_of(vals.get(k, ""))
+            v = num_of(vals.get(k, "") or (cat.DEFAULTS.get(k, "") if iid.startswith("preset:") and vals else ""))
             if v is None:
                 return None
             out.append(int(v))
@@ -221,10 +222,14 @@ class ParamsUI:
         key, name, gi, typ, mn, mx, step, unit, opts = p
         cur = vals.get(key, "?")
         text = f"{head}\n<b>{esc(name)}</b> (<code>{key}</code>)\nValeur actuelle : <b>{esc(cur)}</b>"
+        if cur == "?" and iid.startswith("preset:"):
+            text += "\n<i>Pas encore dans ce preset (créé avant cette version de l'EA) : choisis une valeur pour l'ajouter.</i>"
         if typ in ("int", "dbl"):
             text += f"\nLimites : {fmt_num(p, mn)} – {fmt_num(p, mx)}{esc(unit)} · pas {fmt_num(p, step)}"
         kb = []
-        if typ == "enum":
+        if typ == "bool":                                    # explicite (utile quand la valeur n'existe pas encore)
+            kb.append([("✅ Activer", f"p:{c}:e{idx}:1"), ("❌ Désactiver", f"p:{c}:e{idx}:0")])
+        elif typ == "enum":
             cur_i = self.current_index(iid, idx)
             row = []
             for oi, o in enumerate(opts):
