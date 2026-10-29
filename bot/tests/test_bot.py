@@ -179,7 +179,7 @@ async def test_dashboard_liste_filtres_tri_pagination(svc):
     write_statut(ctx, b.id, solde=300.0, solde_plus_flottant_ea=350.0)
     write_statut(ctx, c.id, solde=130.0, etat="PAUSE")
     text, kb = dash.render()                                                       # accueil : état de l'ensemble
-    assert "🔴 3" in text and "À retirer" in text and "378.20" in text            # total à retirer (503.2 − 125)
+    assert "🔴 3" in text and "à retirer" in text and "378.20" in text            # total à retirer (503.2 − 125)
     assert "▰" in text and "<pre>" in text and "Aucune alerte" not in text
     assert [d for row in kb for _, d in row] == ["d:flt", "d:lst", "d:act", "d:rpt", "d:sys"]
     dash.goto("lst")                                                                 # 👥 Comptes : liste détaillée

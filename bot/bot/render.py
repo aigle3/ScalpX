@@ -47,12 +47,17 @@ ICON_ORDER = (("🟢", "actif"), ("🟠", "alerte"), ("🔴", "arrêté"), ("⚙
 
 
 def home_line(v: AccountView, label_w: int = 10) -> str:
-    """Ligne compacte de l'accueil : icône, nom, solde, barre vers 500."""
+    """Ligne compacte de l'accueil : icône, nom, solde, barre.
+    Objectif en cours sur ce compte → barre de l'objectif (🎯) ; sinon → progression vers le seuil d'arrêt (500)."""
     name = v.inst.label[:label_w].ljust(label_w)
     if v.st is None:
         return f"{v.health.icon} {name} {'—':>9}"
-    pct = int(round(min(v.st.progress500(), 9.99) * 100))
-    return f"{v.health.icon} {name} {v.st.solde:>9.2f} {bar(v.st.progress500())} {pct:>3}%{STATE_TAG.get(v.st.etat, '')}"
+    st = v.st
+    if st.objectif_actif:
+        frac = max(0.0, min(st.objectif_progression, 100.0)) / 100
+        return f"{v.health.icon} {name} {st.solde:>9.2f} {bar(frac)} {frac * 100:>3.0f}% 🎯"
+    pct = int(round(min(st.progress500(), 9.99) * 100))
+    return f"{v.health.icon} {name} {st.solde:>9.2f} {bar(st.progress500())} {pct:>3}%{STATE_TAG.get(st.etat, '')}"
 
 
 def _hhmm(s: str) -> str:
@@ -70,6 +75,10 @@ def _in_min(m: int) -> str:
     return f"dans {m} min" if m < 90 else f"dans {m // 60} h {m % 60:02d}"
 
 
+def news_item(n) -> str:
+    return f"{'🔴' if n.haute else '🟠'} {_hhmm(n.heure)} {esc(n.devise)} {esc(n.nom[:40])} ({_in_min(n.dans_min)})"
+
+
 def trading_ref(views: list[AccountView], now: float):
     """Statut de référence pour l'état du trading (tous les robots ont les mêmes réglages) : le plus récent."""
     fresh = [v.st for v in views if v.st is not None and v.st.age_s(now) < 120]
@@ -77,30 +86,35 @@ def trading_ref(views: list[AccountView], now: float):
 
 
 def goal_line(views: list[AccountView], st, now: float) -> str:
-    """🎯 Objectif en cours : un compte = une ligne ; plusieurs comptes = le total puis le détail de chacun."""
+    """🎯 Objectif en cours : gagné / à gagner (total des comptes en objectif) + barre ; le détail est sur chaque ligne de compte."""
     fresh = [v for v in views if v.st is not None and v.st.age_s(now) < 120]
     on = [v for v in fresh if v.st.objectif_actif]
     if not on:
-        return "🎯 Aucun objectif en cours" + (f" · prochain créneau {_hhmm(st.prochain_creneau)}" if st.prochain_creneau else "")
+        return "🎯 Aucun objectif en cours" + (f" · prochain créneau {_hhmm(st.prochain_creneau)}" if st and st.prochain_creneau else "")
+    cur = on[0].st.devise
+    want = sum(max(0.0, v.st.objectif_cible - v.st.objectif_depart) for v in on)
+    got = sum(max(0.0, v.st.objectif_cible - v.st.objectif_depart) * max(0.0, min(v.st.objectif_progression, 100.0)) / 100 for v in on)
+    frac = got / want if want > 0 else 0.0
+    who = "" if len(fresh) == 1 else f" {len(on)}/{len(fresh)} comptes"
+    return (f"🎯 <b>Objectif{who}</b> : {money(got, '', True)} / {money(want, cur, True)} "
+            f"{bar(frac)} {frac * 100:.0f} %")
 
-    def detail(s) -> str:
-        pct = max(0.0, min(s.objectif_progression, 100.0))
-        return (f"{money(s.objectif_cible - s.objectif_depart, s.devise, True)} (cible {money(s.objectif_cible, s.devise)}) "
-                f"{bar(pct / 100)} {pct:.0f} %")
 
-    if len(fresh) == 1:
-        return f"🎯 <b>Objectif en cours</b> : {detail(on[0].st)}"
-    total = sum(v.st.objectif_cible - v.st.objectif_depart for v in on)
-    lines = [f"🎯 <b>Objectif en cours sur {len(on)}/{len(fresh)} comptes</b> : {money(total, on[0].st.devise, True)} au total"]
-    lines += [f"   {esc(v.inst.label)} : {detail(v.st)}" for v in sorted(on, key=lambda v: v.inst.label.lower())]
-    off = [v.inst.label for v in fresh if not v.st.objectif_actif]
-    if off:
-        lines.append("   ⚪ Sans objectif : " + esc(", ".join(off)))
-    return "\n".join(lines)
+def _head(st, npos: int) -> tuple[str, bool]:
+    """État du trading (titre) ; second élément : True si le robot est arrêté (pas de ligne « nouvelles séries »)."""
+    if st.etat == "ARRET_500":
+        return "🏁 <b>Arrêt à 500</b> : retrait attendu", True
+    if st.vacances:
+        return "🏖 <b>Vacances</b> : aucune nouvelle série", True
+    if st.etat == "PAUSE" or (st.objectif_actif and not st.ea_demarre):
+        return "⏸ <b>En pause</b>" + (f" jusqu'à {_hhmm(st.pause_jusqua)}" if st.pause_jusqua else ""), True
+    if not st.objectif_actif:
+        return "⚪ <b>À l'arrêt</b> : attend un objectif", True
+    return ("🟢 <b>En train de trader</b>" if npos else "🟡 <b>En attente</b> : aucune position"), False
 
 
 def trading_block(views: list[AccountView], now: float) -> list[str]:
-    """Bloc « en tout premier » de l'accueil : le robot trade-t-il, peut-il trader, chaque filtre (dont News), prochaines news."""
+    """Bloc « en tout premier » de l'accueil : état, positions, nouvelles séries, filtres (résumé), news."""
     st = trading_ref(views, now)
     sts = [v.st for v in views if v.st is not None and v.st.age_s(now) < 120]
     if st is None:
@@ -108,68 +122,76 @@ def trading_block(views: list[AccountView], now: float) -> list[str]:
     npos = sum(s.positions for s in sts)
     nacc = sum(1 for s in sts if s.positions > 0)
     flot = sum(s.flottant_ea for s in sts)
-    pos_line = (f"📌 {npos} position(s) ouverte(s) sur {nacc} compte(s) · flottant {money(flot, st.devise, True)}"
-                if npos else "📌 Aucune position ouverte")
-    stopped = True
-    if st.etat == "ARRET_500":
-        head = "🏁 <b>ARRÊT À 500</b> : retrait attendu"
-    elif st.vacances:
-        head = "🏖 <b>MODE VACANCES</b> : aucune nouvelle série"
-    elif st.etat == "PAUSE" or (st.objectif_actif and not st.ea_demarre):
-        head = "⏸ <b>EN PAUSE</b>" + (f" jusqu'à {_hhmm(st.pause_jusqua)} (reprise automatique)" if st.pause_jusqua else "")
-    elif not st.objectif_actif:
-        head = "⚪ <b>À L'ARRÊT</b> : attend un objectif"
+    # titre : un compte en objectif l'emporte ; « arrêt à 500 » seulement si tous les comptes y sont (sinon ligne 🏁 dédiée)
+    pick = ([s for s in sts if s.objectif_actif] or [s for s in sts if s.etat != "ARRET_500"] or sts)
+    head, stopped = _head(max(pick, key=lambda s: s.ts), npos)
+    lines = [head]
+    if npos:
+        lines.append(f"📌 {npos} position(s)" + (f" sur {nacc} comptes" if nacc > 1 else "") + f" · flottant {money(flot, st.devise, True)}")
     else:
-        stopped = False
-        head = "🟢 <b>EN TRAIN DE TRADER</b> : série en cours" if npos else "🟡 <b>EN ATTENTE</b> : aucune position"
-    lines = [head, goal_line(views, st, now), pos_line]
+        lines.append("📌 Aucune position")
     if not stopped:
         blocked = st.trading_autorise is False or (st.trading_autorise is None and bool(st.raison_blocage))
         if blocked:
             lines.append(f"⛔ Nouvelles séries <b>bloquées</b> : {esc(st.raison_blocage or '?')}")
         else:
-            sig = {"achat": " · signal achat", "vente": " · signal vente"}.get(st.signal, "")
-            lines.append(f"✅ Nouvelles séries <b>autorisées</b> : entrée au prochain signal{sig}")
+            sig = {"achat": " (achat)", "vente": " (vente)"}.get(st.signal, "")
+            lines.append(f"✅ Entrée au prochain signal{sig}")
     if st.filtres is None:
         lines.append("🛡 Filtres : détail après la mise à jour de l'EA (5.5.0)")
         return lines
-    # News, mis en avant
+    on = [f for f in st.filtres if f.actif]
+    off = [f.nom for f in st.filtres if not f.actif]
+    bad = [f for f in on if not f.ok]
+    if not on:
+        flt = "🛡 Aucun filtre actif"
+    else:
+        flt = f"🛡 Filtres {len(on) - len(bad)}/{len(on)} OK" if not bad else f"🛡 Filtres <b>{len(on) - len(bad)}/{len(on)} OK</b>"
+    if off:
+        flt += " · ⚪ " + esc(", ".join(off))
+    lines.append(flt)
+    for f in bad:
+        lines.append(f"   🔴 {esc(f.nom)}" + (f" : {esc(f.raison)}" if f.raison else ""))
     if not st.news_filtre:
         lines.append("📰 Filtre News <b>désactivé</b> : le robot trade pendant les annonces")
     elif st.news_bloque:
         lines.append(f"📰 <b>NEWS EN COURS</b> : {esc(st.news_raison)} → pas de nouvelle entrée")
-    else:
-        lines.append("📰 Filtre News actif : aucune news en cours")
-    on = [f for f in st.filtres if f.actif]
-    off = [f.nom for f in st.filtres if not f.actif]
-    lines.append("🛡 " + " · ".join(("🟢 " if f.ok else "🔴 ") + esc(f.nom) for f in on) if on else "🛡 Aucun filtre actif")
-    for f in on:
-        if not f.ok and f.raison:
-            lines.append(f"   ↳ {esc(f.nom)} : {esc(f.raison)}")
-    if off:
-        lines.append("⚪ Désactivés : " + esc(", ".join(off)))
     if st.news:
-        items = [f"{'🔴' if n.haute else '🟠'} {_hhmm(n.heure)} {esc(n.devise)} {esc(n.nom[:40])} ({_in_min(n.dans_min)})" for n in st.news[:3]]
-        lines.append("📅 <b>Prochaines news</b> :\n   " + "\n   ".join(items))
+        more = f" · +{len(st.news) - 1} autre(s) : 🧭" if len(st.news) > 1 else ""
+        lines.append(f"📅 {news_item(st.news[0])}{more}")
     else:
         lines.append("📅 Aucune news importante dans les 24 h")
     return lines
 
 
+def withdraw_lines(views: list[AccountView], cur: str) -> list[str]:
+    """Comptes arrivés au seuil (ARRET_500) : montant à retirer sur chacun (le robot reprend seul après le retrait)."""
+    due = sorted((v for v in views if v.st is not None and v.st.etat == "ARRET_500"), key=lambda v: v.inst.label.lower())
+    if not due:
+        return []
+    total = sum(v.st.to_retire() for v in due)
+    out = [f"🏁 <b>{len(due)} compte(s) à 500</b> · à retirer <b>{money(total, cur)}</b> :"]
+    out += [f"   💸 {esc(v.inst.label)} : <b>{money(v.st.to_retire(), v.st.devise)}</b> (laisser {v.st.seuil_reprise:.0f})"
+            for v in due[:6]]
+    if len(due) > 6:
+        out.append(f"   … et {len(due) - 6} autre(s) : 👥 Comptes")
+    return out
+
+
 def home_text(views: list[AccountView], t: Totals, vps: dict[str, float], cur: str, bot_v: str, ea_v: str,
               update_pending: bool, data_age_s: float | None, now: float, max_lines: int = 8,
               extra_alerts: list[str] | None = None) -> str:
-    """Accueil : état de l'ensemble (comptes, argent, alertes, VPS), puis une ligne par compte."""
+    """Accueil compact : état du trading, argent, alertes, puis une ligne par compte (objectif 🎯 ou vers 500)."""
     c = "" if t.currency_mixed else cur
-    counts = "   ".join(f"{icon} {t.by_icon.get(icon, 0)}" for icon, _ in ICON_ORDER
-                        if t.by_icon.get(icon, 0) or icon in ("🟢", "🟠", "🔴"))
-    lines = [f"📊 <b>ScalpX</b> — {time.strftime('%H:%M', time.localtime(now))}", SEP]
-    lines += trading_block(views, now)
-    lines += [SEP, counts,
-             f"💰 Solde <b>{money(t.balance, c)}</b> · jour {money(t.pl_jour, c, True)}"]
+    tb = trading_block(views, now)
+    lines = [f"📊 <b>ScalpX</b> {time.strftime('%H:%M', time.localtime(now))} · {tb[0]}", SEP]
+    lines += tb[1:]
+    lines.append(SEP)
+    money_line = f"💰 <b>{money(t.balance, c)}</b> · jour {money(t.pl_jour, c, True)}"
     if t.pl_latent:
-        lines.append(f"📉 Latent {money(t.pl_latent, c, True)}")
-    lines.append(f"💸 À retirer : <b>{money(t.to_withdraw, c)}</b>" if t.to_withdraw > 0 else f"💸 À retirer : {money(0, c)}")
+        money_line += f" · latent {money(t.pl_latent, c, True)}"
+    lines.append(money_line)
+    lines += withdraw_lines(views, c)
     alerts = [v for v in views if v.health.icon in ("🟠", "🔴")]
     lines += extra_alerts or []
     if alerts:
@@ -178,10 +200,12 @@ def home_text(views: list[AccountView], t: Totals, vps: dict[str, float], cur: s
             lines.append(f"{v.health.icon} <b>{esc(v.inst.label)}</b> : {esc(why)}")
         if len(alerts) > 3:
             lines.append(f"… et {len(alerts) - 3} autre(s) alerte(s)")
-    elif not extra_alerts:
-        lines.append("✅ Aucune alerte")
+    others = "   ".join(f"{icon} {t.by_icon[icon]}" for icon, _ in ICON_ORDER if t.by_icon.get(icon, 0) and icon != "🟢")
+    ok_line = f"🟢 {t.by_icon.get('🟢', 0)}/{t.count}" + (f"   {others}" if others else "")
+    if not alerts and not extra_alerts:
+        ok_line += " · ✅ aucune alerte"
     hot = [f"{k.upper()} {vps.get(k, 0):.0f}%" for k, lim in (("cpu", 85), ("ram", 85), ("disk", 90)) if vps.get(k, 0) >= lim]
-    lines.append(("⚠️ VPS chargé : " + " · ".join(hot) if hot else "🖥 VPS OK") + f" · Bot {esc(bot_v)} · EA {esc(ea_v or '?')}")
+    lines.append(ok_line + (" · ⚠️ VPS " + " ".join(hot) if hot else " · 🖥 VPS OK"))
     if update_pending:
         lines.append("🔔 Mise à jour disponible : 🛠 Système")
     old = sum(1 for v in views if v.outdated)
@@ -190,10 +214,18 @@ def home_text(views: list[AccountView], t: Totals, vps: dict[str, float], cur: s
     if data_age_s is not None and data_age_s > 45:
         lines.append(f"⚠️ données vieilles de {ago(data_age_s)}")
     lines.append(SEP)
+    ref = trading_ref(views, now)
+    if any(v.st is not None and v.st.objectif_actif for v in views):
+        lines.append(goal_line(views, ref, now))
+    else:
+        lim = f"{ref.seuil_arret:.0f}" if ref is not None and ref.seuil_arret > 0 else "500"
+        nxt = f" · prochain créneau {_hhmm(ref.prochain_creneau)}" if ref is not None and ref.prochain_creneau else ""
+        lines.append(f"🏁 <b>Progression vers {lim}</b>{nxt}")
     shown = sorted(views, key=lambda v: (v.health.icon != "🔴", v.health.icon != "🟠", v.inst.label.lower()))[:max_lines]
     lines.append("<pre>" + "\n".join(esc(home_line(v)) for v in shown) + "</pre>")
     if len(views) > max_lines:
         lines.append(f"… et {len(views) - max_lines} autre(s) : 👥 Comptes")
+    lines.append(f"<i>Bot {esc(bot_v)} · EA {esc(ea_v or '?')}</i>")
     return "\n".join(lines)
 
 

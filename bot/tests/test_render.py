@@ -31,52 +31,63 @@ def block(*views) -> str:
 
 
 def test_autorise_filtres_et_news():
-    news = [{"heure": time.strftime("%Y.%m.%d") + " 14:30", "dans_min": 95, "devise": "USD", "nom": "Non-Farm Payrolls", "haute": True}]
+    news = [{"heure": time.strftime("%Y.%m.%d") + " 14:30", "dans_min": 95, "devise": "USD", "nom": "Non-Farm Payrolls", "haute": True},
+            {"heure": time.strftime("%Y.%m.%d") + " 16:00", "dans_min": 185, "devise": "USD", "nom": "ISM", "haute": False}]
     txt = block(view(1, signal="achat", news=news), view(2))
-    assert txt.startswith("🟡 <b>EN ATTENTE</b>") and "✅ Nouvelles séries <b>autorisées</b>" in txt and "signal achat" in txt
-    assert "🟢 Volatilité (ATR)" in txt and "🔴 Volume" in txt and "↳ Volume : Volume trop faible" in txt
-    assert "⚪ Désactivés : Horaire" in txt and "🟢 News" in txt
-    assert "Filtre News actif : aucune news en cours" in txt
-    assert "14:30 USD Non-Farm Payrolls (dans 1 h 35)" in txt
-    assert "Aucune position ouverte" in txt
+    assert txt.startswith("🟡 <b>En attente</b>") and "✅ Entrée au prochain signal (achat)" in txt
+    assert "🛡 Filtres <b>2/3 OK</b> · ⚪ Horaire" in txt and "   🔴 Volume : Volume trop faible" in txt
+    assert "14:30 USD Non-Farm Payrolls (dans 1 h 35) · +1 autre(s)" in txt and "ISM" not in txt
+    assert "Aucune position" in txt
 
 
 def test_news_bloque_et_positions():
     txt = block(view(1, trading_autorise=False, raison_blocage="News : USD NFP (14:30)", news_bloque=True,
                      news_raison="USD NFP (14:30)", positions=3, flottant_ea=-4.5),
                 view(2, positions=0))
-    assert txt.startswith("🟢 <b>EN TRAIN DE TRADER</b>")
+    assert txt.startswith("🟢 <b>En train de trader</b>")
     assert "⛔ Nouvelles séries <b>bloquées</b> : News : USD NFP (14:30)" in txt
     assert "<b>NEWS EN COURS</b> : USD NFP (14:30)" in txt
-    assert "3 position(s) ouverte(s) sur 1 compte(s)" in txt and "-4.50 EUR" in txt
+    assert "📌 3 position(s) · flottant -4.50 EUR" in txt
 
 
 def test_filtre_news_desactive_pause_et_vieil_ea():
     assert "Filtre News <b>désactivé</b>" in block(view(1, news_filtre=False))
     txt = block(view(1, etat="PAUSE", ea_demarre=False, pause_jusqua=time.strftime("%Y.%m.%d") + " 16:00"))
-    assert txt.startswith("⏸ <b>EN PAUSE</b> jusqu'à 16:00")
-    assert block(view(1, objectif_actif=False, ea_demarre=False)).startswith("⚪ <b>À L'ARRÊT</b>")
+    assert txt.startswith("⏸ <b>En pause</b> jusqu'à 16:00")
+    assert block(view(1, objectif_actif=False, ea_demarre=False)).startswith("⚪ <b>À l'arrêt</b>")
     old = block(view(1, filtres=None, trading_autorise=None))                     # EA < 5.5.0
     assert "après la mise à jour de l'EA" in old
     assert "aucune donnée" in block(view(1, ts=int(time.time()) - 600))
 
 
-def test_accueil_commence_par_le_trading():
+def test_accueil_compact_trading_en_titre():
     v = [view(1)]
     txt = render.home_text(v, totals(v), {}, "EUR", "2.4.0", "5.5.0", False, 1.0, time.time())
     lines = txt.splitlines()
-    assert lines[2].startswith("🟡 <b>EN ATTENTE</b>")
-    assert txt.index("EN ATTENTE") < txt.index("💰 Solde")
+    assert "🟡 <b>En attente</b>" in lines[0]
+    assert txt.index("En attente") < txt.index("💰")
+    assert "<i>Bot 2.4.0 · EA 5.5.0</i>" in txt and "🟢 1/1 · ✅ aucune alerte · 🖥 VPS OK" in txt
 
 
-def test_objectif_en_cours():
-    txt = block(view(1, objectif_depart=200.0, objectif_cible=210.0, objectif_progression=66.4), view(2, objectif_actif=False))
-    assert "🎯 <b>Objectif en cours sur 1/2 comptes</b> : +10.00 EUR au total" in txt
-    assert "   1 : +10.00 EUR (cible 210.00 EUR) ▰▰▰▱▱ 66 %" in txt and "⚪ Sans objectif : 2" in txt
-    txt = block(view(1, objectif_depart=206.70, objectif_cible=208.77), view(2, objectif_depart=125.0, objectif_cible=126.25))
-    assert "sur 2/2 comptes</b> : +3.32 EUR au total" in txt
-    assert "   1 : +2.07 EUR (cible 208.77 EUR)" in txt and "   2 : +1.25 EUR (cible 126.25 EUR)" in txt
-    assert "🎯 <b>Objectif en cours</b> : +2.00 EUR" in block(view(1, objectif_depart=100.0, objectif_cible=102.0))
-    txt = block(view(1, objectif_actif=False, ea_demarre=False, prochain_creneau=time.strftime("%Y.%m.%d") + " 09:00"))
-    assert "🎯 Aucun objectif en cours · prochain créneau 09:00" in txt
+def test_objectif_en_cours_et_barres_des_comptes():
+    a = view(1, objectif_depart=200.0, objectif_cible=210.0, objectif_progression=60.0, solde=206.0)
+    b = view(2, objectif_actif=False, solde=250.0, solde_plus_flottant_ea=250.0, seuil_arret=500)
+    txt = render.home_text([a, b], totals([a, b]), {}, "EUR", "2", "6", False, 1.0, time.time())
+    assert "🎯 <b>Objectif 1/2 comptes</b> : +6.00 / +10.00 EUR ▰▰▰▱▱ 60 %" in txt
+    assert "▰▰▰▱▱  60% 🎯" in txt                                                   # compte en objectif : barre de l'objectif
+    assert "250.00 ▰▰▱▱▱  50%" in txt                                               # sans objectif : vers 500
+    assert "🎯 <b>Objectif</b> : +1.00 / +2.00 EUR" in render.goal_line(
+        [view(1, objectif_depart=100.0, objectif_cible=102.0, objectif_progression=50)], None, time.time())
+    c = view(1, objectif_actif=False, ea_demarre=False, solde=100.0, solde_plus_flottant_ea=100.0, seuil_arret=500,
+             prochain_creneau=time.strftime("%Y.%m.%d") + " 09:00")
+    txt = render.home_text([c], totals([c]), {}, "EUR", "2", "6", False, 1.0, time.time())
+    assert "🏁 <b>Progression vers 500</b> · prochain créneau 09:00" in txt and "🎯" not in txt
 
+
+def test_comptes_a_500_listes_avec_le_montant_a_retirer():
+    a = view(1, objectif_actif=False, etat="ARRET_500", solde=512.0, seuil_arret=500, seuil_reprise=125)
+    b = view(2, objectif_actif=False, solde=200.0)
+    txt = render.home_text([a, b], totals([a, b]), {}, "EUR", "2", "6", False, 1.0, time.time())
+    assert "🏁 <b>1 compte(s) à 500</b> · à retirer <b>387.00 EUR</b>" in txt
+    assert "💸 1 : <b>387.00 EUR</b> (laisser 125)" in txt
+    assert txt.splitlines()[0].endswith("⚪ <b>À l'arrêt</b> : attend un objectif")    # un seul compte à 500 : pas le titre

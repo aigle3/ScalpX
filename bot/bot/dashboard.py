@@ -252,6 +252,9 @@ class Dashboard:
             lines.append(f"🛡️ <b>Filtres</b> (identiques sur tous les robots ; lus sur {render.esc(ref)}, "
                          f"il y a {render.ago(now - ts)})")
             lines.append(render.esc(body) if body else "<i>réponse vide</i>")
+        ref = render.trading_ref(views, now)
+        if ref is not None and ref.news:                 # la liste complète (l'accueil n'affiche que la prochaine)
+            lines += ["", "📅 <b>Prochaines news</b>"] + ["   " + render.news_item(n) for n in ref.news[:5]]
         lines += ["", "📌 <b>Positions ouvertes</b>"]
         rows, npos, nord, flot, cur = [], 0, 0, 0.0, ""
         for v in sorted(views, key=lambda v: v.inst.label.lower()):
