@@ -281,3 +281,13 @@ def test_overlay_set_ajoute_un_input_absent_et_garde_l_optimisation():
     out = ps.overlay_set(_set(["FastEMA=10||10||1||30||N", ""]), {"fast": "12", "slow": "25"})
     txt = out[2:].decode("utf-16-le")
     assert "FastEMA=12||10||1||30||N" in txt and "SlowEMA=25" in txt
+
+
+def test_presets_reglages_supprimes_de_l_ea_ignores(tmp_path):
+    import json
+    from core import presets as ps
+    f = tmp_path / "presets.json"
+    f.write_text(json.dumps({"active": "Martin", "presets": {"Martin": {"lot": "0.01", "autoresume": "20"}}}))
+    st = ps.PresetStore(f)
+    assert st.presets["Martin"] == {"lot": "0.01"} and st.active == "Martin"     # « autoresume » (EA < 6.0.0) retiré
+    assert ps.differences({"lot": "0.01", "autoresume": "20"}, {"lot": "0.01"}) == {}

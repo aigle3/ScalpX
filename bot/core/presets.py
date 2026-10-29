@@ -69,8 +69,9 @@ def raw_values(displayed: dict[str, str]) -> dict[str, str]:
 
 
 def differences(preset: dict[str, str], current_raw: dict[str, str]) -> dict[str, str]:
-    """Clés du preset dont la valeur diffère sur le robot : {clé: valeur du preset}."""
-    return {k: v for k, v in preset.items() if current_raw.get(k) != v}
+    """Clés du preset dont la valeur diffère sur le robot : {clé: valeur du preset}.
+    Les réglages qui n'existent plus dans l'EA (supprimés d'une version) sont ignorés."""
+    return {k: v for k, v in preset.items() if k in BY_KEY and current_raw.get(k) != v}
 
 
 class PresetStore:
@@ -83,7 +84,9 @@ class PresetStore:
     def load(self) -> None:
         try:
             d = json.loads(self.path.read_text(encoding="utf-8"))
-            self.presets = {str(k): {str(a): str(b) for a, b in v.items()} for k, v in d.get("presets", {}).items()}
+            # réglages supprimés de l'EA (ex. « autoresume » en 6.0.0) : retirés des presets
+            self.presets = {str(k): {str(a): str(b) for a, b in v.items() if str(a) in BY_KEY}
+                            for k, v in d.get("presets", {}).items()}
             self.active = d.get("active", "") if d.get("active", "") in self.presets else ""
         except (OSError, ValueError, AttributeError):
             self.presets, self.active = {}, ""
