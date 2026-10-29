@@ -913,7 +913,8 @@ class Router:
         names = plan.bot_files[:6] + plan.ea_files[:6]
         lines.append("<i>" + esc(", ".join(names)) + ("…" if len(plan.bot_files) + len(plan.ea_files) > len(names) else "") + "</i>")
         self._upd_msg = await self.sender.send(self.chat_id, "\n".join(lines),
-                                               [[("⬆ Installer", f"upd:go:{plan.stamp}"), ("⏰ Plus tard", "upd:later")]], True)
+                                               [[("⬆ Installer", f"upd:go:{plan.stamp}"), ("⏰ Plus tard", "upd:later")]]
+                                               + ([[(f"⏩ Tout installer d'un coup ({left + 1})", "upd:all")]] if left else []), True)
 
     async def _upd_cb(self, p: list[str]) -> str:
         from core import update as upd
@@ -926,7 +927,7 @@ class Router:
                                        "tableau de bord → <b>🔔 ⬆ Mises à jour</b>.", None)
             await self.dash.refresh(force=True)
             return ""
-        if sub != "go":
+        if sub not in ("go", "all"):
             return ""
         if self.ctx.deploy.running or self.building:
             return "Déploiement ou compilation en cours : réessaie après."
@@ -934,6 +935,17 @@ class Router:
             return "Installation déjà en cours…"
         self.installing = True
         try:
+            if sub == "all":                    # ⏩ dernière publication directement (contient toutes les précédentes)
+                from core import github as gh
+                inst_c = (self.ctx.db.meta_get("installed_commit") or "").split(" ")[0]
+                if mid:
+                    await self.sender.edit(self.chat_id, mid, "⏳ Téléchargement de la dernière version…", None)
+                res = await asyncio.to_thread(lambda: gh.fetch(self.ctx.cfg, force=True, installed=inst_c, latest=True))
+                if not res.ok:
+                    if mid:
+                        await self.sender.edit(self.chat_id, mid, f"❌ Téléchargement impossible : {esc(res.error)}", None)
+                    return ""
+                log.info("installation groupée : dernière publication %s", (res.sha or "")[:7])
             return await self._upd_install(mid)
         finally:
             self.installing = False

@@ -249,6 +249,14 @@ def test_github_plusieurs_publications_proposees_une_par_une_dans_l_ordre(tmp_pa
     r = gh.fetch(cfg, http, force=True, installed="c3")
     assert r.sha == "c4" and r.remaining == 0
     assert not gh.fetch(cfg, http, installed="c4").changed                 # à jour
+    # ⏩ Tout installer : la dernière publication directement, même si la précédente proposée n'est pas installée
+    got.clear()
+    gh._SEEN.update(sha="", since=0.0)
+    import shutil
+    shutil.rmtree(tmp_path / "release")
+    assert gh.fetch(cfg, http, force=True, installed="c1").sha == "c2"
+    r = gh.fetch(cfg, http, force=True, installed="c1", latest=True)
+    assert r.changed and r.sha == "c4" and r.remaining == 0 and got == ["c2", "c4"]
 
 
 def _set(lines):

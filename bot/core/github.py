@@ -128,12 +128,13 @@ _SEEN = {"sha": "", "since": 0.0}             # dernier commit vu sur la branche
 
 
 def fetch(cfg: Config, http: Http | None = None, force: bool = False, now: float | None = None,
-          installed: str = "") -> FetchResult:
+          installed: str = "", latest: bool = False) -> FetchResult:
     """Met à jour la copie locale du paquet si la branche a un nouveau commit, resté inchangé depuis
     [update] settle_min minutes (évite de proposer une publication en cours). force=True : sans attente.
 
     Plusieurs publications d'affilée : elles sont proposées DANS L'ORDRE, une par une. `installed` = commit installé ;
-    le paquet téléchargé est la publication qui le suit, et rien de plus n'est téléchargé tant qu'il n'est pas installé."""
+    le paquet téléchargé est la publication qui le suit, et rien de plus n'est téléchargé tant qu'il n'est pas installé.
+    latest=True (bouton « ⏩ Tout installer ») : la DERNIÈRE publication directement (elle contient toutes les précédentes)."""
     get = http or http_get
     repo = cfg.update.github.strip()
     branch = "stable" if cfg.update.validated_only else (cfg.update.branch or "main")
@@ -152,7 +153,7 @@ def fetch(cfg: Config, http: Http | None = None, force: bool = False, now: float
         local = local_sha(dest)
         if sha and sha == local:
             return FetchResult(True, False, sha, msg, token_expires=expires)
-        if installed and local and not local.startswith(installed):       # paquet précédent pas encore installé : on attend
+        if installed and local and not local.startswith(installed) and not latest:   # paquet précédent pas encore installé : on attend
             return FetchResult(True, False, local, "", token_expires=expires)
         t = now if now is not None else time.time()
         if sha != _SEEN["sha"]:
@@ -160,7 +161,7 @@ def fetch(cfg: Config, http: Http | None = None, force: bool = False, now: float
         if not force and t - _SEEN["since"] < cfg.update.settle_min * 60:
             return FetchResult(True, False, sha, msg, token_expires=expires, waiting=True)
         remaining = 0
-        if installed:                                                      # publication suivante seulement
+        if installed and not latest:                                       # publication suivante seulement
             rc = get(f"{API}/repos/{repo}/compare/{installed}...{sha}", _headers(cfg))
             if rc[0] == 200:
                 cj = json.loads(rc[1].decode("utf-8"))

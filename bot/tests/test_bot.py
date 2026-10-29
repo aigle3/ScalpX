@@ -1205,3 +1205,24 @@ async def test_alertes_des_filtres_coupees_une_fois(svc):
         assert ea.accounts[a.id]["params"]["n_filters"] == "✅"
     finally:
         await ea.stop()
+
+
+@pytest.mark.asyncio
+async def test_bouton_tout_installer(svc, monkeypatch):
+    """⏩ visible seulement s'il reste des publications ; il télécharge la dernière puis installe comme « Installer »."""
+    from core import github as gh, update as u
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    called = {}
+    monkeypatch.setattr(gh, "fetch", lambda cfg, **kw: called.update(kw) or gh.FetchResult(False, error="hors ligne"))
+    router._upd_msg = await sender.send(1, "x")
+    await router._upd_cb(["upd", "all"])
+    assert called.get("latest") is True and "hors ligne" in sender.msgs[router._upd_msg][0] and not router.installing
+    installs = []
+
+    async def fake_install(mid):
+        installs.append(mid)
+        return ""
+    monkeypatch.setattr(gh, "fetch", lambda cfg, **kw: gh.FetchResult(True, True, "abc"))
+    monkeypatch.setattr(router, "_upd_install", fake_install)
+    await router._upd_cb(["upd", "all"])
+    assert installs == [router._upd_msg]
