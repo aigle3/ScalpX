@@ -1162,3 +1162,25 @@ async def test_notification_ratee_renvoyee_au_passage_suivant():
     s.sent.clear()
     await n.flush()
     assert [t for _, t, _, _ in s.sent] == ["<b>Alpha</b>\nun\n\n<b>Beta</b>\ndeux", "<b>Alpha</b>\ntrois"]
+
+
+@pytest.mark.asyncio
+async def test_rappel_ea_a_deployer_avec_cloche(svc):
+    """EA compilé dans BASE mais pas encore déployé : 🔔 sur l'accueil, sur ⚡ Actions et sur 🚀 Déployer l'EA, tant que c'est vrai."""
+    from mt5 import base as basemod
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    st = ctx_stack(svc)
+    a = seed(st, 61, "Demo-Server 1")
+    base_v = basemod.read_version(ctx.cfg.paths.base)
+    write_statut(ctx, a.id, version="0.0.1")
+    dash.goto("dash")
+    text, kb = dash.render()
+    labels = [t for row in kb for t, _ in row]
+    if base_v:
+        assert f"EA {base_v} à déployer sur 1 compte(s)" in text and "⚡ Actions 🔔" in labels
+        dash.goto("act")
+        assert "🚀 Déployer l'EA 🔔 1" in [t for row in dash.render()[1] for t, _ in row]
+    write_statut(ctx, a.id, version=base_v or "0.0.1")
+    dash.goto("dash")
+    text, kb = dash.render()
+    assert "à déployer" not in text and "⚡ Actions" in [t for row in kb for t, _ in row]

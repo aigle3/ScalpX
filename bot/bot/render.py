@@ -184,6 +184,9 @@ def home_text(views: list[AccountView], t: Totals, vps: dict[str, float], cur: s
     lines.append(("⚠️ VPS chargé : " + " · ".join(hot) if hot else "🖥 VPS OK") + f" · Bot {esc(bot_v)} · EA {esc(ea_v or '?')}")
     if update_pending:
         lines.append("🔔 Mise à jour disponible : 🛠 Système")
+    old = sum(1 for v in views if v.outdated)
+    if old:                                  # nouvel EA compilé dans BASE, pas encore déployé partout (rappel permanent)
+        lines.append(f"🔔 EA {esc(ea_v or '?')} à déployer sur {old} compte(s) : ⚡ Actions → 🚀 Déployer l'EA")
     if data_age_s is not None and data_age_s > 45:
         lines.append(f"⚠️ données vieilles de {ago(data_age_s)}")
     lines.append(SEP)

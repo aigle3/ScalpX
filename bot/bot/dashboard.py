@@ -179,8 +179,9 @@ class Dashboard:
         text = render.home_text(views, t, vps, cur, bot_version(), basemod.read_version(self.ctx.cfg.paths.base),
                                 pending, min(ages) if ages else None, now,
                                 extra_alerts=[a for a in [pui.alert_line(self.preset_check)] if a])
+        act_btn = ("⚡ Actions" + (" 🔔" if any(v.outdated for v in views) else ""), "d:act")
         kb = [[("🧭 Filtres et positions", "d:flt")],
-              [("👥 Comptes", "d:lst"), ("⚡ Actions", "d:act")],
+              [("👥 Comptes", "d:lst"), act_btn],
               [("📈 Rapports", "d:rpt"), sys_btn]]
         return self._with_flash(text), kb
 
@@ -201,6 +202,7 @@ class Dashboard:
 
     def _render_actions(self) -> tuple[str, Keyboard]:
         silent = self.silent
+        old = sum(1 for v in self.ctx.views() if v.outdated)
         text = ("⚡ <b>Actions sur tous les comptes</b> (terminaux lancés)\n\n"
                 "Objectif, réglages et commandes partent vers chaque compte, avec confirmation.\n"
                 "Pour un seul compte : 👥 Comptes → le compte.")
@@ -209,7 +211,7 @@ class Dashboard:
             [("🎯 Objectif (tous)", "g:all"), ("⚙️ Paramètres (tous)", "p:all")],
             [("🧰 Commandes (tous)", "d:gcmd"), ("🖥 Terminaux (tous)", "d:gterm")],
             [("💾 Presets (tous les robots)", "s:l")],
-            [("🚀 Déployer l'EA", "d:dep"), ("➕ Nouveau compte", "n")],
+            [("🚀 Déployer l'EA" + (f" 🔔 {old}" if old else ""), "d:dep"), ("➕ Nouveau compte", "n")],
             [(("🔔 Rétablir le son" if silent else "🔕 Mode silencieux"), "d:sil")],
             [("⬅ Accueil", "d:home")],
         ]
