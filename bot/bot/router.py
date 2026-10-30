@@ -22,6 +22,7 @@ from .reports import build_report
 from . import params_ui as pu
 from . import presets_ui as pui
 from .ui import ALL_ID, Confirmations, Keyboard, Pending, Sender, resolve, short
+from migrations.trendpullback import TPInstaller          # [MIGRATION TrendPullback] temporaire
 
 log = logging.getLogger(__name__)
 
@@ -42,6 +43,8 @@ class Router:
         self.awaiting_preset: tuple[str, str] | None = None   # (compte modèle, preset remplacé) : nom attendu (texte)
         self.awaiting_goal: str | None = None               # compte (ou ALL_ID) dont on attend l'objectif (message texte)
         self._dep_sel: set[str] = set()
+        # [MIGRATION TrendPullback] temporaire : installation de TrendPullback depuis Telegram
+        self.mig = TPInstaller(sender, chat_id, ctx.cfg.token, ctx.cfg.paths.data / "logs")
 
     def _bg(self, coro) -> None:
         """Lance une action longue sans bloquer la réception des mises à jour Telegram."""
@@ -86,6 +89,8 @@ class Router:
                 return await self._pause_cb(parts)
             if head == "s":
                 return await self._preset_cb(parts)
+            if head == "mig":                                        # [MIGRATION TrendPullback] temporaire
+                return await self.mig.on_callback(parts[1:])
         except Exception:
             log.exception("callback en erreur : %s", head)
             return "Erreur"
@@ -358,6 +363,9 @@ class Router:
 
     async def on_text(self, text: str) -> None:
         """Message texte libre : valeur attendue d'un paramètre, sinon le tableau de bord revient en bas."""
+        if self.mig.awaiting:                                        # [MIGRATION TrendPullback] temporaire
+            await self.mig.on_text(text)
+            return
         if self.awaiting_goal:
             iid, self.awaiting_goal = self.awaiting_goal, None
             inst = act.target(self.ctx, iid)
