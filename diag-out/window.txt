@@ -1,0 +1,9 @@
+fenetre 66306 pids {1132}
+menu 67083 ['file', 'view', 'insert', 'charts', 'tools', 'window', 'help']
+avant [('languages', False), ('color themes', False), ('', False), ('toolbars', False), ('status bar', True), ('charts bar', True), ('', False), ('symbols', False), ('depth of market', False), ('', False), ('market watch', True), ('data window', False), ('navigator', True), ('toolbox', True), ('strategy tester', False), ('chats', False), ('reports', False), ('', False), ('fullscreen', False)]
+panneaux (ancienne méthode) []
+masques ['standard', 'line studies', 'timeframes', 'status bar', 'charts bar', 'market watch', 'navigator', 'toolbox']
+apres [('languages', False), ('color themes', False), ('', False), ('toolbars', False), ('status bar', False), ('charts bar', False), ('', False), ('symbols', False), ('depth of market', False), ('', False), ('market watch', False), ('data window', False), ('navigator', False), ('toolbox', False), ('strategy tester', False), ('chats', False), ('reports', False), ('', False), ('fullscreen', False)]
+panneaux restants []
+dialogues fermés 1
+graphique agrandi True
