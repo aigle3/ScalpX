@@ -432,3 +432,19 @@ def test_catalogue_du_bot_identique_aux_reglages_de_l_ea():
             assert line.split("=")[0] in inputs, line
     for k in ("UseExtensionFilter", "ExtensionMaxATR", "UseFreshSignalFilter", "FreshSignalMaxBars", "ObjectifAutoEntreeMin"):
         assert f"\r\n{k}=" in st
+
+
+def test_commandes_simultanees_numeros_uniques_hors_boucle(tmp_path):
+    """send() tourne dans des fils (send_and_wait) : jamais deux fois le même numéro, même en parallèle."""
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    from core.commands import CommandQueue
+    q = CommandQueue(tmp_path)
+    with ThreadPoolExecutor(8) as ex:
+        ns = list(ex.map(lambda i: q.send("A", "SET", ["k", str(i)]), range(200)))
+    assert len(set(ns)) == 200 and len(list(tmp_path.glob("cmd_A_*.json"))) == 200
+
+    async def run():
+        return await q.send_and_wait("B", "PING", timeout=0.3, poll=0.05)
+    r = asyncio.run(run())
+    assert r.timeout and not list(tmp_path.glob("cmd_B_*.json"))               # sans réponse : commande retirée

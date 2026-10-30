@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import json
 import logging
 import time
@@ -29,12 +30,15 @@ class CommandQueue:
     def __init__(self, common: Path) -> None:
         self.common = Path(common)
         self._last_n = 0
+        self._n_lock = threading.Lock()
 
     def _next_n(self) -> int:
-        """Numéro croissant (horodatage en ms) : l'ordre est conservé même après un redémarrage du bot."""
-        n = max(self._last_n + 1, int(time.time() * 1000))
-        self._last_n = n
-        return n
+        """Numéro croissant (horodatage en ms) : l'ordre est conservé même après un redémarrage du bot.
+        Verrou : send() tourne dans des fils (plusieurs commandes simultanées ne reçoivent jamais le même numéro)."""
+        with self._n_lock:
+            n = max(self._last_n + 1, int(time.time() * 1000))
+            self._last_n = n
+            return n
 
     def cmd_path(self, iid: str, n: int) -> Path:
         return self.common / f"cmd_{iid}_{n}.json"
@@ -65,10 +69,11 @@ class CommandQueue:
     async def send_and_wait(self, iid: str, cmd: str, args: list[str] | None = None,
                             timeout: float = 20.0, poll: float = 0.25) -> CmdResult:
         """Envoie une commande et attend son ack (⏳ → ✅/❌). Sur timeout, supprime la commande non lue."""
-        n = self.send(iid, cmd, args)
+        # écriture (fsync, nouvel essai si l'EA tient le fichier) et lectures dans un fil : la boucle du bot n'est jamais figée
+        n = await asyncio.to_thread(self.send, iid, cmd, args)
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            ack = self.read_ack(iid, n)
+            ack = await asyncio.to_thread(self.read_ack, iid, n)
             if ack is not None:
                 return CmdResult(ack.ok, ack.message, False, n)
             await asyncio.sleep(poll)

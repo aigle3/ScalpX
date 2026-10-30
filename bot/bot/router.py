@@ -557,7 +557,8 @@ class Router:
                 store.set_value(store.active, "n_filters", "0")
                 self.sync_base_set()
             self.ctx.db.meta_set("nfilters_off_preset", "1")
-        todo = [i for i in self._running() if not self.ctx.db.meta_get(f"nfilters_off_{i.id}")]
+        running = await asyncio.to_thread(self._running)               # parcours des processus : hors de la boucle du bot
+        todo = [i for i in running if not self.ctx.db.meta_get(f"nfilters_off_{i.id}")]
         if not todo:
             return
         res = await asyncio.gather(*[act.send_cmd(self.ctx, i, "SET", ["n_filters", "0"]) for i in todo])
@@ -715,8 +716,16 @@ class Router:
         if not store.active:
             self.dash.preset_check = None
             return
-        self.dash.preset_check = await pui.check_all(self.ctx, store, self._running())
+        t0 = time.monotonic()
+        insts = await asyncio.to_thread(self._running)                 # parcours des processus : hors de la boucle du bot
+        t1 = time.monotonic()
+        self.dash.preset_check = await pui.check_all(self.ctx, store, insts)
+        t2 = time.monotonic()
         await self.dash.refresh(force=True)
+        t3 = time.monotonic()
+        if t3 - t0 > 3.0:                                               # diagnostic : quelle étape est lente
+            log.info("vérification des presets : %.1f s (processus %.1f s, lecture de %d robot(s) %.1f s, tableau de bord %.1f s)",
+                     t3 - t0, t1 - t0, len(insts), t2 - t1, t3 - t2)
 
     async def _pause_cb(self, p: list[str]) -> str:
         """z:<compte|all>:<choix> : pause immédiate ou programmée (reprise automatique par l'EA)."""
