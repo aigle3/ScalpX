@@ -49,6 +49,10 @@ PARAMS = [
     ("volmin", "Volume minimum", 3, "dbl", 0.1, 1.5, 0.05, " x moy.", []),
     ("volmax", "Volume maximum", 3, "dbl", 1.2, 10.0, 0.1, " x moy.", []),
     ("volbars", "Bougies pour la moyenne", 3, "int", 5.0, 100.0, 5.0, "", []),
+    ("f_ext", "Filtre d'extension", 3, "bool", 0.0, 1.0, 1.0, "", []),                     # EA 6.6.0
+    ("extatr", "Extension maximum", 3, "dbl", 0.5, 10.0, 0.1, " x ATR", []),
+    ("f_fresh", "Filtre signal récent", 3, "bool", 0.0, 1.0, 1.0, "", []),
+    ("freshbars", "Signal récent : bougies max", 3, "int", 1.0, 200.0, 1.0, " bougies", []),
     ("f_lo", "Filtre EMA timeframe inférieur", 4, "bool", 0.0, 1.0, 1.0, "", []),
     ("lotf", "Timeframe inférieur", 4, "enum", 0.0, 5.0, 1.0, "", ["M1", "M5", "M15", "M30", "H1", "H4"]),
     ("lofast", "Inférieur : EMA rapide", 4, "int", 2.0, 200.0, 1.0, "", []),
@@ -78,6 +82,7 @@ PARAMS = [
     ("sl_on", "Objectif auto aux créneaux", 7, "bool", 0.0, 1.0, 1.0, "", []),
     ("sl_pct", "Objectif auto : gain", 7, "dbl", 0.1, 20.0, 0.1, " %", []),
     ("sl_win", "Fenêtre de lancement", 7, "int", 5.0, 15.0, 5.0, " min", []),
+    ("sl_entry", "Fenêtre d'entrée après le créneau", 7, "int", 0.0, 240.0, 5.0, " min", []),   # EA 6.6.0 (0 = désactivé)
     ("sl_m00", "Créneaux à l'heure pile (:00)", 7, "int", 0.0, 16777215.0, 1.0, "", []),
     ("sl_m15", "Créneaux à :15", 7, "int", 0.0, 16777215.0, 1.0, "", []),
     ("sl_m30", "Créneaux à :30", 7, "int", 0.0, 16777215.0, 1.0, "", []),

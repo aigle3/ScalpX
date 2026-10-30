@@ -505,6 +505,36 @@ string NextSlotText()
    return TimeToString(t, TIME_DATE | TIME_MINUTES);
 }
 
+// [ARCHI] début : 6.6.0 fenêtre d'entrée après le créneau : objectif du créneau sans série ouverte après N min → annulé
+datetime g_slotGoalAt = 0;           // lancement (GMT) de l'objectif du créneau, tant qu'aucune série ne s'est ouverte (0 = rien à surveiller)
+string   g_slotGoalName = "";
+
+void SlotEntrySet(datetime t, string slot = "")
+{
+   g_slotGoalAt = t;
+   g_slotGoalName = slot;
+   if(t > 0) GlobalVariableSet(GVN("slentry"), (double)t);
+   else      GlobalVariableDel(GVN("slentry"));
+}
+
+void SlotEntryTick()
+{
+   if(g_slotGoalAt == 0) return;
+   if(!g_goalActive || st_posCount > 0) { SlotEntrySet(0); return; }   // série ouverte (ou objectif terminé) : plus rien à surveiller
+   int lim = PInt(P_SL_ENTRY);
+   if(lim <= 0 || g_maint || g_phase500 || !g_enabled) return;       // robot mis en pause à la main : on n'annule pas son objectif
+   if(TimeGMT() - g_slotGoalAt < (datetime)lim * 60) return;
+   string slot = g_slotGoalName;
+   string why = g_blockReason;
+   SlotEntrySet(0);
+   if(st_pendCount > 0) CancelPendingFast();
+   GoalCancel();
+   EvTyped("OBJECTIF_ANNULE", 1, "⌛ " + (slot != "" ? "Créneau " + slot + " : objectif" : "Objectif du créneau") + " annulé : aucune série ouverte en " +
+           IntegerToString(lim) + " min" + (why != "" ? " (" + why + ")" : "") + ".\n🕐 Prochain créneau : " + NextSlotText(),
+           "{\"creneau\":\"" + slot + "\",\"minutes\":" + IntegerToString(lim) + ",\"raison\":\"" + JsonEsc(why) + "\"}");
+}
+// [ARCHI] fin
+
 void SlotTick()
 {
    if(!PBool(P_SL_ON) || g_slotsN == 0) return;
@@ -552,6 +582,7 @@ void SlotTick()
    g_cooldownUntilMs = 0;
    g_failCount = 0;
    g_nextTradeMs = 0;
+   SlotEntrySet(TimeGMT(), slot);     // [ARCHI] 6.6.0 : fenêtre d'entrée surveillée à partir de maintenant
    GlobalVariablesFlush();
    EvTyped("OBJECTIF_AUTO", 1, "🎯 Créneau " + slot + " : objectif +" + DoubleToString(PDbl(P_SL_PCT), 2) + " % lancé.\n" + msg,
            "{\"creneau\":\"" + slot + "\",\"cible\":" + NumS(g_goalTarget) + ",\"depart\":" + NumS(g_goalInit) + "}");
@@ -1158,6 +1189,7 @@ void ArchiInit()
       GlobalVariablesFlush();
    }
    SlotsParse();
+   g_slotGoalAt = GlobalVariableCheck(GVN("slentry")) ? (datetime)GlobalVariableGet(GVN("slentry")) : 0;   // [ARCHI] 6.6.0
    g_lastSlotKey = GlobalVariableCheck(GVN("slotkey")) ? (long)GlobalVariableGet(GVN("slotkey")) : 0;
    if(g_lastSlotKey > 0 && g_lastSlotKey < 10000000000)   // clé d'avant 6.2.0 (AAAAMMJJHH) → AAAAMMJJHHMM : créneau déjà consommé gardé
    {
@@ -1207,6 +1239,7 @@ void ArchiTimer()
       EvFlushPending();
       CloseRetryTick();                  // fermeture voulue restée bloquée (marché fermé / trading désactivé) : nouvel essai
       SlotTick();
+      SlotEntryTick();                   // [ARCHI] 6.6.0 : fenêtre d'entrée après le créneau
       //--- cohérence avec le panneau / l'ancien code : arrêt manuel <-> PAUSE
       if(g_state == ST_ACTIF && g_stoppedManually) SetState(ST_PAUSE, true, "Arrêt manuel détecté");
       else if(g_state == ST_PAUSE && !g_stoppedManually && g_enabled) SetState(ST_ACTIF, true, "Reprise manuelle détectée");

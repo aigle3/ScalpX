@@ -17,7 +17,7 @@
 //|   SX_Panel.mqh     panneau d'informations dynamique              |
 //+------------------------------------------------------------------+
 #property copyright   "ScalpX"
-#property version     "6.05"
+#property version     "6.06"
 #property description "ScalpX v6.1.0 — EMA 10/20 + grille ATR + TP commun + filtres multi-timeframe, pilotage par bot central (fichiers)"
 
 // [SEUIL500] début : TEST UNIQUEMENT (test B-3 de la checklist). Décommenter pour simuler un glissement de 2.0 (devise du compte)
@@ -68,6 +68,12 @@ input bool   NewsPauseEnabledAtStart = true;          // [ARCHI] Pause auto sur 
 input double VolumeMinRatio = 0.7;                    // Volume min (x moyenne)
 input double VolumeMaxRatio = 2.5;                    // Volume max (x moyenne)
 input int    VolumeBars = 20;                         // Bougies pour la moyenne de volume
+// [ARCHI] début : 6.6.0 filtres d'entrée (désactivés par défaut : comportement inchangé tant qu'on ne les active pas)
+input bool   UseExtensionFilter = false;              // Filtre d'extension : pas d'entrée si le prix est trop loin de l'EMA lente
+input double ExtensionMaxATR = 2.0;                   // Extension maximum : distance prix – EMA lente, en x ATR
+input bool   UseFreshSignalFilter = false;            // Filtre signal récent : entrée seulement peu après le croisement des EMA
+input int    FreshSignalMaxBars = 12;                 // Signal récent : bougies maximum depuis le croisement des EMA
+// [ARCHI] fin
 
 input group "══ Filtres multi-timeframe (v4.1) ══"
 input bool   UseLowerTFFilter = true;                 // Filtre EMA timeframe inférieur (réaction rapide)
@@ -127,6 +133,7 @@ input bool   ObjectifAutoCreneaux = true;             // Objectif automatique au
 input double ObjectifAutoPct = 1.0;                   // Objectif automatique : gain en % du solde au créneau
 input string ObjectifAutoHeures = "3,6,9,12,17,20";   // Créneaux de départ : « H » ou « H:MM » (MM = 00, 15, 30 ou 45), séparés par des virgules ; lundi à vendredi, heures du fuseau réglé dans l'EA
 input int    ObjectifAutoFenetreMin = 10;             // Fenêtre de lancement après l'heure du créneau (5, 10 ou 15 min) ; au-delà : créneau perdu
+input int    ObjectifAutoEntreeMin = 0;               // 6.6.0 : fenêtre d'entrée (min) : sans série ouverte dans ce délai après le créneau, l'objectif est annulé (0 = désactivé)
 input bool   FermerAutresGraphiques = true;              // Ferme les autres graphiques du terminal au démarrage (un compte = un graphique)
 // [ARCHI] fin
 

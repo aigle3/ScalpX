@@ -253,7 +253,8 @@ class Dashboard:
         days = getattr(self, "sst_days", 30)
         db = self.ctx.db
         evs = [e for e in db.events_since(int(now) - days * 86400)
-               if e["type"] in ("OBJECTIF_AUTO", "CRENEAU_SAUTE", "OBJECTIF_ATTEINT", "CLOTURE_500_OK", "ARRET_500", "NOTIF")]
+               if e["type"] in ("OBJECTIF_AUTO", "CRENEAU_SAUTE", "OBJECTIF_ATTEINT", "OBJECTIF_ANNULE", "CLOTURE_500_OK",
+                                 "ARRET_500", "NOTIF")]
         stats = slotstats.compute(evs)
         views = self.ctx.views()
         cur = next((v.st.devise for v in views if v.st and v.st.devise), "")

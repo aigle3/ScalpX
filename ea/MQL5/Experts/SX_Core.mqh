@@ -3,7 +3,7 @@
 //| Noyau : variables globales, registre de paramètres (tous les     |
 //| réglages sont modifiables à chaud), persistance, presets.        |
 //+------------------------------------------------------------------+
-#define SX_VERSION   "6.5.1"
+#define SX_VERSION   "6.6.0"
 #define SX_PREFIX    "SX4_"
 #define SX_MAXQ      40
 
@@ -41,6 +41,9 @@ enum ENUM_PID
    // Alertes, news, mode vacances
    P_N_WATCHDOG, P_N_MARKET,
    P_N_NEWS, P_NEWS_MIN, P_NEWS_IMP, P_NEWS_BLOCK, P_NEWS_BEFORE, P_NEWS_AFTER, P_VAC_RISK,
+   // [ARCHI] début : 6.6.0 filtres d'extension et de signal récent, fenêtre d'entrée après le créneau (en fin de liste : clés inchangées)
+   P_F_EXT, P_EXTATR, P_F_FRESH, P_FRESHBARS, P_SL_ENTRY,
+   // [ARCHI] fin
    P_COUNT
 };
 
@@ -122,7 +125,13 @@ double   mk_candleBody = 0, mk_candleMin = 0;               // corps et seuil (p
 bool     f_timeBlocked = false;
 bool     f_marketOpen  = true;
 //--- Tableau des filtres (SX_FilterBoard.mqh) : les 6 filtres de marché + Horaire + News
-#define FB_N 9                    // [ARCHI] 6.3.0 : + Spread (affichage ; le contrôle du spread est inchangé)
+#define FB_N 11                   // [ARCHI] 6.3.0 : + Spread (affichage ; le contrôle du spread est inchangé) ; 6.6.0 : + Extension, Signal récent
+// [ARCHI] début : 6.6.0 filtres d'extension et de signal récent (directionnels, calculés par UpdateFilters)
+double   mk_extAtr   = 0;          // (prix - EMA lente) / ATR, signé
+int      mk_freshAge = -1;         // bougies depuis le croisement des EMA (-1 = plus ancien que la recherche)
+bool     f_extOK = true, f_freshOK = true;
+string   f_extWhy = "", f_freshWhy = "";
+// [ARCHI] fin
 int      g_faState  = -1;          // dernier état global annoncé : 1 = tous OK, 0 = bloqué, -1 = inconnu
 ulong    g_faSince  = 0;
 //--- Demandes d'images du bot (traitées par le timer : ShotTick)
@@ -507,6 +516,18 @@ void InitParams()
        "Les nouvelles séries restent bloquées pendant ce délai APRÈS l'annonce.");
    Reg(P_VAC_RISK, "vac_risk", "Mode vacances : plafond de risque", G_RISK, PT_DBL, 5.0, 0.5, 50.0, 0.5, " %",
        "En mode vacances, toutes les positions sont fermées si la perte flottante dépasse ce % de la balance.");
+   // [ARCHI] début : 6.6.0
+   Reg(P_F_EXT, "f_ext", "Filtre d'extension", G_FILTERS, PT_BOOL, UseExtensionFilter ? 1 : 0, 0, 1, 1, "",
+       "Bloque une nouvelle série si le prix est déjà trop loin de l'EMA lente dans le sens du signal (fin de mouvement probable : achat au sommet, vente au creux).");
+   Reg(P_EXTATR, "extatr", "Extension maximum", G_FILTERS, PT_DBL, ExtensionMaxATR, 0.5, 10.0, 0.1, " x ATR",
+       "Distance maximum entre le prix et l'EMA lente, en multiple de l'ATR du timeframe du robot. Plus petit = plus strict.");
+   Reg(P_F_FRESH, "f_fresh", "Filtre signal récent", G_FILTERS, PT_BOOL, UseFreshSignalFilter ? 1 : 0, 0, 1, 1, "",
+       "N'ouvre une série que peu après le croisement des EMA du robot (début de tendance) ; une tendance plus ancienne est ignorée.");
+   Reg(P_FRESHBARS, "freshbars", "Signal récent : bougies max", G_FILTERS, PT_INT, FreshSignalMaxBars, 1, 200, 1, " bougies",
+       "Nombre maximum de bougies (timeframe du robot) depuis le croisement des EMA pour autoriser une nouvelle série.");
+   Reg(P_SL_ENTRY, "sl_entry", "Fenêtre d'entrée après le créneau", G_GOAL, PT_INT, MathMax(0, MathMin(240, ObjectifAutoEntreeMin)), 0, 240, 5, " min",
+       "Objectif lancé par un créneau : si aucune série n'a pu s'ouvrir dans ce délai, l'objectif est annulé (évite une entrée tardive à une heure non voulue). 0 = désactivé.");
+   // [ARCHI] fin
 }
 
 //+------------------------------------------------------------------+

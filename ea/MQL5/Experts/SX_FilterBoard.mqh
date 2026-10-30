@@ -7,7 +7,11 @@
 //+------------------------------------------------------------------+
 #define FA_CONFIRM_MS   30000     // un état global doit durer 30 s avant d'être annoncé
 
-//--- Les FB_N lignes : 0 ATR, 1 Prix/EMA, 2 Volume, 3 EMA inf., 4 EMA sup., 5 Bougie sup., 6 Horaire, 7 News, 8 Spread
+// [ARCHI] début : 6.6.0
+string FreshText() { return mk_freshAge < 0 ? "croisement trop ancien" : "croisement il y a " + IntegerToString(mk_freshAge) + " bougie(s)"; }
+// [ARCHI] fin
+
+//--- Les FB_N lignes : 0 ATR, 1 Prix/EMA, 2 Volume, 3 EMA inf., 4 EMA sup., 5 Bougie sup., 6 Horaire, 7 News, 8 Spread, 9 Extension, 10 Signal récent
 //    [ARCHI] 8 Spread : toujours actif (le spread maximum bloque déjà les nouveaux ordres, voir OnTick) ; ici affichage seul
 bool FbOn(int i)
 {
@@ -21,6 +25,8 @@ bool FbOn(int i)
       case 5: return PBool(P_F_CAN);
       case 6: return PBool(P_F_TIME);
       case 7: return PBool(P_NEWS_BLOCK);
+      case 9: return PBool(P_F_EXT);                              // [ARCHI] 6.6.0
+      case 10: return PBool(P_F_FRESH);                           // [ARCHI] 6.6.0
       default: return true;                                       // [ARCHI] spread : toujours contrôlé
    }
 }
@@ -30,6 +36,8 @@ bool FbOK(int i)
    if(i == 6) return !f_timeBlocked;
    if(i == 7) return !g_newsBlock;
    if(i == 8) return mk_spread <= PInt(P_MAXSPREAD);              // [ARCHI] même test que OnTick
+   if(i == 9) return f_extOK;                                     // [ARCHI] 6.6.0
+   if(i == 10) return f_freshOK;                                  // [ARCHI] 6.6.0
    return f_ok[i];
 }
 
@@ -45,6 +53,8 @@ string FbName(int i)
       case 5: return "Bougie " + TfNameP(P_HITF) + " précédente";
       case 6: return "Horaire";
       case 7: return "News";
+      case 9: return "Extension";                                 // [ARCHI] 6.6.0
+      case 10: return "Signal récent";                            // [ARCHI] 6.6.0
       default: return "Spread";
    }
 }
@@ -63,6 +73,8 @@ string FbInfo(int i)
       case 5: return (mk_candleDir > 0 ? "▲ haussière" : (mk_candleDir < 0 ? "▼ baissière" : "– neutre")) + ", corps " + F0(MathAbs(mk_candleBody)) + "/" + F0(mk_candleMin) + " pts";
       case 6: return "blocage " + IntegerToString(PInt(P_T_START)) + "h–" + IntegerToString(PInt(P_T_END)) + "h";
       case 8: return F0(mk_spread) + " pts (max " + IntegerToString(PInt(P_MAXSPREAD)) + ")";
+      case 9: return F1(MathAbs(mk_extAtr)) + " x ATR de l'EMA lente (max " + F1(PDbl(P_EXTATR)) + ")";      // [ARCHI] 6.6.0
+      case 10: return FreshText() + " (max " + IntegerToString(PInt(P_FRESHBARS)) + ")";                    // [ARCHI] 6.6.0
       default:
       {
          string nx = NewsNextText();
@@ -76,10 +88,12 @@ string FbWhy(int i)
    if(i == 6) return f_timeBlocked ? "plage de blocage en cours" : "";
    if(i == 7) return g_newsBlock ? "news : " + g_newsWhy : "";
    if(i == 8) return FbOK(8) ? "" : "spread trop large (" + F0(mk_spread) + " > " + IntegerToString(PInt(P_MAXSPREAD)) + " pts)";
+   if(i == 9) return f_extWhy;                                    // [ARCHI] 6.6.0
+   if(i == 10) return f_freshWhy;                                 // [ARCHI] 6.6.0
    return f_why[i];
 }
 
-int FbOrder(int k) { int o[FB_N] = { 0, 1, 2, 6, 7, 8, 3, 4, 5 }; return o[k]; }   // même ordre que le panneau du graphique
+int FbOrder(int k) { int o[FB_N] = { 0, 1, 9, 10, 2, 6, 7, 8, 3, 4, 5 }; return o[k]; }   // même ordre que le panneau du graphique ([ARCHI] 6.6.0 : + 9, 10)
 
 bool FiltersAllOK()
 {

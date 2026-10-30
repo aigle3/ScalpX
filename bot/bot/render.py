@@ -283,6 +283,8 @@ def slot_stats_text(stats: dict, days: int, n_accounts: int, cur: str) -> str:
     extra = []
     if t.skipped:
         extra.append(f"{t.skipped} créneau(x) sauté(s)")
+    if t.cancelled:
+        extra.append(f"{t.cancelled} annulé(s) sans entrée")
     if t.session_stops:
         extra.append(f"{t.session_stops} limite(s) de perte de session")
     if extra:

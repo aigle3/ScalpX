@@ -388,3 +388,47 @@ def test_resultat_du_jour_sans_le_latent():
     # EA plus ancien : réalisé = (equity − départ) − (equity − solde)
     assert Statut(id="1_a", solde=500, equity=450, pl_latent=-50, pl_jour=-60).day_realized() == pytest.approx(-10)
     assert Statut(id="1_a", solde=500, equity=450, pl_jour=0).day_realized() == 0.0      # journée pas encore initialisée
+
+
+def test_catalogue_du_bot_identique_aux_reglages_de_l_ea():
+    """Chaque réglage du bot existe dans l'EA (Reg) avec les mêmes bornes, et chaque input du .set de BASE existe dans l'EA."""
+    import re
+    from pathlib import Path
+    from core import params as cat, presets as cps
+    ea = Path(__file__).resolve().parents[2] / "ea" / "MQL5"
+    core = (ea / "Experts" / "SX_Core.mqh").read_text(encoding="utf-8-sig")
+    def args(i):                                     # arguments d'un appel Reg( … ) (virgules hors parenthèses et chaînes)
+        out, cur, depth, q = [], "", 0, False
+        for ch in core[i:]:
+            if ch == '"':
+                q = not q
+            if not q and ch == "(":
+                depth += 1
+            if not q and ch == ")":
+                if depth == 0:
+                    break
+                depth -= 1
+            if not q and ch == "," and depth == 0:
+                out.append(cur.strip()); cur = ""
+                continue
+            cur += ch
+        return out + [cur.strip()]
+    regs = {}
+    for m in re.finditer(r"\bReg\(", core):
+        a = args(m.end())
+        if len(a) > 8 and a[0].startswith("P_"):
+            regs[a[1].strip('"')] = (a[6], a[7])
+    for p in cat.PARAMS:
+        assert p[0] in regs, f"{p[0]} absent de l'EA"
+        mn, mx = (float(x) for x in regs[p[0]])
+        assert (mn, mx) == (p[4], p[5]), f"bornes de {p[0]} : EA {mn}–{mx}, bot {p[4]}–{p[5]}"
+    mq5 = (ea / "Experts" / "ScalpX_v5.mq5").read_text(encoding="utf-8-sig")
+    inputs = set(re.findall(r"^input\s+\w+\s+(\w+)\s*=", mq5, re.M))
+    for k, name in cps.SET_INPUTS.items():
+        assert name in inputs, f"input {name} ({k}) absent de l'EA"
+    st = (ea / "Presets" / "scalpx_v5.set").read_bytes()[2:].decode("utf-16-le")
+    for line in st.split("\r\n"):
+        if "=" in line and not line.startswith(";"):
+            assert line.split("=")[0] in inputs, line
+    for k in ("UseExtensionFilter", "ExtensionMaxATR", "UseFreshSignalFilter", "FreshSignalMaxBars", "ObjectifAutoEntreeMin"):
+        assert f"\r\n{k}=" in st

@@ -165,3 +165,12 @@ def test_preset_conseille_ajoute_une_fois_sans_toucher_au_sl(tmp_path):
     assert (v["lotmult"], v["sl_pct"], v["gridatr"], v["gridmin"], v["maxpend"]) == ("1.2", "0.5", "0.7", "200", "12")
     assert cps.slots_input(v) == "2,4,6,11,20"
     assert cps.ensure_recommended(st, True) == "" and len(st.presets) == 2
+
+
+def test_stats_creneau_objectif_annule_sans_entree():
+    from core import slotstats
+    evs = [_ev("a", 10, "OBJECTIF_AUTO", "🎯 Créneau 4:00 : objectif +0.50 % lancé."),
+           _ev("a", 2000, "OBJECTIF_ANNULE", "⌛ Créneau 4:00 : objectif annulé : aucune série ouverte en 30 min.")]
+    s = slotstats.compute(evs)["4:00"]
+    assert (s.launched, s.cancelled, s.open, s.done) == (1, 1, 0, 0)
+    assert "1 annulé(s) sans entrée" in render.slot_stats_text({"4:00": s}, 30, 1, "EUR")

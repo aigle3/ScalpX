@@ -176,6 +176,8 @@ SET_INPUTS = {
     "ch_levels": "ChartShowLevels", "ch_panel": "ChartShowPanel", "news_block": "NewsPauseEnabledAtStart",
     "sl_on": "ObjectifAutoCreneaux", "sl_pct": "ObjectifAutoPct", "sl_win": "ObjectifAutoFenetreMin",
     "seuil_on": "ActiverSeuil500", "seuil_arret": "SeuilArret", "seuil_reprise": "SeuilReprise",
+    "f_ext": "UseExtensionFilter", "extatr": "ExtensionMaxATR", "f_fresh": "UseFreshSignalFilter",
+    "freshbars": "FreshSignalMaxBars", "sl_entry": "ObjectifAutoEntreeMin",
 }
 SLOTS_INPUT = "ObjectifAutoHeures"     # les 4 masques de créneaux (sl_m00..sl_m45) → un seul input texte « 3,6,9:30 »
 

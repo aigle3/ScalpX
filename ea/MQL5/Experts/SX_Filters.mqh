@@ -102,6 +102,8 @@ bool MtfEntryOK(int dir, string &why)
    return true;
 }
 
+void UpdateEntryFilters(int sh, int dir, double s, bool haveEma);   // [ARCHI] 6.6.0 (défini plus bas)
+
 void UpdateFilters()
 {
    int sh = BarShift();
@@ -205,11 +207,54 @@ void UpdateFilters()
          NoteFilter(i, raw, title, det);
       }
    }
+   UpdateEntryFilters(sh, dir, s, haveEma);   // [ARCHI] 6.6.0 : extension et signal récent
 }
 
 //+------------------------------------------------------------------+
 //| Une nouvelle série peut-elle être ouverte ? (raison sinon)       |
 //+------------------------------------------------------------------+
+// [ARCHI] début : 6.6.0 bougies depuis le croisement des EMA du robot (0 = croisement sur la bougie lue ; -1 = au-delà de maxBars)
+int BarsSinceCross(int sh, int maxBars)
+{
+   int n = maxBars + 2;
+   double a[], b[];
+   ArraySetAsSeries(a, true);
+   ArraySetAsSeries(b, true);
+   if(CopyBuffer(g_hFast, 0, sh, n, a) != n || CopyBuffer(g_hSlow, 0, sh, n, b) != n) return -1;
+   int s0 = (a[0] > b[0]) ? 1 : ((a[0] < b[0]) ? -1 : 0);
+   if(s0 == 0) return 0;
+   for(int k = 1; k < n; k++)
+   {
+      int sk = (a[k] > b[k]) ? 1 : ((a[k] < b[k]) ? -1 : 0);
+      if(sk != s0) return k - 1;
+   }
+   return -1;
+}
+
+// Extension et signal récent : sens du signal (dir), EMA (f, s) et ATR déjà lus par UpdateFilters
+void UpdateEntryFilters(int sh, int dir, double s, bool haveEma)
+{
+   f_extOK = true; f_extWhy = "";
+   mk_extAtr = (haveEma && mk_atrPts > 0) ? ((mk_bid - s) / _Point) / mk_atrPts : 0;
+   if(PBool(P_F_EXT) && haveEma && dir != 0 && mk_atrPts > 0)
+   {
+      double e = (dir > 0) ? mk_extAtr : -mk_extAtr;
+      if(e > PDbl(P_EXTATR))
+      {
+         f_extOK = false;
+         f_extWhy = "Prix à " + F1(e) + " x ATR de l'EMA lente (max " + F1(PDbl(P_EXTATR)) + ") : fin de mouvement probable";
+      }
+   }
+   f_freshOK = true; f_freshWhy = "";
+   mk_freshAge = haveEma ? BarsSinceCross(sh, PInt(P_FRESHBARS)) : -1;
+   if(PBool(P_F_FRESH) && haveEma && dir != 0 && (mk_freshAge < 0 || mk_freshAge > PInt(P_FRESHBARS)))
+   {
+      f_freshOK = false;
+      f_freshWhy = "Croisement des EMA trop ancien (plus de " + IntegerToString(PInt(P_FRESHBARS)) + " bougies) : tendance déjà avancée";
+   }
+}
+// [ARCHI] fin
+
 bool EntryAllowed(string &why)
 {
    why = "";
@@ -233,6 +278,10 @@ bool EntryAllowed(string &why)
    if(f_timeBlocked)     { why = "Filtre horaire (" + IntegerToString(PInt(P_T_START)) + "h–" + IntegerToString(PInt(P_T_END)) + "h)"; return false; }
    for(int i = 0; i < NFILTERS; i++)
       if(!f_ok[i]) { why = f_why[i] != "" ? f_why[i] : "Filtre actif"; return false; }
+   // [ARCHI] début : 6.6.0
+   if(PBool(P_F_EXT) && !f_extOK)     { why = f_extWhy; return false; }
+   if(PBool(P_F_FRESH) && !f_freshOK) { why = f_freshWhy; return false; }
+   // [ARCHI] fin
    return true;
 }
 //+------------------------------------------------------------------+
