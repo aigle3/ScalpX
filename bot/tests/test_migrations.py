@@ -354,3 +354,27 @@ async def test_bouton_verifier_envoie_resume_et_rapport(tmp_path):
     assert s.docs and s.docs[0][0] == "trendpullback_verification.txt"
     rep = s.docs[0][1].decode("utf-8")
     assert "[OK]" in rep and GH not in rep and TG not in rep and HC not in rep and not inst.checking
+
+
+def test_journaux_mt5_des_comptes(tmp_path):
+    root, _ = tp_tree(tmp_path)
+    inst = root / "MT5" / "instances" / "68526357_RoboForex_Pro"
+    (inst / "logs").mkdir(parents=True)
+    (inst / "MQL5" / "Logs").mkdir(parents=True)
+    (inst / "MQL5" / "Experts").mkdir(parents=True)
+    (inst / "terminal64.exe").write_text("x")
+    term = ("﻿KO\t0\t00:08:01.123\tNetwork\t'68526357': authorized on RoboForex-Pro through Access Point\r\n"
+            "JK\t2\t00:08:02.456\tExperts\texpert TrendPullback (EURUSD,H4) loading failed\r\n")
+    (inst / "logs" / "20261031.log").write_bytes(term.encode("utf-16-le"))
+    (inst / "MQL5" / "Logs" / "20261031.log").write_bytes("﻿PN\t0\t00:08:03.000\tTrendPullback (EURUSD,H4)\tarray out of range in 'TP_News.mqh' (12,5)\r\n".encode("utf-16-le"))
+    bot_exe = str(root / "bot" / ".venv" / "Scripts" / "pythonw.exe")
+    procs = [{"pid": 4242, "name": "pythonw.exe", "exe": bot_exe, "cmdline": "main.py", "started": 1.0, "rss": 1},
+             {"pid": 9, "name": "metaeditor64.exe", "exe": str(inst / "MetaEditor64.exe"), "cmdline": "", "started": 1.0, "rss": 1}]
+    sec = checker(root, tmp_path, procs=procs).scan()
+    txt = "\n".join(f"{l} {t}" for _, l, t in levels(sec))
+    assert "warn 68526357_RoboForex_Pro : TrendPullback.ex5 absent" in txt
+    assert "warn 68526357_RoboForex_Pro [terminal] 00:08:02 Experts\texpert TrendPullback (EURUSD,H4) loading failed" in txt
+    assert "array out of range in 'TP_News.mqh'" in txt and "authorized on RoboForex-Pro" in txt
+    assert "warn MetaEditor lancé" in txt
+    rep = tpc.full_report(sec)
+    assert "--- 68526357_RoboForex_Pro : journal terminal 20261031.log" in rep and "loading failed" in rep

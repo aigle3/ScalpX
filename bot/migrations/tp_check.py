@@ -33,6 +33,7 @@ Run = Callable[[list, Path | None, int], tuple[int, str]]      # (commande, doss
 class Section:
     title: str
     items: list[tuple[str, str]] = field(default_factory=list)
+    details: list[str] = field(default_factory=list)          # rapport complet seulement (extraits de journaux)
 
     def add(self, level: str, text: str) -> None:
         self.items.append((level, text))
@@ -40,7 +41,8 @@ class Section:
 
 def run_cmd(cmd: list, cwd: Path | None, timeout: int) -> tuple[int, str]:
     try:
-        r = subprocess.run(cmd, cwd=str(cwd) if cwd else None, capture_output=True, timeout=timeout,
+        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")      # accents lisibles (sortie Windows)
+        r = subprocess.run(cmd, cwd=str(cwd) if cwd else None, capture_output=True, timeout=timeout, env=env,
                            stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         out = (r.stdout or b"") + (r.stderr or b"")
         return r.returncode, out.decode("utf-8", errors="replace")
@@ -108,6 +110,38 @@ def _tail(p: Path, n: int = 400) -> list[str]:
         return []
 
 
+MT5_BAD = re.compile(r"(?i)\berror\b|failed|cannot|invalid|removed|critical|not found|out of range|zero divide|"
+                     r"no connection|disabled|refused|erreur|init_|unable")
+MT5_GOOD = re.compile(r"(?i)loaded successfully|authorized on|initialized|démarré|started|connected")
+
+
+def _latest_log(folder: Path) -> Path | None:
+    try:
+        logs = [f for f in folder.glob("*.log") if f.is_file() and f.name[:8].isdigit()]
+    except OSError:
+        return None
+    return max(logs, key=lambda f: f.stat().st_mtime) if logs else None
+
+
+def _mt5_lines(f: Path) -> list[str]:
+    """Journal MT5 (UTF-16 LE en général), lu même verrouillé par le terminal."""
+    try:
+        raw = f.read_bytes()[-400_000:]
+    except OSError:
+        return []
+    if raw[:2] == b"\xff\xfe" or (len(raw) > 3 and raw[1:2] == b"\x00"):
+        txt = raw.decode("utf-16-le", errors="replace")
+    else:
+        txt = raw.decode("utf-8", errors="replace")
+    return [l.strip().lstrip("\ufeff") for l in txt.splitlines() if l.strip()]
+
+
+def _strip_mt5(line: str) -> str:
+    """« XX 0 12:34:56.789 Source texte » -> « 12:34:56 Source texte »."""
+    m = re.match(r"^\w{2}\s+\d\s+(\d\d:\d\d:\d\d)\.\d+\s+(.*)$", line)
+    return f"{m.group(1)} {m.group(2)}" if m else line
+
+
 class TPCheck:
     def __init__(self, root: Path, scalpx_token: str = "", scalpx_port: int = 0, scalpx_logs: Path | None = None,
                  run: Run | None = None, procs: Callable[[], list[dict]] | None = None,
@@ -159,7 +193,7 @@ class TPCheck:
         except tomllib.TOMLDecodeError as exc:
             self.cfg = {"_error": str(exc)}
         for f in (self.c_dirs, self.c_versions, self.c_base, self.c_bot, self.c_procs, self.c_tasks, self.c_logs,
-                  self.c_link, self.c_selfcheck):
+                  self.c_link, self.c_mt5logs, self.c_selfcheck):
             try:
                 f()
             except Exception as exc:                                  # un contrôle en erreur n'empêche pas les autres
@@ -407,6 +441,44 @@ class TPCheck:
             s.add(WARN if old else INFO, f"{len(cmds)} commande(s) en attente" + (f", dont {len(old)} de plus de 2 min" if old else ""))
         self.sections.append(s)
 
+    def c_mt5logs(self) -> None:
+        """Journaux MT5 de chaque compte (terminal + Experts) : pourquoi un EA ne démarre pas."""
+        s = Section("🧾 Journaux MT5 des comptes")
+        inst = self._path("instances", self.root / "MT5" / "instances")
+        arch = self._path("archives", self.root / "MT5" / "archives")
+        folders = sorted((d for d in inst.iterdir() if d.is_dir()), key=lambda d: d.name) if inst.is_dir() else []
+        old = sorted((d for d in arch.iterdir() if d.is_dir()), key=lambda d: d.stat().st_mtime) if arch.is_dir() else []
+        folders += old[-2:]                                   # dernières archives (création échouée, etc.)
+        if not folders:
+            s.add(INFO, "aucun dossier de compte (instances, archives)")
+        for d in folders:
+            where = ("archive " if d.parent == arch else "") + d.name
+            ea_ok = any((d / "MQL5" / "Experts" / f).is_file() for f in ("TrendPullback.ex5",))
+            if not ea_ok:
+                s.add(WARN, f"{where} : TrendPullback.ex5 absent de MQL5\\Experts")
+            if not (d / "terminal64.exe").is_file():
+                s.add(WARN, f"{where} : terminal64.exe absent (copie incomplète ?)")
+            for kind, sub in (("terminal", d / "logs"), ("Experts", d / "MQL5" / "Logs")):
+                f = _latest_log(sub)
+                if f is None:
+                    s.add(INFO, f"{where} : aucun journal {kind}")
+                    continue
+                lines = _mt5_lines(f)
+                s.details.append(f"--- {where} : journal {kind} {f.name} ({len(lines)} lignes, 80 dernières) ---")
+                s.details += [self._m(l)[:300] for l in lines[-80:]]
+                bad = [l for l in lines if MT5_BAD.search(l)]
+                good = [l for l in lines if MT5_GOOD.search(l)]
+                for l in bad[-3:]:
+                    s.add(WARN, f"{where} [{kind}] " + self._m(_strip_mt5(l))[:200])
+                if good:
+                    s.add(INFO, f"{where} [{kind}] " + self._m(_strip_mt5(good[-1]))[:200])
+                if not bad and not good:
+                    s.add(INFO, f"{where} [{kind}] {len(lines)} ligne(s), rien de notable")
+        procs = [p for p in self.procs() if p["name"] == "metaeditor64.exe" and str(self.root).lower() in p["exe"].lower()]
+        for p in procs:
+            s.add(WARN, f"MetaEditor lancé depuis {p['exe']} (pid {p['pid']}, depuis {_age(self.now - p['started'])})")
+        self.sections.append(s)
+
     def c_selfcheck(self) -> None:
         s = Section("✔️ Vérification du bot (main.py --check)")
         py = self.bot / ".venv" / "Scripts" / "python.exe"
@@ -461,5 +533,6 @@ def full_report(sections: list[Section], now: float | None = None) -> str:
     for s in sections:
         lines.append(f"== {s.title} ==")
         lines += [f"{tag[l]} {txt}" for l, txt in s.items]
+        lines += s.details
         lines.append("")
     return "\n".join(lines)
