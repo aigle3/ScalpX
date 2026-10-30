@@ -112,15 +112,19 @@ class TPInstaller:
 
     def __init__(self, sender, chat_id: int, scalpx_token: str, log_dir: Path,
                  root: Path = Path(r"C:\TrendPullback"), http: Http | None = None, runner: Runner | None = None,
-                 mt5_roots: list[str] | None = None, is_windows: bool | None = None) -> None:
+                 mt5_roots: list[str] | None = None, is_windows: bool | None = None, scalpx_port: int = 0,
+                 checker: Callable[..., object] | None = None) -> None:
         self.sender, self.chat_id, self.scalpx_token = sender, chat_id, scalpx_token
         self.log_dir, self.root = Path(log_dir), Path(root)
         self.http = http or _default_http
         self.runner = runner or run_process
         self.mt5_roots = mt5_roots
         self.is_windows = (os.name == "nt") if is_windows is None else is_windows
+        self.scalpx_port = scalpx_port
+        self.checker = checker                      # fabrique de TPCheck (tests)
         self.msg_id: int | None = None
         self.running = False
+        self.checking = False
         self._reset()
 
     # ------------------------------------------------------------------ état
@@ -254,6 +258,12 @@ class TPInstaller:
         arg = parts[1] if len(parts) > 1 else ""
         if cmd == "start":
             return await self.start()
+        if cmd == "chk":
+            if self.checking:
+                return "Vérification en cours"
+            self.checking = True
+            asyncio.get_event_loop().create_task(self.check())
+            return "Vérification lancée"
         if self.running:
             return "Installation en cours"
         if cmd == "cancel":
@@ -475,6 +485,34 @@ class TPInstaller:
             await self._show(title + f"❌ <b>Installation interrompue</b> (code {code}).\n<pre>{tail}</pre>\n"
                              "Corrige le point signalé puis relance « 🧩 Installer TrendPullback » (les jetons seront "
                              "redemandés). Journal complet (masqué) : data\\logs\\trendpullback_install.log.")
+
+    # ------------------------------------------------------------------ vérification (lecture seule)
+    async def check(self) -> None:
+        """Analyse complète de l'installation TrendPullback : résumé dans Telegram + rapport complet en fichier."""
+        from . import tp_check
+        try:
+            if not self.is_windows:
+                await self.sender.send(self.chat_id, "🔎 Vérification de TrendPullback : uniquement sur le VPS Windows.")
+                return
+            mid = await self.sender.send(self.chat_id, "🔎 <b>Vérification de TrendPullback</b>\n⏳ Analyse en cours "
+                                         "(fichiers, processus, tâches, journaux, auto-vérification du bot)…")
+            make = self.checker or tp_check.TPCheck
+            chk = make(self.root, scalpx_token=self.scalpx_token, scalpx_port=self.scalpx_port, scalpx_logs=self.log_dir)
+            sections = await asyncio.to_thread(chk.scan)
+            text = mask(tp_check.summary(sections), chk.secrets + [self.scalpx_token])
+            kb: Keyboard = [[("🔄 Relancer la vérification", "mig:chk")], [("⬅ Système", "d:sys")]]
+            r = await self.sender.edit(self.chat_id, mid, text, kb)
+            if r not in (EditResult.OK, EditResult.SAME):
+                await self.sender.send(self.chat_id, text, kb)
+            report = mask(tp_check.full_report(sections), chk.secrets + [self.scalpx_token])
+            await self.sender.document(self.chat_id, report.encode("utf-8"), "trendpullback_verification.txt",
+                                       "Rapport complet (secrets masqués)")
+        except Exception as exc:
+            log.exception("vérification TrendPullback en erreur")
+            await self.sender.send(self.chat_id, "🔎 Vérification de TrendPullback : erreur " +
+                                   esc(mask(f"{type(exc).__name__}: {exc}", [self.scalpx_token])))
+        finally:
+            self.checking = False
 
     def _write_log(self, lines: list[str], code: int) -> None:
         try:

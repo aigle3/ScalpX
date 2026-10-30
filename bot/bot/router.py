@@ -44,7 +44,8 @@ class Router:
         self.awaiting_goal: str | None = None               # compte (ou ALL_ID) dont on attend l'objectif (message texte)
         self._dep_sel: set[str] = set()
         # [MIGRATION TrendPullback] temporaire : installation de TrendPullback depuis Telegram
-        self.mig = TPInstaller(sender, chat_id, ctx.cfg.token, ctx.cfg.paths.data / "logs")
+        self.mig = TPInstaller(sender, chat_id, ctx.cfg.token, ctx.cfg.paths.data / "logs",
+                              scalpx_port=ctx.cfg.runtime.lock_port)
 
     def _bg(self, coro) -> None:
         """Lance une action longue sans bloquer la réception des mises à jour Telegram."""
