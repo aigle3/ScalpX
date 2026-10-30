@@ -378,3 +378,13 @@ def test_journaux_mt5_des_comptes(tmp_path):
     assert "warn MetaEditor lancé" in txt
     rep = tpc.full_report(sec)
     assert "--- 68526357_RoboForex_Pro : journal terminal 20261031.log" in rep and "loading failed" in rep
+
+
+def test_fichiers_d_echange_et_journal_ea_dans_le_rapport(tmp_path):
+    root, common = tp_tree(tmp_path)
+    (common / "logs").mkdir()
+    (common / "logs" / "68526357_2026-10-31.jsonl").write_text('{"type":"system","msg":"démarrage"}\n')
+    (common / "events_68526357_RoboForex_Pro.jsonl").write_text('{"type":"DEMARRAGE_EA"}\n')
+    rep = tpc.full_report(checker(root, tmp_path).scan())
+    assert "logs" in rep and '"msg":"démarrage"' in rep and "DEMARRAGE_EA" in rep
+    assert "--- bot.log (60 dernières lignes) ---" in rep and GH not in rep

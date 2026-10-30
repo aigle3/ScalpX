@@ -399,6 +399,8 @@ class TPCheck:
                 s.add(WARN, f"{len(errs)} erreur(s) dans les {len(lines)} dernières lignes ; dernière : " + self._m(errs[-1])[:220])
             else:
                 s.add(OK, f"aucune erreur dans les {len(lines)} dernières lignes")
+            s.details.append("--- bot.log (60 dernières lignes) ---")
+            s.details += [self._m(l)[:400] for l in lines[-60:]]
         crash = _read(logs / "crash.log")
         n = len(re.findall(r"(?m)^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$", crash))
         s.add(WARN if n else OK, f"{n} plantage(s) enregistré(s) (crash.log)" if n else "aucun plantage enregistré")
@@ -435,6 +437,15 @@ class TPCheck:
                        f"{j.get('etat', '?')}, connecté {'oui' if j.get('connecte') else 'NON'}, "
                        f"AutoTrading {'oui' if j.get('algo_terminal') and j.get('algo_ea') else 'NON'}, "
                        f"statut il y a {_age(age)}")
+        files = sorted((f for f in c.rglob("*") if f.is_file()), key=lambda f: f.stat().st_mtime)
+        s.add(INFO, f"{len(files)} fichier(s) d'échange" + (f", dernier : {files[-1].relative_to(c)} il y a "
+                                                           f"{_age(self.now - files[-1].stat().st_mtime)}" if files else ""))
+        s.details.append(f"--- fichiers de {c} (30 plus récents) ---")
+        s.details += [f"{_age(self.now - f.stat().st_mtime):>7}  {f.stat().st_size:>8} o  {f.relative_to(c)}" for f in files[-30:]]
+        for f in [f for f in files if f.suffix == ".jsonl"][-3:]:            # journal JSON de l'EA, événements
+            lines = _tail(f, 25)
+            s.details.append(f"--- {f.relative_to(c)} (25 dernières lignes) ---")
+            s.details += [self._m(l)[:400] for l in lines]
         cmds = list(c.glob("cmd_*.json"))
         if cmds:
             old = [p for p in cmds if self.now - p.stat().st_mtime > 120]
