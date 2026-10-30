@@ -17,7 +17,7 @@
 //|   SX_Panel.mqh     panneau d'informations dynamique              |
 //+------------------------------------------------------------------+
 #property copyright   "ScalpX"
-#property version     "6.06"
+#property version     "7.00"
 #property description "ScalpX v6.1.0 — EMA 10/20 + grille ATR + TP commun + filtres multi-timeframe, pilotage par bot central (fichiers)"
 
 // [SEUIL500] début : TEST UNIQUEMENT (test B-3 de la checklist). Décommenter pour simuler un glissement de 2.0 (devise du compte)
@@ -134,6 +134,8 @@ input double ObjectifAutoPct = 1.0;                   // Objectif automatique : 
 input string ObjectifAutoHeures = "3,6,9,12,17,20";   // Créneaux de départ : « H » ou « H:MM » (MM = 00, 15, 30 ou 45), séparés par des virgules ; lundi à vendredi, heures du fuseau réglé dans l'EA
 input int    ObjectifAutoFenetreMin = 10;             // Fenêtre de lancement après l'heure du créneau (5, 10 ou 15 min) ; au-delà : créneau perdu
 input int    ObjectifAutoEntreeMin = 0;               // 6.6.0 : fenêtre d'entrée (min) : sans série ouverte dans ce délai après le créneau, l'objectif est annulé (0 = désactivé)
+input bool   ObjectifCoupureActive = true;            // 7.0.0 : coupure de l'objectif aux heures ci-dessous
+input string ObjectifCoupureHeures = "13:45,21";      // 7.0.0 : heures de coupure (« H » ou « H:MM », MM = 00/15/30/45) : sans position, l'objectif est annulé ; avec une grille, elle finit au TP puis l'objectif est annulé
 input bool   FermerAutresGraphiques = true;              // Ferme les autres graphiques du terminal au démarrage (un compte = un graphique)
 // [ARCHI] fin
 

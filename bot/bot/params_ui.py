@@ -158,12 +158,12 @@ class ParamsUI:
         return (f"✅ {head} : preset + {len(members)} robot(s)" if not bad else
                 f"⚠️ {head} : preset enregistré, {len(members) - len(bad)}/{len(members)} robot(s) ; échec : {esc(', '.join(bad[:5]))}")
 
-    def masks(self, iid: str) -> list[int] | None:
-        """Les 4 masques de créneaux lus sur le robot (ou le preset) ; None si l'un d'eux est inconnu.
-        Preset plus ancien que l'EA 6.2.0 : créneaux par défaut de l'EA (enregistrés au premier changement)."""
+    def masks(self, iid: str, keys: tuple = cat.SLOT_KEYS) -> list[int] | None:
+        """Les 4 masques de créneaux (ou de coupures : keys = cat.CUT_KEYS) lus sur le robot (ou le preset) ; None si l'un
+        d'eux est inconnu. Preset plus ancien que l'EA : valeurs par défaut de l'EA (enregistrées au premier changement)."""
         vals = self.cached(iid)
         out = []
-        for k in cat.SLOT_KEYS:
+        for k in keys:
             v = num_of(vals.get(k, "") or (cat.DEFAULTS.get(k, "") if iid.startswith("preset:") and vals else ""))
             if v is None:
                 return None
@@ -206,6 +206,9 @@ class ParamsUI:
             if gi == cat.SLOT_GROUP:
                 m = self.masks(iid)
                 kb.append([(f"🕐 Créneaux · {cat.slots_text(m) if m is not None else '?'}"[:60], f"p:{c}:c")])
+                m = self.masks(iid, cat.CUT_KEYS)
+                cut_on = bool_of(vals.get("ct_on", "")) is not False
+                kb.append([(f"⛔ Coupures · {(cat.slots_text(m) if cut_on else 'désactivées') if m is not None else '?'}"[:60], f"p:{c}:u")])
             for i, p in enumerate(cat.PARAMS):
                 if p[2] != gi or p[0] in cat.HIDDEN:
                     continue
@@ -214,7 +217,7 @@ class ParamsUI:
                 kb.append([(f"{p[1][:30]} · {shown}"[:60], f"p:{c}:{'t' if p[3] == 'bool' else 'k'}{i}")])
             kb.append([("⬅ Catégories", f"p:{c}"), back])
             return f"{head}\n<b>{esc(cat.GROUPS[gi])}</b> — touche un paramètre pour le changer." + fl, kb
-        if kind in ("prc", "prh", "prq"):
+        if kind in ("prc", "prh", "prq", "puc", "puh", "puq"):
             return self._render_slots(screen, c, head, back, fl)
         # prp : un paramètre
         idx = int(screen[2])
@@ -245,31 +248,68 @@ class ParamsUI:
         kb.append([("⬅ " + cat.GROUPS[gi][:24], f"p:{c}:g{gi}"), back])
         return text + fl, kb
 
+    # ---- ⛔ coupures de l'objectif (EA 7.0.0) : la liste
+    def _render_cuts(self, screen, c, head, back, fl, vals, masks, slots) -> tuple[str, Keyboard]:
+        on = bool_of(vals.get("ct_on", ""))
+        lines = [head, "<b>⛔ Coupures de l'objectif</b>",
+                 "Tous les jours, à l'heure du fuseau réglé dans l'EA. À chaque heure de coupure :",
+                 "• <b>aucune position</b> (filtres bloquants) : l'objectif en cours est annulé ;",
+                 "• <b>une série est ouverte</b> : plus de nouvelle série, la grille continue jusqu'à son TP, puis l'objectif est annulé.",
+                 "Le robot attend ensuite le prochain créneau.", ""]
+        if on is False:
+            lines.append("⚪ <b>Coupures désactivées</b> : l'objectif n'est jamais coupé.")
+        lines.append(f"<b>{len(slots)} coupure(s)</b> : {esc(cat.slots_text(masks))}" if slots else "Aucune heure de coupure.")
+        if slots:
+            lines.append("<i>Touche ✖ pour retirer une heure.</i>")
+        kb: Keyboard = []
+        row = []
+        for s in slots[:cat.SLOTS_PER_PAGE]:
+            row.append((f"✖ {cat.slot_text(s)}", f"p:{c}:ux{s}"))
+            if len(row) == 4:
+                kb.append(row)
+                row = []
+        if row:
+            kb.append(row)
+        kb.append([("➕ Ajouter une heure", f"p:{c}:ua")])
+        kb.append([(("✅ Activées" if on else "❌ Désactivées") if on is not None else "Activation ?", f"p:{c}:t{find('ct_on')}")])
+        kb.append([("🔃 Relire", f"p:{c}:r"), ("⬅ " + cat.GROUPS[cat.SLOT_GROUP][:24], f"p:{c}:g{cat.SLOT_GROUP}"), back])
+        return "\n".join(lines) + fl, kb
+
     # ---- 🕐 créneaux d'objectif automatique : liste (prc), choix de l'heure (prh), choix des minutes (prq)
     def _render_slots(self, screen: tuple, c: str, head: str, back: tuple, fl: str) -> tuple[str, Keyboard]:
+        """🕐 Créneaux (prc/prh/prq, boutons p:…:c…) et ⛔ Coupures (puc/puh/puq, boutons p:…:u…) : même codage, mêmes écrans."""
         kind, iid = screen[0], screen[1]
+        cut = kind.startswith("pu")
+        f = "u" if cut else "c"
+        noun = "coupure" if cut else "créneau"
+        title = "⛔ Coupures" if cut else "🕐 Créneaux"
         vals = self.cached(iid)
-        masks = self.masks(iid)
-        to_list = ("⬅ Créneaux", f"p:{c}:c")
+        masks = self.masks(iid, cat.CUT_KEYS if cut else cat.SLOT_KEYS)
+        to_list = (f"⬅ {title[2:]}", f"p:{c}:{f}")
         if masks is None:
-            return (head + "\n<b>🕐 Créneaux</b>\n\n<i>Créneaux illisibles : touche 🔃 Relire (EA en version 6.2.0 ou plus requis).</i>" + fl,
+            return (head + f"\n<b>{title}</b>\n\n<i>Heures illisibles : touche 🔃 Relire "
+                           f"(EA en version {'7.0.0' if cut else '6.2.0'} ou plus requis).</i>" + fl,
                     [[("🔃 Relire", f"p:{c}:r")], [("⬅ " + cat.GROUPS[cat.SLOT_GROUP][:24], f"p:{c}:g{cat.SLOT_GROUP}"), back]])
         slots = cat.slots_of(masks)
-        if kind == "prh":
+        if kind in ("prh", "puh"):
             taken = {s // 60 for s in slots}
             kb: Keyboard = []
             for r in range(4):
-                kb.append([((f"• {h:02d}h" if h in taken else f"{h:02d}h"), f"p:{c}:ch{h}") for h in range(r * 6, r * 6 + 6)])
+                kb.append([((f"• {h:02d}h" if h in taken else f"{h:02d}h"), f"p:{c}:{f}h{h}") for h in range(r * 6, r * 6 + 6)])
             kb.append([to_list, back])
-            return (head + "\n<b>➕ Nouveau créneau : choisis l'heure</b>\n<i>• = heure qui a déjà un créneau.</i>" + fl, kb)
-        if kind == "prq":
+            return (head + f"\n<b>➕ Nouvelle {noun} : choisis l'heure</b>\n<i>• = heure qui en a déjà une.</i>" if cut else
+                    head + "\n<b>➕ Nouveau créneau : choisis l'heure</b>\n<i>• = heure qui a déjà un créneau.</i>") + fl, kb
+        if kind in ("prq", "puq"):
             h = int(screen[2])
             row = []
             for m in cat.SLOT_MINUTES:
                 t = cat.slot_text(h * 60 + m)
-                row.append((f"✓ {t}" if h * 60 + m in slots else t, f"p:{c}:cm{h}:{m}"))
-            kb = [row[:2], row[2:], [("⬅ Heures", f"p:{c}:ca"), to_list]]
-            return (head + f"\n<b>➕ Nouveau créneau à {h:02d}h : choisis les minutes</b>\n<i>✓ = déjà présent.</i>" + fl, kb)
+                row.append((f"✓ {t}" if h * 60 + m in slots else t, f"p:{c}:{f}m{h}:{m}"))
+            kb = [row[:2], row[2:], [("⬅ Heures", f"p:{c}:{f}a"), to_list]]
+            return (head + f"\n<b>➕ Nouvelle {noun} à {h:02d}h : choisis les minutes</b>" if cut else
+                    head + f"\n<b>➕ Nouveau créneau à {h:02d}h : choisis les minutes</b>") + "\n<i>✓ = déjà présent.</i>" + fl, kb
+        if cut:
+            return self._render_cuts(screen, c, head, back, fl, vals, masks, slots)
         # prc : la liste
         on = bool_of(vals.get("sl_on", ""))
         pct, win = vals.get("sl_pct", "?"), vals.get("sl_win", "?")

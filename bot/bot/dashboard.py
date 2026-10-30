@@ -121,7 +121,7 @@ class Dashboard:
             fl = self._flash_text()
             return ((f"{fl}\n\n" if fl else "") + system_text(self.ctx, self.vps(self.ctx.cfg.paths.data)),
                     system_kb(bool(self.ctx.db.meta_get("update_pending")), upd.backup_version(BOT_ROOT)))
-        if kind in ("prm", "prg", "prp", "prc", "prh", "prq"):
+        if kind in ("prm", "prg", "prp", "prc", "prh", "prq", "puc", "puh", "puq"):
             sid = self.screen[1]
             if sid.startswith(pui.PREFIX):                  # réglages d'un preset (gardé par le bot)
                 name = sid[len(pui.PREFIX):]
@@ -253,7 +253,7 @@ class Dashboard:
         days = getattr(self, "sst_days", 30)
         db = self.ctx.db
         evs = [e for e in db.events_since(int(now) - days * 86400)
-               if e["type"] in ("OBJECTIF_AUTO", "CRENEAU_SAUTE", "OBJECTIF_ATTEINT", "OBJECTIF_ANNULE", "CLOTURE_500_OK",
+               if e["type"] in ("OBJECTIF_AUTO", "CRENEAU_SAUTE", "OBJECTIF_ATTEINT", "OBJECTIF_ANNULE", "OBJECTIF_COUPE", "CLOTURE_500_OK",
                                  "ARRET_500", "NOTIF")]
         stats = slotstats.compute(evs)
         views = self.ctx.views()

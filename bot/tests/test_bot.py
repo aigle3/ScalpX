@@ -1503,3 +1503,43 @@ async def test_preset_ancien_reglages_absents_modifiables(svc):
     assert await _until(lambda: dash.store.presets["Martin"].get("sl_m30") == str(1 << 9))
     from core import presets as ps
     assert ps.slots_input(dash.store.presets["Martin"]) == "3,6,9,9:30,12,17,20"
+
+
+@pytest.mark.asyncio
+async def test_coupures_par_boutons_sur_un_compte(svc):
+    """⛔ Coupures (EA 7.0.0) : mêmes écrans que les créneaux, masques ct_m.. ; 13:45 et 21:00 par défaut."""
+    from bot import params_ui as pu
+    from core import params as cat
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    st = ctx_stack(svc)
+    a = seed(st, 91, "Demo-Server 1")
+    ea.start()
+    await asyncio.sleep(0.3)
+    cuts = {"sl_on": "✅", "sl_m00": "1184328", "sl_m15": "0", "sl_m30": "0", "sl_m45": "0",
+            "ct_on": "✅", "ct_m00": str(1 << 21), "ct_m15": "0", "ct_m30": "0", "ct_m45": str(1 << 13)}
+    try:
+        ea.accounts.setdefault(a.id, {})["params"] = {**DEFAULT_PARAMS_T, **cuts}
+        c = short(a.id)
+        await router.on_callback(f"p:{c}")
+        assert await _until(lambda: dash.params.cached(a.id).get("ct_m45") == str(1 << 13))
+        await router.on_callback(f"p:{c}:g{cat.SLOT_GROUP}")
+        kb = dash.render()[1]
+        assert ("⛔ Coupures · 13:45, 21:00", f"p:{c}:u") in [b for row in kb for b in row]
+        assert f"p:{c}:k{pu.find('ct_m00')}" not in [d for row in kb for _, d in row]
+        await router.on_callback(f"p:{c}:u")
+        text, kb = dash.render()
+        assert "Coupures de l'objectif" in text and "2 coupure(s)</b> : 13:45, 21:00" in text and "jusqu'à son TP" in text
+        assert f"p:{c}:ux825" in [d for row in kb for _, d in row]
+        await router.on_callback(f"p:{c}:ua")
+        await router.on_callback(f"p:{c}:uh17")
+        assert [d for row in dash.render()[1] for _, d in row if ":um17:" in d] == [f"p:{c}:um17:{m}" for m in (0, 15, 30, 45)]
+        await router.on_callback(f"p:{c}:um17:30")
+        assert await _until(lambda: ea.accounts[a.id]["params"]["ct_m30"] == str(1 << 17))
+        assert await _until(lambda: "✅ Coupure 17:30 ajoutée" in dash.render()[0])
+        await router.on_callback(f"p:{c}:ux825")
+        assert await _until(lambda: ea.accounts[a.id]["params"]["ct_m45"] == "0")
+        assert ea.accounts[a.id]["params"]["sl_m00"] == "1184328"                   # les créneaux ne sont pas touchés
+        await router.on_callback(f"p:{c}:um17:30")
+        assert "existe déjà" in dash.render()[0]
+    finally:
+        await ea.stop()

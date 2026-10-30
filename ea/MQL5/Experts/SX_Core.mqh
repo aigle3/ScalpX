@@ -3,7 +3,7 @@
 //| Noyau : variables globales, registre de paramètres (tous les     |
 //| réglages sont modifiables à chaud), persistance, presets.        |
 //+------------------------------------------------------------------+
-#define SX_VERSION   "6.6.0"
+#define SX_VERSION   "7.0.0"
 #define SX_PREFIX    "SX4_"
 #define SX_MAXQ      40
 
@@ -43,6 +43,7 @@ enum ENUM_PID
    P_N_NEWS, P_NEWS_MIN, P_NEWS_IMP, P_NEWS_BLOCK, P_NEWS_BEFORE, P_NEWS_AFTER, P_VAC_RISK,
    // [ARCHI] début : 6.6.0 filtres d'extension et de signal récent, fenêtre d'entrée après le créneau (en fin de liste : clés inchangées)
    P_F_EXT, P_EXTATR, P_F_FRESH, P_FRESHBARS, P_SL_ENTRY,
+   P_CT_ON, P_CT_M00, P_CT_M15, P_CT_M30, P_CT_M45,           // 7.0.0 : coupure de l'objectif (4 masques consécutifs, comme les créneaux)
    // [ARCHI] fin
    P_COUNT
 };
@@ -131,6 +132,8 @@ double   mk_extAtr   = 0;          // (prix - EMA lente) / ATR, signé
 int      mk_freshAge = -1;         // bougies depuis le croisement des EMA (-1 = plus ancien que la recherche)
 bool     f_extOK = true, f_freshOK = true;
 string   f_extWhy = "", f_freshWhy = "";
+bool     g_cutPending = false;      // 7.0.0 : coupure passée pendant une série : plus de nouvelle série, l'objectif est annulé à la fin de la série
+string   g_cutName = "";
 // [ARCHI] fin
 int      g_faState  = -1;          // dernier état global annoncé : 1 = tous OK, 0 = bloqué, -1 = inconnu
 ulong    g_faSince  = 0;
@@ -527,6 +530,18 @@ void InitParams()
        "Nombre maximum de bougies (timeframe du robot) depuis le croisement des EMA pour autoriser une nouvelle série.");
    Reg(P_SL_ENTRY, "sl_entry", "Fenêtre d'entrée après le créneau", G_GOAL, PT_INT, MathMax(0, MathMin(240, ObjectifAutoEntreeMin)), 0, 240, 5, " min",
        "Objectif lancé par un créneau : si aucune série n'a pu s'ouvrir dans ce délai, l'objectif est annulé (évite une entrée tardive à une heure non voulue). 0 = désactivé.");
+   int cutMk[4];
+   SlotsMasksFromText(ObjectifCoupureHeures, cutMk);
+   Reg(P_CT_ON, "ct_on", "Coupure de l'objectif", G_GOAL, PT_BOOL, ObjectifCoupureActive ? 1 : 0, 0, 1, 1, "",
+       "Aux heures de coupure : sans position, l'objectif en cours est annulé ; avec une série ouverte, plus aucune nouvelle série, la grille continue jusqu'à son TP, puis l'objectif est annulé. Le robot attend ensuite le prochain créneau.");
+   Reg(P_CT_M00, "ct_m00", "Coupures à l'heure pile (:00)", G_GOAL, PT_INT, cutMk[0], 0, 16777215, 1, "",
+       "Heures de coupure à :00 (un bit par heure, 0 à 23). Se règle avec l'écran Coupures du bot.");
+   Reg(P_CT_M15, "ct_m15", "Coupures à :15", G_GOAL, PT_INT, cutMk[1], 0, 16777215, 1, "",
+       "Heures de coupure à :15 (un bit par heure, 0 à 23). Se règle avec l'écran Coupures du bot.");
+   Reg(P_CT_M30, "ct_m30", "Coupures à :30", G_GOAL, PT_INT, cutMk[2], 0, 16777215, 1, "",
+       "Heures de coupure à :30 (un bit par heure, 0 à 23). Se règle avec l'écran Coupures du bot.");
+   Reg(P_CT_M45, "ct_m45", "Coupures à :45", G_GOAL, PT_INT, cutMk[3], 0, 16777215, 1, "",
+       "Heures de coupure à :45 (un bit par heure, 0 à 23). Se règle avec l'écran Coupures du bot.");
    // [ARCHI] fin
 }
 

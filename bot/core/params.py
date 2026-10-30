@@ -83,6 +83,11 @@ PARAMS = [
     ("sl_pct", "Objectif auto : gain", 7, "dbl", 0.1, 20.0, 0.1, " %", []),
     ("sl_win", "Fenêtre de lancement", 7, "int", 5.0, 15.0, 5.0, " min", []),
     ("sl_entry", "Fenêtre d'entrée après le créneau", 7, "int", 0.0, 240.0, 5.0, " min", []),   # EA 6.6.0 (0 = désactivé)
+    ("ct_on", "Coupure de l'objectif", 7, "bool", 0.0, 1.0, 1.0, "", []),                         # EA 7.0.0
+    ("ct_m00", "Coupures à l'heure pile (:00)", 7, "int", 0.0, 16777215.0, 1.0, "", []),
+    ("ct_m15", "Coupures à :15", 7, "int", 0.0, 16777215.0, 1.0, "", []),
+    ("ct_m30", "Coupures à :30", 7, "int", 0.0, 16777215.0, 1.0, "", []),
+    ("ct_m45", "Coupures à :45", 7, "int", 0.0, 16777215.0, 1.0, "", []),
     ("sl_m00", "Créneaux à l'heure pile (:00)", 7, "int", 0.0, 16777215.0, 1.0, "", []),
     ("sl_m15", "Créneaux à :15", 7, "int", 0.0, 16777215.0, 1.0, "", []),
     ("sl_m30", "Créneaux à :30", 7, "int", 0.0, 16777215.0, 1.0, "", []),
@@ -114,14 +119,16 @@ PARAMS = [
 # ---------------------------------------------------------------- créneaux d'objectif automatique
 # L'EA garde les créneaux dans 4 masques de 24 bits, un par minute (00, 15, 30, 45) : le bit h = un créneau à h:MM.
 SLOT_KEYS = ("sl_m00", "sl_m15", "sl_m30", "sl_m45")
+CUT_KEYS = ("ct_m00", "ct_m15", "ct_m30", "ct_m45")      # EA 7.0.0 : heures de coupure de l'objectif (même codage)
 SLOT_MINUTES = (0, 15, 30, 45)
-HIDDEN = frozenset(SLOT_KEYS)          # pas de bouton « nombre » : ils se règlent dans l'écran 🕐 Créneaux
+HIDDEN = frozenset(SLOT_KEYS + CUT_KEYS)  # pas de bouton « nombre » : ils se règlent dans les écrans 🕐 Créneaux / ⛔ Coupures
 SLOTS_PER_PAGE = 40                    # boutons ✖ par page (Telegram : 100 boutons au plus par message)
 SLOT_GROUP = 7                         # 🏆 Objectifs
 # Valeurs par défaut de l'EA (inputs) des réglages ajoutés en 6.2.0 : point de départ quand un preset plus ancien
 # ne les contient pas encore (rien n'est enregistré tant qu'on ne les modifie pas)
 DEFAULTS = {"sl_on": "1", "sl_pct": "1.0", "sl_win": "10", "sl_m00": "1184328", "sl_m15": "0", "sl_m30": "0", "sl_m45": "0",
-            "seuil_on": "1", "seuil_arret": "500", "seuil_reprise": "125"}
+            "seuil_on": "1", "seuil_arret": "500", "seuil_reprise": "125",
+            "ct_on": "1", "ct_m00": str(1 << 21), "ct_m15": "0", "ct_m30": "0", "ct_m45": str(1 << 13)}   # EA 7.0.0 : 13:45, 21:00
 
 
 def slots_of(masks: list[int]) -> list[int]:
@@ -150,12 +157,13 @@ def slots_text(masks: list[int]) -> str:
 
 def mask_text(key: str, raw: str) -> str:
     """Valeur d'un masque → texte lisible (« 03:00, 06:00 ») ; autre clé ou valeur illisible : inchangée."""
-    if key not in SLOT_KEYS:
+    keys = SLOT_KEYS if key in SLOT_KEYS else CUT_KEYS if key in CUT_KEYS else None
+    if keys is None:
         return raw
     try:
         m = int(float(raw))
     except (TypeError, ValueError):
         return raw
     masks = [0, 0, 0, 0]
-    masks[SLOT_KEYS.index(key)] = m
+    masks[keys.index(key)] = m
     return slots_text(masks)

@@ -281,6 +281,7 @@ bool EntryAllowed(string &why)
    // [ARCHI] début : 6.6.0
    if(PBool(P_F_EXT) && !f_extOK)     { why = f_extWhy; return false; }
    if(PBool(P_F_FRESH) && !f_freshOK) { why = f_freshWhy; return false; }
+   if(g_cutPending)                   { why = "Coupure " + g_cutName + " : plus de nouvelle série (la série en cours finit au TP)"; return false; }
    // [ARCHI] fin
    return true;
 }

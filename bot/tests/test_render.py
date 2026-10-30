@@ -173,4 +173,19 @@ def test_stats_creneau_objectif_annule_sans_entree():
            _ev("a", 2000, "OBJECTIF_ANNULE", "⌛ Créneau 4:00 : objectif annulé : aucune série ouverte en 30 min.")]
     s = slotstats.compute(evs)["4:00"]
     assert (s.launched, s.cancelled, s.open, s.done) == (1, 1, 0, 0)
-    assert "1 annulé(s) sans entrée" in render.slot_stats_text({"4:00": s}, 30, 1, "EUR")
+    assert "1 annulé(s) (sans entrée ou coupure)" in render.slot_stats_text({"4:00": s}, 30, 1, "EUR")
+
+
+def test_coupure_accueil_stats_et_preset():
+    from core import slotstats, presets as cps, params as cat
+    txt = block(view(1, positions=2, coupure_en_cours="13:45"), view(2))
+    assert "⛔ Coupure 13:45 : la série en cours finit au TP, puis l'objectif est annulé" in txt
+    evs = [_ev("a", 10, "OBJECTIF_AUTO", "🎯 Créneau 11:00 : objectif +0.50 % lancé."),
+           _ev("a", 9000, "OBJECTIF_COUPE", "⛔ Coupure 13:45 : objectif annulé (aucune série ouverte).")]
+    s = slotstats.compute(evs)["11:00"]
+    assert (s.cancelled, s.open) == (1, 0)
+    assert cps.slots_input(dict(cat.DEFAULTS), cat.CUT_KEYS) == "13:45,21"
+    data = b"\xff\xfe" + "A=1\r\nObjectifCoupureHeures=13:45,21\r\n".encode("utf-16-le")
+    out = cps.overlay_set(data, {"ct_on": "0", "ct_m00": str(1 << 20), "ct_m15": "0", "ct_m30": "0", "ct_m45": "0"})
+    t = out[2:].decode("utf-16-le")
+    assert "ObjectifCoupureHeures=20\r\n" in t and "ObjectifCoupureActive=false" in t

@@ -265,18 +265,21 @@ class Router:
             if sub == "r" or not ui.fresh(inst.id):
                 self.dash.flash("⏳ Lecture des paramètres…")
                 self._bg(self._prm_fetch(inst))
-        elif sub == "c" or (sub.startswith("cp") and sub[2:].isdigit()):   # 🕐 créneaux (cp<n> : page n)
-            self.dash.goto("prc", inst.id, int(sub[2:]) if sub.startswith("cp") else 0)
-            if not ui.fresh(inst.id):
-                self._bg(self._prm_fetch(inst))
-        elif sub == "ca":                                               # ➕ choix de l'heure
-            self.dash.goto("prh", inst.id)
-        elif sub.startswith("ch") and sub[2:].isdigit() and int(sub[2:]) < 24:
-            self.dash.goto("prq", inst.id, int(sub[2:]))
-        elif sub.startswith("cm") and sub[2:].isdigit() and len(p) > 3 and p[3].isdigit():
-            self._slot_change(inst, int(sub[2:]) * 60 + int(p[3]), add=True)
-        elif sub.startswith("cx") and sub[2:].isdigit():
-            self._slot_change(inst, int(sub[2:]), add=False)
+        elif sub[:1] in ("c", "u") and (len(sub) == 1 or sub[1] in "pahmx"):   # 🕐 créneaux (c…) / ⛔ coupures (u…, EA 7.0.0)
+            f, rest = sub[0], sub[1:]
+            scr = "prc" if f == "c" else "puc"
+            if rest == "" or (rest.startswith("p") and rest[1:].isdigit()):     # liste (p<n> : page n)
+                self.dash.goto(scr, inst.id, int(rest[1:]) if rest else 0)
+                if not ui.fresh(inst.id):
+                    self._bg(self._prm_fetch(inst))
+            elif rest == "a":                                           # ➕ choix de l'heure
+                self.dash.goto("prh" if f == "c" else "puh", inst.id)
+            elif rest.startswith("h") and rest[1:].isdigit() and int(rest[1:]) < 24:
+                self.dash.goto("prq" if f == "c" else "puq", inst.id, int(rest[1:]))
+            elif rest.startswith("m") and rest[1:].isdigit() and len(p) > 3 and p[3].isdigit():
+                self._slot_change(inst, int(rest[1:]) * 60 + int(p[3]), add=True, cut=f == "u")
+            elif rest.startswith("x") and rest[1:].isdigit():
+                self._slot_change(inst, int(rest[1:]), add=False, cut=f == "u")
         elif sub[0] == "g" and sub[1:].isdigit():
             self.dash.goto("prg", inst.id, int(sub[1:]))
         elif sub[0] == "k" and sub[1:].isdigit():
@@ -311,33 +314,36 @@ class Router:
         await self.dash.refresh(force=True)
         return ""
 
-    def _slot_change(self, inst, slot: int, add: bool) -> None:
-        """Ajoute ou retire un créneau : un seul masque (celui de ses minutes) est envoyé, sur le robot, tous les robots ou le preset."""
+    def _slot_change(self, inst, slot: int, add: bool, cut: bool = False) -> None:
+        """Ajoute ou retire un créneau (ou une heure de coupure si cut) : un seul masque (celui de ses minutes) est envoyé,
+        sur le robot, tous les robots ou le preset."""
         cat = pu.cat
-        masks = self.dash.params.masks(inst.id)
+        keys = cat.CUT_KEYS if cut else cat.SLOT_KEYS
+        noun = "L'heure de coupure" if cut else "Le créneau"
+        masks = self.dash.params.masks(inst.id, keys)
         h, m = divmod(slot, 60)
         if masks is None:
-            self.dash.flash("⚠️ Créneaux inconnus : touche 🔃 Relire.")
+            self.dash.flash("⚠️ Heures inconnues : touche 🔃 Relire.")
             return
         if not (0 <= h < 24 and m in cat.SLOT_MINUTES):
-            self.dash.flash("❌ Créneau invalide.")
+            self.dash.flash("❌ Heure invalide.")
             return
         slots = cat.slots_of(masks)
         t = cat.slot_text(slot)
-        self.dash.goto("prc", inst.id)
+        self.dash.goto("puc" if cut else "prc", inst.id)
         if add and slot in slots:
-            self.dash.flash(f"ℹ️ Le créneau {t} existe déjà.")
+            self.dash.flash(f"ℹ️ {noun} {t} existe déjà.")
             return
         if not add and slot not in slots:
-            self.dash.flash(f"ℹ️ Le créneau {t} n'existe plus.")
+            self.dash.flash(f"ℹ️ {noun} {t} n'existe plus.")
             return
         mi = cat.SLOT_MINUTES.index(m)
         new = masks[mi] | (1 << h) if add else masks[mi] & ~(1 << h)
         cached = self.dash.params.vals.get(inst.id)
         if cached:                                     # cache mis à jour tout de suite : deux touches rapides ne s'écrasent pas
-            cached[1][cat.SLOT_KEYS[mi]] = str(new)
-        self._bg(self._prm_apply(inst, pu.find(cat.SLOT_KEYS[mi]), str(new),
-                                 f"Créneau {t} {'ajouté' if add else 'retiré'}"))
+            cached[1][keys[mi]] = str(new)
+        what = f"Coupure {t} {'ajoutée' if add else 'retirée'}" if cut else f"Créneau {t} {'ajouté' if add else 'retiré'}"
+        self._bg(self._prm_apply(inst, pu.find(keys[mi]), str(new), what))
 
     async def _prm_fetch(self, inst) -> None:
         ok = await self.dash.params.fetch(inst)

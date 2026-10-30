@@ -177,17 +177,19 @@ SET_INPUTS = {
     "sl_on": "ObjectifAutoCreneaux", "sl_pct": "ObjectifAutoPct", "sl_win": "ObjectifAutoFenetreMin",
     "seuil_on": "ActiverSeuil500", "seuil_arret": "SeuilArret", "seuil_reprise": "SeuilReprise",
     "f_ext": "UseExtensionFilter", "extatr": "ExtensionMaxATR", "f_fresh": "UseFreshSignalFilter",
-    "freshbars": "FreshSignalMaxBars", "sl_entry": "ObjectifAutoEntreeMin",
+    "freshbars": "FreshSignalMaxBars", "sl_entry": "ObjectifAutoEntreeMin", "ct_on": "ObjectifCoupureActive",
 }
 SLOTS_INPUT = "ObjectifAutoHeures"     # les 4 masques de créneaux (sl_m00..sl_m45) → un seul input texte « 3,6,9:30 »
+CUTS_INPUT = "ObjectifCoupureHeures"   # EA 7.0.0 : les 4 masques de coupure (ct_m00..ct_m45) → « 13:45,21 »
 
 
-def slots_input(values: dict[str, str]) -> str | None:
-    """Masques du preset → valeur de ObjectifAutoHeures (« H » pour :00, « H:MM » sinon) ; None si le preset n'en a pas."""
-    if not any(k in values for k in cat.SLOT_KEYS):
+def slots_input(values: dict[str, str], keys: tuple = cat.SLOT_KEYS) -> str | None:
+    """Masques du preset → valeur de ObjectifAutoHeures (« H » pour :00, « H:MM » sinon) ; None si le preset n'en a pas.
+    keys = cat.CUT_KEYS : même chose pour ObjectifCoupureHeures."""
+    if not any(k in values for k in keys):
         return None
     masks = []
-    for k in cat.SLOT_KEYS:
+    for k in keys:
         try:
             masks.append(int(float(values.get(k, cat.DEFAULTS.get(k, "0")))))   # absent : défaut de l'EA (comme à l'écran)
         except ValueError:
@@ -197,7 +199,7 @@ def slots_input(values: dict[str, str]) -> str | None:
 
 def human(p: tuple, raw: str) -> str:
     """Valeur brute → texte pour un humain (les masques de créneaux deviennent des heures)."""
-    return cat.mask_text(p[0], raw) if p[0] in cat.SLOT_KEYS else display_of(p, raw)
+    return cat.mask_text(p[0], raw) if p[0] in cat.SLOT_KEYS + cat.CUT_KEYS else display_of(p, raw)
 
 
 def set_value(key: str, raw: str) -> str:
@@ -222,6 +224,9 @@ def overlay_set(data: bytes, values: dict[str, str]) -> bytes:
     hours = slots_input(values)
     if hours is not None:
         want[SLOTS_INPUT] = hours
+    cuts = slots_input(values, cat.CUT_KEYS)
+    if cuts is not None:
+        want[CUTS_INPUT] = cuts
     out, seen = [], set()
     for line in text.split("\r\n"):
         name = line.split("=", 1)[0].strip() if "=" in line and not line.lstrip().startswith(";") else ""

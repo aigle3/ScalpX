@@ -132,6 +132,9 @@ def trading_block(views: list[AccountView], now: float) -> list[str]:
         lines.append(f"📌 {npos} position(s)" + (f" sur {nacc} comptes" if nacc > 1 else "") + f" · flottant {money(flot, st.devise, True)}")
     else:
         lines.append("📌 Aucune position")
+    cut = next((s.coupure_en_cours for s in sts if s.coupure_en_cours), "")
+    if cut:                                                  # EA 7.0.0 : coupure passée pendant une série
+        lines.append(f"⛔ Coupure {esc(cut)} : la série en cours finit au TP, puis l'objectif est annulé")
     if not stopped:
         blocked = st.trading_autorise is False or (st.trading_autorise is None and bool(st.raison_blocage))
         if blocked:
@@ -284,7 +287,7 @@ def slot_stats_text(stats: dict, days: int, n_accounts: int, cur: str) -> str:
     if t.skipped:
         extra.append(f"{t.skipped} créneau(x) sauté(s)")
     if t.cancelled:
-        extra.append(f"{t.cancelled} annulé(s) sans entrée")
+        extra.append(f"{t.cancelled} annulé(s) (sans entrée ou coupure)")
     if t.session_stops:
         extra.append(f"{t.session_stops} limite(s) de perte de session")
     if extra:

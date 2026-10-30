@@ -429,6 +429,18 @@ int DrawPlanning(int x, int w, int y0)
       CvText(cx, y, many ? IntegerToString(g_slotsN) + " créneaux · les " + IntegerToString(maxChips) + " prochains · fenêtre " + IntegerToString(win) + " min"
                          : "Lun–ven · fenêtre " + IntegerToString(win) + " min · sauté si un objectif est en cours", PC_DIM, 8);
       y += 16;
+      // [ARCHI] début : 7.0.0
+      if(g_cutPending)
+      {
+         CvText(cx, y, "Coupure " + g_cutName + " : la série en cours finit au TP, puis l'objectif est annulé", PC_ORANGE, 8, 0, true);
+         y += 16;
+      }
+      else if(PBool(P_CT_ON) && CutsText() != "")
+      {
+         CvText(cx, y, "Coupure de l'objectif : " + CutsText(), PC_DIM, 8);
+         y += 16;
+      }
+      // [ARCHI] fin
    }
    return CardEnd(0, y0, y);
    // [ARCHI] fin

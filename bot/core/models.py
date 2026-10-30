@@ -69,6 +69,8 @@ class Statut(BaseModel):
     seuil_reprise: float = 125.0
     seuil500_actif: bool = True
     prochain_creneau: str = ""
+    coupures: str = ""                       # EA 7.0.0 : heures de coupure de l'objectif (« 13:45, 21:00 »), vide si désactivée
+    coupure_en_cours: str = ""               # EA 7.0.0 : coupure passée pendant une série (la série finit au TP)
     raison_blocage: str = ""
     # EA 5.5.0+ (None / vide avec un EA plus ancien)
     trading_autorise: bool | None = None

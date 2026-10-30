@@ -4,7 +4,8 @@ Un essai = un événement OBJECTIF_AUTO (« 🎯 Créneau 9:30 : objectif +1.00 
   - OBJECTIF_ATTEINT          → gagné (profit, durée, drawdown max lus dans le texte) ;
   - NOTIF « STOP LOSS D'URGENCE » → perdu (perte lue dans le texte) ;
   - arrêt à 500 (CLOTURE_500_OK / ARRET_500) → gagné (l'objectif est absorbé par la clôture à 500) ;
-  - OBJECTIF_ANNULE (EA 6.6.0 : aucune série ouverte dans la fenêtre d'entrée) → annulé (hors taux, compté à part) ;
+  - OBJECTIF_ANNULE (EA 6.6.0 : aucune série ouverte dans la fenêtre d'entrée) ou OBJECTIF_COUPE (EA 7.0.0 : heure de
+    coupure) → annulé (hors taux, compté à part) ;
   - nouvel OBJECTIF_AUTO sans fin connue, ou rien encore → interrompu / en cours (exclus des taux).
 « ⛔ LIMITE DE PERTE DE SESSION » pendant l'essai est compté à part (le robot se met en pause, l'objectif continue).
 Les heures sont celles du fuseau réglé dans l'EA (celles des créneaux).
@@ -119,7 +120,7 @@ def compute(events) -> dict[str, SlotStat]:
             continue
         elif typ == "OBJECTIF_ATTEINT":
             close(iid, True, ts, gain=_num(_PROFIT, text), dd=_num(_DD, text))
-        elif typ == "OBJECTIF_ANNULE":
+        elif typ in ("OBJECTIF_ANNULE", "OBJECTIF_COUPE"):        # EA 7.0.0 : coupure → compté avec les annulés
             r = running.pop(iid)
             s = get(r["slot"])
             s.open -= 1

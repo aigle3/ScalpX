@@ -535,6 +535,82 @@ void SlotEntryTick()
 }
 // [ARCHI] fin
 
+// [ARCHI] début : 7.0.0 coupure de l'objectif (heures = 4 masques ct_m00..ct_m45, tous les jours, fuseau de l'EA)
+#define CUT_WINDOW_MIN 15            // une coupure reste applicable 15 min (redémarrage du terminal juste après l'heure)
+long g_lastCutKey = 0;
+
+int OpenCut(const MqlDateTime &d)
+{
+   if(!PBool(P_CT_ON)) return -1;
+   int now = d.hour * 60 + d.min;
+   for(int mi = 0; mi < 4; mi++)
+   {
+      int mk = PInt(P_CT_M00 + mi);
+      for(int h = 0; h < 24; h++)
+         if((mk & (1 << h)) != 0 && now >= h * 60 + mi * 15 && now < h * 60 + mi * 15 + CUT_WINDOW_MIN) return h * 60 + mi * 15;
+   }
+   return -1;
+}
+
+string CutsText()
+{
+   string s = "";
+   for(int h = 0; h < 24; h++)
+      for(int mi = 0; mi < 4; mi++)
+         if((PInt(P_CT_M00 + mi) & (1 << h)) != 0) s += (s != "" ? ", " : "") + SlotText(h * 60 + mi * 15);
+   return s;
+}
+
+void CutPendingSet(bool on, string name = "")
+{
+   g_cutPending = on;
+   g_cutName = name;
+   if(on) GlobalVariableSet(GVN("cutpend"), 1); else GlobalVariableDel(GVN("cutpend"));
+}
+
+void CutCancelGoal(string name, string what)
+{
+   if(st_pendCount > 0) CancelPendingFast();
+   SlotEntrySet(0);
+   GoalCancel();
+   EvTyped("OBJECTIF_COUPE", 1, "⛔ Coupure " + name + " : " + what + ".\n🕐 Prochain créneau : " + NextSlotText(),
+           "{\"coupure\":\"" + name + "\"}");
+}
+
+void CutTick()
+{
+   //--- série en cours au moment de la coupure : l'objectif est annulé dès qu'elle est fermée (TP)
+   if(g_cutPending)
+   {
+      if(!g_goalActive) CutPendingSet(false);                   // objectif atteint (ou arrêté) entre-temps : plus rien à faire
+      else if(st_posCount == 0)
+      {
+         string nm = g_cutName;
+         CutPendingSet(false);
+         CutCancelGoal(nm, "série fermée, objectif annulé ; le robot attend le prochain créneau");
+      }
+   }
+   MqlDateTime d;
+   TimeToStruct(LocalNow(), d);
+   int cut = OpenCut(d);
+   if(cut < 0) return;
+   long key = SlotKey(d, cut);
+   if(key == g_lastCutKey) return;
+   g_lastCutKey = key;                                           // une coupure n'agit qu'une fois
+   GlobalVariableSet(GVN("cutkey"), (double)key);
+   if(!g_goalActive || g_phase500) return;
+   string name = SlotText(cut);
+   if(st_posCount == 0)
+      CutCancelGoal(name, "objectif annulé (aucune série ouverte)");
+   else if(!g_cutPending)
+   {
+      CutPendingSet(true, name);
+      EvTyped("COUPURE", 1, "⛔ Coupure " + name + " : plus de nouvelle série. La série en cours (" + IntegerToString(st_posCount) +
+              " position(s)) continue jusqu'à son TP, puis l'objectif sera annulé.", "{\"coupure\":\"" + name + "\"}");
+   }
+}
+// [ARCHI] fin
+
 void SlotTick()
 {
    if(!PBool(P_SL_ON) || g_slotsN == 0) return;
@@ -815,6 +891,8 @@ void StatutWrite()
    j += ",\"seuil_reprise\":" + NumS(PDbl(P_SEUIL_REPRISE));
    j += ",\"seuil500_actif\":" + BoolS(PBool(P_SEUIL_ON));
    j += ",\"prochain_creneau\":\"" + (ns > 0 ? TimeToString(ns, TIME_DATE | TIME_MINUTES) : "") + "\"";
+   j += ",\"coupures\":\"" + (PBool(P_CT_ON) ? CutsText() : "") + "\"";                      // [ARCHI] 7.0.0
+   j += ",\"coupure_en_cours\":\"" + (g_cutPending ? g_cutName : "") + "\"";
    j += ",\"raison_blocage\":\"" + JsonEsc(g_blockReason) + "\"";
    j += ",\"trading_autorise\":" + BoolS(g_blockReason == "");
    j += ",\"pause_jusqua\":\"" + (g_pauseUntil > 0 ? TimeToString(g_pauseUntil, TIME_DATE | TIME_MINUTES) : "") + "\"";
@@ -1190,6 +1268,9 @@ void ArchiInit()
    }
    SlotsParse();
    g_slotGoalAt = GlobalVariableCheck(GVN("slentry")) ? (datetime)GlobalVariableGet(GVN("slentry")) : 0;   // [ARCHI] 6.6.0
+   g_lastCutKey = GlobalVariableCheck(GVN("cutkey")) ? (long)GlobalVariableGet(GVN("cutkey")) : 0;          // [ARCHI] 7.0.0
+   g_cutPending = GlobalVariableCheck(GVN("cutpend")) && g_goalActive;
+   if(!g_cutPending) GlobalVariableDel(GVN("cutpend"));
    g_lastSlotKey = GlobalVariableCheck(GVN("slotkey")) ? (long)GlobalVariableGet(GVN("slotkey")) : 0;
    if(g_lastSlotKey > 0 && g_lastSlotKey < 10000000000)   // clé d'avant 6.2.0 (AAAAMMJJHH) → AAAAMMJJHHMM : créneau déjà consommé gardé
    {
@@ -1240,6 +1321,7 @@ void ArchiTimer()
       CloseRetryTick();                  // fermeture voulue restée bloquée (marché fermé / trading désactivé) : nouvel essai
       SlotTick();
       SlotEntryTick();                   // [ARCHI] 6.6.0 : fenêtre d'entrée après le créneau
+      CutTick();                         // [ARCHI] 7.0.0 : coupure de l'objectif
       //--- cohérence avec le panneau / l'ancien code : arrêt manuel <-> PAUSE
       if(g_state == ST_ACTIF && g_stoppedManually) SetState(ST_PAUSE, true, "Arrêt manuel détecté");
       else if(g_state == ST_PAUSE && !g_stoppedManually && g_enabled) SetState(ST_ACTIF, true, "Reprise manuelle détectée");
