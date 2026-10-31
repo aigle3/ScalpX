@@ -127,7 +127,6 @@ def system_kb(pending: bool, previous: str = "") -> Keyboard:
         [("📜 Journaux", "d:logs"), ("🪟 Réduire les terminaux", "d:win")],
         [("🏓 Ping", "d:png"), ("🧾 Journal des actions", "d:jra")],
         [("🔄 Redémarrer le bot", "d:rst"), ("🔃", "d:sys")],
-        [("🧩 Installer TrendPullback", "mig:start"), ("🔎 Vérifier TrendPullback", "mig:chk")],   # [MIGRATION TrendPullback] temporaire
         [("⬅ Accueil", "d:home")],
     ]
 

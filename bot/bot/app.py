@@ -38,8 +38,7 @@ MENU_BUTTON = "📊 Tableau de bord"
 
 # --------------------------------------------------------------------------- Sender Telegram
 # Préfixes des boutons traités par le routeur (Router.on_callback) : tout nouveau préfixe DOIT être ajouté ici.
-CB_HEADS = ("d", "a", "c", "ok", "no", "dep", "x", "p", "upd", "e", "g", "z", "s",
-            "mig")                                  # mig : [MIGRATION TrendPullback] temporaire
+CB_HEADS = ("d", "a", "c", "ok", "no", "dep", "x", "p", "upd", "e", "g", "z", "s")
 CB_PATTERN = r"^(" + "|".join(CB_HEADS) + r")(:|$)"
 
 
