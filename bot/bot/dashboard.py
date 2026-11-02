@@ -184,6 +184,8 @@ class Dashboard:
             return self._render_labo_list()
         if kind == "labe" and self.lab_edit:
             return self._render_labo_edit()
+        if kind == "labk":
+            return self._render_labo_pack()
         if kind == "wdr":
             return self._render_withdrawals(now)
         if kind == "gterm":
@@ -394,24 +396,51 @@ class Dashboard:
                  "<i>Un scénario créé ou modifié repart d'un compte virtuel neuf (solde réel du moment).</i>", ""]
         kb: Keyboard = []
         for c in cfg.customs:
-            lines.append(f"• <b>{c.key}</b> : {render.esc(labo.auto_name(c.toks))}")
-            kb.append([("✏️ " + _cut(labo.auto_name(c.toks), 30), f"d:labe:{c.key}"), ("🗑", f"d:labd:{c.key}")])
+            detail = labo.auto_name(c.toks, c.opts)
+            lines.append(f"• <b>{render.esc(c.name)}</b>" + (f" : {render.esc(detail)}" if detail != c.name else ""))
+            kb.append([("✏️ " + _cut(c.name, 30), f"d:labe:{c.key}"), ("🗑", f"d:labd:{c.key}")])
         if not cfg.customs:
             lines.append("<i>Aucun scénario perso.</i>")
+        lines.append(f"\n<i>{len(cfg.customs)}/{labo.MAX_CUSTOM} scénarios perso.</i>")
+        row = [("⭐ Scénarios conseillés", "d:labk")]
         if len(cfg.customs) < labo.MAX_CUSTOM:
-            kb.append([("➕ Nouveau scénario", "d:labn")])
+            row.append(("➕ Nouveau", "d:labn"))
+        kb.append(row)
         kb.append([("⬅ Labo", "d:lab"), ("🏠 Accueil", "d:home")])
+        return self._with_flash("\n".join(lines)), kb
+
+    def _render_labo_pack(self) -> tuple[str, Keyboard]:
+        from core import labo
+        cfg = labo.load_config(self.ctx.cfg.paths.common())
+        names = {c.name for c in cfg.customs}
+        lines = ["⭐ <b>Scénarios conseillés</b>",
+                 "Mes meilleures hypothèses après le 02/11 (achat au sommet d'un rebond, grille trop serrée). "
+                 "Ce ne sont pas des certitudes : le labo et le backtest diront lesquels gagnent vraiment.", ""]
+        kb: Keyboard = []
+        for i, (name, toks, opts, why) in enumerate(labo.PACK):
+            have = name in names
+            lines.append(f"{'✅' if have else '▫️'} <b>{render.esc(name)}</b> : {render.esc(why)}")
+            if not have:
+                kb.append([(f"➕ {name}", f"d:labk:{i}")])
+        free = labo.MAX_CUSTOM - len(cfg.customs)
+        lines.append(f"\n<i>Places libres : {free}/{labo.MAX_CUSTOM}. Un scénario ajouté démarre d'un compte virtuel neuf ; "
+                     "pour juger tout de suite, lance un backtest (il joue aussi ces scénarios).</i>")
+        if any(n not in names for n, *_ in labo.PACK):
+            kb.append([("➕ Tout ajouter (remplace mes scénarios perso)", "d:labk:all")])
+        kb.append([("⬅ Scénarios", "d:labs"), ("🧪 Backtest", "d:bt")])
         return self._with_flash("\n".join(lines)), kb
 
     def _render_labo_edit(self) -> tuple[str, Keyboard]:
         from core import labo
-        key, toks = self.lab_edit
-        text = (f"🧬 <b>Scénario {key}</b>\n{render.esc(labo.auto_name(toks))}\n\n"
+        key, toks, opts = self.lab_edit
+        text = (f"🧬 <b>Scénario {key}</b>\n{render.esc(labo.auto_name(toks, opts))}\n\n"
                 "Touche un filtre pour changer son réglage dans ce scénario :\n"
                 "comme le compte → désactivé → activé → assoupli 10 / 20 / 30 / 50 % → durci 10 / 20 / 30 %\n"
                 "<i>Assoupli = plage ATR / volume plus large, corps de bougie plus petit, fenêtre de news plus courte, "
                 "spread / extension / ancienneté du signal plus grands. Durci = l'inverse.</i>")
         kb: Keyboard = [[(f"{labo.LABELS[i]} : {labo.tok_text(t)}", f"d:labt:{i}")] for i, t in enumerate(toks)]
+        for k in ("g", "n", "x"):
+            kb.append([("⚙️ " + labo.opt_text(k, opts.get(k, "")), f"d:labo:{k}")])
         kb.append([("💾 Enregistrer", "d:labv"), ("✖ Annuler", "d:labs")])
         return self._with_flash(text), kb
 

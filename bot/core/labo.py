@@ -23,7 +23,7 @@ LABELS = ["Volatilité (ATR)", "Prix / EMA", "Volume", "EMA TF inférieur", "EMA
 TUNABLE = {0, 2, 5, 7, 8, 9, 10}                  # filtres à seuils (assouplir / durcir)
 CYCLE_TUNE = ["=", "off", "on", "+10", "+20", "+30", "+50", "-10", "-20", "-30"]
 CYCLE_PLAIN = ["=", "off", "on"]
-MAX_CUSTOM = 6
+MAX_CUSTOM = 7                                    # + 13 scénarios automatiques = 20 (maximum de l'EA)
 LOSS_RES = ("sl", "liquide")
 WIN_RES = ("atteint", "500")
 MIN_GOALS = 5                                     # en dessous : pas de verdict
@@ -50,10 +50,77 @@ def next_tok(i: int, tok: str) -> str:
     return cyc[(cyc.index(tok) + 1) % len(cyc)] if tok in cyc else cyc[0]
 
 
-def auto_name(toks: list[str]) -> str:
+# ---- options d'un scénario (EA 7.3.0) : écart de grille, respirations du signal récent, timeframe de l'extension
+OPT_CYCLES = {"g": ["1", "1.3", "1.6", "2"], "n": ["-1", "0", "2", "3", "5"], "x": ["0", "1", "2", "3"]}
+EXT_TF = {"1": "TF du robot", "2": "M15", "3": "H1"}
+
+
+def opt_text(k: str, v: str) -> str:
+    if k == "g":
+        return "écart de grille comme le compte" if v in ("", "1") else f"écart de grille × {v}"
+    if k == "n":
+        if v in ("", "-1"):
+            return "signal récent : recroisements comme le compte"
+        return "signal récent : tout recroisement compte" if v == "0" else f"signal récent : respirations ≤ {v} bougies ignorées"
+    if k == "x":
+        return "extension comme le compte" if v in ("", "0") else f"extension mesurée en {EXT_TF.get(v, v)}"
+    return f"{k}={v}"
+
+
+def opt_default(k: str, v: str) -> bool:
+    return v in ("", "1") if k == "g" else (v in ("", "-1") if k == "n" else v in ("", "0"))
+
+
+def parse_opts(text: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for part in (text or "").split(";"):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            if k.strip() in OPT_CYCLES:
+                out[k.strip()] = v.strip()
+    return out
+
+
+def opts_str(opts: dict[str, str]) -> str:
+    return ";".join(f"{k}={v}" for k, v in opts.items() if k in OPT_CYCLES and not opt_default(k, v))
+
+
+def next_opt(k: str, v: str) -> str:
+    cyc = OPT_CYCLES[k]
+    return cyc[(cyc.index(v) + 1) % len(cyc)] if v in cyc else cyc[1]
+
+
+def auto_name(toks: list[str], opts: dict[str, str] | None = None) -> str:
     parts = [f"{LABELS[i]} {tok_text(t)}" for i, t in enumerate(toks) if t not in ("", "=")]
+    parts += [opt_text(k, v) for k, v in (opts or {}).items() if k in OPT_CYCLES and not opt_default(k, v)]
     name = ", ".join(parts) if parts else "Identique au compte"
     return name if len(name) <= 70 else name[:69] + "…"
+
+
+def _toks(**kw: str) -> list[str]:
+    t = ["="] * len(CODES)
+    for code, v in kw.items():
+        t[CODES.index(code)] = v
+    return t
+
+
+# ---- ⭐ scénarios conseillés (à vérifier au labo et au backtest : ce sont des hypothèses, pas des certitudes)
+PACK: list[tuple[str, list[str], dict[str, str], str]] = [
+    ("🧱 Grille large", _toks(), {"g": "1.6"},
+     "Écart de grille × 1,6 : un repli de 20-25 $ remplit 4-5 positions au lieu de 10 (moins de drawdown, TP plus loin)."),
+    ("🌬 Signal récent sans respirations", _toks(fresh="on"), {"n": "3"},
+     "Signal récent actif, un recroisement de 3 bougies ou moins ne remet pas le compteur à zéro (pas d'entrée tardive au sommet)."),
+    ("📏 Extension H1", _toks(ext="+25"), {"x": "3"},
+     "Pas d'achat (ou de vente) quand le prix est déjà à plus de 2,5 ATR H1 de l'EMA lente H1 : mouvement épuisé."),
+    ("🛡 Prudent", _toks(ext="+25", fresh="on"), {"g": "1.6", "n": "3", "x": "3"},
+     "Grille large + extension H1 + signal récent sans respirations : moins d'entrées, surtout moins de grilles profondes."),
+    ("⚖️ Équilibré", _toks(ext="+50", fresh="off"), {"g": "1.3", "x": "3"},
+     "Grille × 1,3, extension H1 tolérante (3 ATR), sans signal récent : garde les entrées tôt dans le mouvement."),
+    ("🚀 Plus d'entrées, grille large", _toks(vol="off", can="off"), {"g": "1.6"},
+     "Volume et bougie M15 désactivés (plus d'objectifs tentés), compensé par une grille plus large."),
+    ("🧱🧱 Grille très large", _toks(), {"g": "2"},
+     "Écart de grille × 2 : le plus résistant aux gros replis, mais séries plus longues."),
+]
 
 
 @dataclass
@@ -61,10 +128,12 @@ class Custom:
     key: str
     name: str
     toks: list[str]
+    opts: dict = field(default_factory=dict)
 
     def line(self) -> str:
         name = self.name.replace("|", "/").replace("\n", " ")
-        return f"{self.key}|{name}|{','.join(self.toks)}"
+        o = opts_str(self.opts)
+        return f"{self.key}|{name}|{','.join(self.toks)}" + (f"|{o}" if o else "")
 
 
 @dataclass
@@ -102,7 +171,7 @@ def load_config(common: Path) -> LabConfig:
             if len(p) >= 3 and p[0].startswith("p"):
                 toks = [t.strip() or "=" for t in p[2].split(",")]
                 toks = (toks + ["="] * len(CODES))[:len(CODES)]
-                cfg.customs.append(Custom(p[0], p[1], toks))
+                cfg.customs.append(Custom(p[0], p[1], toks, parse_opts(p[3]) if len(p) > 3 else {}))
     return cfg
 
 

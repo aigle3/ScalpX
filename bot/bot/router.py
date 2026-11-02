@@ -498,28 +498,53 @@ class Router:
                 self.dash.flash(f"Maximum {labo.MAX_CUSTOM} scénarios perso.")
                 self.dash.goto("labs")
             else:
-                self.dash.lab_edit = [cfg.next_key(), ["="] * len(labo.CODES)]
+                self.dash.lab_edit = [cfg.next_key(), ["="] * len(labo.CODES), {}]
                 self.dash.goto("labe")
         elif sub == "labe":
             c = next((c for c in labo.load_config(common).customs if c.key == arg), None)
             if c is None:
                 self.dash.goto("labs")
             else:
-                self.dash.lab_edit = [c.key, list(c.toks)]
+                self.dash.lab_edit = [c.key, list(c.toks), dict(c.opts)]
                 self.dash.goto("labe")
         elif sub == "labt" and self.dash.lab_edit and arg.isdigit() and int(arg) < len(labo.CODES):
             i = int(arg)
             self.dash.lab_edit[1][i] = labo.next_tok(i, self.dash.lab_edit[1][i])
+        elif sub == "labo" and self.dash.lab_edit and arg in labo.OPT_CYCLES:
+            opts = self.dash.lab_edit[2]
+            opts[arg] = labo.next_opt(arg, opts.get(arg, ""))
+        elif sub == "labk":                                 # ⭐ scénarios conseillés
+            if arg == "all" or arg.isdigit():
+                cfg = labo.load_config(common)
+                picks = labo.PACK if arg == "all" else [labo.PACK[int(arg)]] if int(arg) < len(labo.PACK) else []
+                if arg == "all":
+                    cfg.customs = []
+                names = {c.name for c in cfg.customs}
+                added = []
+                for name, toks, opts, _ in picks:
+                    if name in names or len(cfg.customs) >= labo.MAX_CUSTOM:
+                        continue
+                    cfg.customs.append(labo.Custom(cfg.next_key(), name, list(toks), dict(opts)))
+                    added.append(name)
+                if added:
+                    labo.save_config(common, cfg)
+                    self.ctx.db.add_action("", "Labo : scénarios conseillés ajoutés (" + ", ".join(added) + ")", True)
+                    self.dash.flash(f"⭐ {len(added)} scénario(s) ajouté(s) : les EA les jouent sous 10 s.")
+                else:
+                    self.dash.flash(f"Aucune place libre ({labo.MAX_CUSTOM} scénarios perso au maximum) : supprimes-en un d'abord.")
+            self.dash.goto("labk")
         elif sub == "labv" and self.dash.lab_edit:
-            key, toks = self.dash.lab_edit
-            if all(t == "=" for t in toks):
+            key, toks, opts = self.dash.lab_edit
+            if all(t == "=" for t in toks) and not labo.opts_str(opts):
                 self.dash.flash("Ce scénario est identique aux réglages actuels : change au moins un filtre.")
                 return None
             cfg = labo.load_config(common)
-            cfg.customs = [c for c in cfg.customs if c.key != key] + [labo.Custom(key, labo.auto_name(toks), list(toks))]
+            old = next((c for c in cfg.customs if c.key == key), None)
+            name = old.name if old is not None and old.toks == list(toks) and old.opts == opts else labo.auto_name(toks, opts)
+            cfg.customs = [c for c in cfg.customs if c.key != key] + [labo.Custom(key, name, list(toks), dict(opts))]
             cfg.customs.sort(key=lambda c: int(c.key[1:]) if c.key[1:].isdigit() else 99)
             labo.save_config(common, cfg)
-            self.ctx.db.add_action("", f"Labo : scénario {key} enregistré ({labo.auto_name(toks)})", True)
+            self.ctx.db.add_action("", f"Labo : scénario {key} enregistré ({name})", True)
             self.dash.lab_edit = None
             self.dash.flash("💾 Scénario enregistré : les EA le prennent en compte sous 10 s.")
             self.dash.goto("labs")
