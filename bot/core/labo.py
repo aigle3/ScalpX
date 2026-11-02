@@ -309,11 +309,18 @@ def verdict(s: ScenStat, ref: ScenStat | None) -> Verdict:
     if min(s.launched, ref.launched) < MIN_GOALS:
         return Verdict("⏳", "pas assez de données")
     more_losses = s.lost > ref.lost
-    much_deeper = s.dd_max > ref.dd_max + 10
-    better = s.won >= ref.won and s.net > ref.net and not more_losses and not much_deeper
-    worse = more_losses or (s.net < ref.net and s.won <= ref.won)
+    gain, dgoals, ddd = s.net - ref.net, s.won - ref.won, s.dd_max - ref.dd_max
+    sig_net = max(2.0, 0.05 * abs(ref.net))                 # écart significatif : 5 % du gain (2 au moins)…
+    sig_goals = max(3, round(0.03 * ref.launched))          # … ou 3 % des objectifs (3 au moins)
+    much_deeper = ddd > 10
+    better = gain > 0 and (gain >= sig_net or dgoals >= sig_goals) and not more_losses and not much_deeper
+    worse = more_losses or gain <= -sig_net or dgoals <= -sig_goals
     every = s.key == "aucun"
     removes = every or (s.key.startswith("t") and (s.name.startswith("Sans ") or "off" in _diff_toks(s.spec, ref.spec)))
+    if not more_losses and gain > 0 and much_deeper and (gain >= sig_net or dgoals >= sig_goals):
+        return Verdict("⚖️", f"plus de gain mais drawdown + {ddd:.0f} pts : plus risqué")
+    if not more_losses and not worse and ddd <= -10:
+        return Verdict("🟢", f"moins risqué : drawdown {ddd:.0f} pts, gain équivalent")
     if better:
         if removes:
             return Verdict("🟢", "les filtres sont trop restrictifs" if every else "filtre trop restrictif : à assouplir ou désactiver")
@@ -324,7 +331,7 @@ def verdict(s: ScenStat, ref: ScenStat | None) -> Verdict:
                 return Verdict("🛡️", "les filtres évitent des pertes" if every else "filtre utile : il évite des pertes")
             return Verdict("🛡️", "plus risqué : les réglages actuels évitent des pertes")
         return Verdict("🔴", "moins bon")
-    return Verdict("⚪", "équivalent")
+    return Verdict("⚪", "équivalent : différence trop faible pour conclure")
 
 
 def _diff_toks(a: str, b: str) -> list[str]:

@@ -222,7 +222,7 @@ class BacktestManager:
                     run.sim_started = time.time()
                     run.note("⚙️ Test en cours (l'EA tourne dans le testeur)")
                 run.progress = p
-            elif line and line != run.last_line:
+            elif line and line != run.last_line and run.progress is None:   # avant le début du test seulement
                 run.stage = "📥 MT5 : connexion / historique"
             run.last_line = line
             low = line.lower()
