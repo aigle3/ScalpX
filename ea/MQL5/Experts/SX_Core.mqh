@@ -3,9 +3,52 @@
 //| Noyau : variables globales, registre de paramètres (tous les     |
 //| réglages sont modifiables à chaud), persistance, presets.        |
 //+------------------------------------------------------------------+
-#define SX_VERSION   "7.1.0"
+#define SX_VERSION   "7.2.0"
 #define SX_PREFIX    "SX4_"
 #define SX_MAXQ      40
+
+// [ARCHI] début : 7.2.0 backtest piloté par le bot. Dans le testeur, l'horloge du robot devient le temps SIMULÉ
+// (sinon les délais en millisecondes et l'antirebond des filtres suivraient le temps réel, des milliers de fois plus lent).
+// Hors backtest (g_bt = false), SxTicks() et SxGmt() renvoient exactement GetTickCount64() et TimeGMT().
+bool     g_bt        = false;        // backtest lancé par le bot (testeur + BacktestId)
+int      g_btWinter  = 7200;         // décalage du serveur en hiver (s) ; +1 h pendant l'heure d'été américaine si g_btUsDst
+bool     g_btUsDst   = true;
+ulong    g_btMs      = 0;
+ulong    g_btRealAt  = 0;
+long     g_btSimLast = 0;
+ulong    SxRealMs()  { return GetTickCount64(); }
+datetime SxRealGmt() { return TimeGMT(); }
+bool     TzUsDst(datetime utc);
+#define GetTickCount64 SxTicks
+#define TimeGMT SxGmt
+
+ulong SxTicks()
+{
+   if(!g_bt) return SxRealMs();
+   long sim = (long)TimeCurrent() * 1000;
+   MqlTick t;
+   if(SymbolInfoTick(_Symbol, t) && t.time_msc > 0) sim = (long)t.time_msc;
+   ulong real = SxRealMs();
+   if(sim != g_btSimLast) { g_btSimLast = sim; g_btRealAt = real; }
+   ulong v = (ulong)sim + (real - g_btRealAt);         // les attentes actives (Sleep) avancent avec le temps réel
+   if(v < g_btMs) v = g_btMs;                          // toujours croissant
+   g_btMs = v;
+   return v;
+}
+
+int BtSrvOffset(datetime srv)
+{
+   datetime utc = (datetime)((long)srv - g_btWinter);
+   return g_btWinter + ((g_btUsDst && TzUsDst(utc)) ? 3600 : 0);
+}
+
+datetime SxGmt()
+{
+   if(!g_bt) return SxRealGmt();
+   datetime srv = TimeCurrent();
+   return (datetime)((long)srv - BtSrvOffset(srv));
+}
+// [ARCHI] fin
 
 //--- Types / groupes / identifiants de paramètres
 enum ENUM_PTYPE  { PT_BOOL = 0, PT_INT = 1, PT_DBL = 2, PT_ENUM = 3 };

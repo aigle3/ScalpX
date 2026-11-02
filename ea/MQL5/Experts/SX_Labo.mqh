@@ -128,7 +128,7 @@ void LbAvg(double &avg, int &n, double v)
 // Appelé pour chaque requête acceptée (OnTradeTransaction, TRADE_TRANSACTION_REQUEST)
 void LaboOnRequest(const MqlTradeRequest &rq, const MqlTradeResult &rs)
 {
-   if(!g_lbOn) return;
+   if(!g_lbOn || g_bt) return;                      // backtest : valeurs mesurées en réel, passées par le bot
    if(rq.action != TRADE_ACTION_DEAL || rq.symbol != _Symbol || rq.magic != MagicNumber) return;
    if(rq.price <= 0 || rs.price <= 0) return;
    double adv = (rq.type == ORDER_TYPE_BUY) ? (rs.price - rq.price) / _Point : (rq.price - rs.price) / _Point;
@@ -143,7 +143,7 @@ void LaboOnRequest(const MqlTradeRequest &rq, const MqlTradeResult &rs)
 // Appelé pour chaque deal ajouté (OnTradeTransaction, TRADE_TRANSACTION_DEAL_ADD)
 void LaboOnDeal(ulong deal)
 {
-   if(!g_lbOn || !HistoryDealSelect(deal)) return;
+   if(!g_lbOn || g_bt || !HistoryDealSelect(deal)) return;
    if(HistoryDealGetString(deal, DEAL_SYMBOL) != _Symbol) return;
    if(HistoryDealGetInteger(deal, DEAL_MAGIC) != MagicNumber) return;
    long t = HistoryDealGetInteger(deal, DEAL_TYPE);
@@ -948,13 +948,19 @@ void LbUpdateK()
 
 void LaboInit()
 {
-   g_lbOn = g_archiOn;
+   g_lbOn = g_archiOn || g_bt;                     // 7.2.0 : aussi dans le backtest du bot (mêmes scénarios, sur l'historique)
    if(!g_lbOn) return;
    for(int h = 0; h < 25; h++) { g_lbSlip[h] = 0; g_lbSlipN[h] = 0; }
    LrReset();
    g_lbN = 0;
-   LaboLoadState();
+   if(!g_bt) LaboLoadState();
    LaboLoadScenarios();
+   if(g_bt)
+   {
+      g_lbWanted = true;                             // le backtest joue toujours les scénarios
+      g_lbComm = MathMax(0.0, BtCommissionLot); g_lbCommN = 1;
+      g_lbSlip[24] = BtSlippagePts; g_lbSlipN[24] = 1;
+   }
    g_lbFileMod = FileGetInteger(LB_SCEN_FILE, FILE_MODIFY_DATE, true);
    LbUpdateK();
    Log("Labo des filtres : " + IntegerToString(g_lbN) + " scénarios virtuels" + (g_lbWanted ? "" : " (en pause)"));
@@ -962,7 +968,9 @@ void LaboInit()
 
 void LaboDeinit()
 {
-   if(g_lbOn) LaboSave();
+   if(!g_lbOn) return;
+   if(g_bt) LbEtat();                                // backtest : état final des comptes virtuels
+   else LaboSave();
 }
 
 // État des comptes virtuels pour le bot (toutes les 30 min)
@@ -989,7 +997,7 @@ void LaboTimer1Hz()
    if(!g_lbOn) return;
    static ulong lastFile = 0, lastSave = 0, lastEtat = 0;
    ulong now = GetTickCount64();
-   if(now - lastFile >= 10000)
+   if(!g_bt && now - lastFile >= 10000)
    {
       lastFile = now;
       long md = FileGetInteger(LB_SCEN_FILE, FILE_MODIFY_DATE, true);
@@ -1032,6 +1040,7 @@ void LaboTimer1Hz()
          }
       }
    }
+   if(g_bt) return;                                  // backtest : ni sauvegarde ni état périodique
    if(now - lastSave >= 60000 || (g_lbDirty && now - lastSave >= 5000)) { lastSave = now; LaboSave(); }
    if(lastEtat == 0 || now - lastEtat >= 1800000) { lastEtat = now; LbEtat(); }
 }

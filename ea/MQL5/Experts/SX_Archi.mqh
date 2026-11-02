@@ -343,9 +343,12 @@ void EvPush(const string line)
 }
 
 // Événement typé. prio : 0 info, 1 important, 2 critique. dataJson : objet JSON facultatif.
+void BtCount(const string type, const string text);   // [ARCHI] 7.2.0 (SX_Backtest.mqh)
+
 void EvTyped(const string type, int prio, const string text, const string dataJson = "")
 {
-   if(!g_archiOn) return;
+   if(!g_archiOn && !g_bt) return;
+   if(g_bt) BtCount(type, text);                     // 7.2.0 : compteurs de la progression du backtest
    g_evSeq++;
    string l = "{\"seq\":" + IntegerToString((int)g_evSeq) +
               ",\"ts\":" + IntegerToString((long)TimeGMT()) +
@@ -414,7 +417,7 @@ void SetState(int ns, bool emit = true, const string why = "")
 //+------------------------------------------------------------------+
 bool PeutTrader()
 {
-   if(!g_archiOn) return true;                       // Strategy Tester : jamais de blocage
+   if(!g_archiOn && !g_bt) return true;              // Strategy Tester : jamais de blocage (sauf backtest du bot : comme en réel)
    if(g_maint) return false;
    if(g_state != ST_ACTIF) return false;
    if(!PBool(P_SEUIL_ON)) return true;
@@ -771,7 +774,7 @@ void Close500Sequence()
 // Appelé à chaque tick, juste après GoalTick() (même endroit et même fréquence que le 1 %)
 void Seuil500Tick()
 {
-   if(!g_archiOn || !PBool(P_SEUIL_ON)) return;
+   if((!g_archiOn && !g_bt) || !PBool(P_SEUIL_ON)) return;   // 7.2.0 : actif aussi dans le backtest du bot
    if(g_closing) return;
    double bal = AccountInfoDouble(ACCOUNT_BALANCE);
 
@@ -916,6 +919,7 @@ void StatutWrite()
    j += ",\"news_raison\":\"" + JsonEsc(g_newsWhy) + "\"";
    j += ",\"news\":" + NewsJson(3);
    j += ",\"magic\":" + IntegerToString((long)MagicNumber);
+   j += ",\"levier\":" + IntegerToString((long)AccountInfoInteger(ACCOUNT_LEVERAGE));   // 7.2.0 : repris par le backtest
    j += ",\"ts\":" + IntegerToString((long)TimeGMT());
    j += ",\"ts_iso\":\"" + IsoNow() + "\"";
    j += "}";
