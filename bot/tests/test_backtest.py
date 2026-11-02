@@ -282,3 +282,15 @@ async def test_labo_complete_par_backtest_meme_apres_remise_a_zero(svc):  # noqa
     ctx.db.add_labo(f"bt_{new}", now - 5 * 86400, "SERIE", "miroir", json.dumps({"sc": "miroir", "res": "atteint", "profit": 1}))
     await router.on_callback("d:lab:30")
     assert f"backtest #{new}" in dash.render()[0]
+
+
+@pytest.mark.asyncio
+async def test_labo_rejouer_la_periode_avec_les_reglages_actuels(svc):  # noqa: F811
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    now = int(time.time())
+    rid = ctx.db.bt_create("bt", now - 30 * 86400, now, "reel", "anciens réglages")
+    ctx.db.bt_update(rid, "ok", "")
+    ctx.db.add_labo(f"bt_{rid}", now - 5 * 86400, "SERIE", "miroir", json.dumps({"sc": "miroir", "res": "atteint", "profit": 1}))
+    await router.on_callback("d:lab:30")
+    kb = dash.render()[1]
+    assert any("Rejouer avec mes réglages actuels" in t and d.startswith("d:btlab:") for row in kb for t, d in row)

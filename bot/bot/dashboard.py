@@ -345,12 +345,14 @@ class Dashboard:
         cov = min((int(r["ts"]) for r in live_all), default=int(now))      # début des mesures en direct
         rows = [r for r in live_all if int(r["ts"]) >= since]
         notes: list[str] = []
+        used_bt = None
         missing = max(0, cov - since)
         if missing >= 86400:
             # après une remise à zéro : seuls les backtests lancés depuis comptent (mêmes scénarios que le labo actuel)
             run = next((r for r in db.bt_list(30) if r["status"] == "ok" and r["d_to"] >= since and r["d_from"] < cov
                         and r["created"] >= reset_ts), None)
             if run is not None:
+                used_bt = run
                 extra = [r for r in db.labo_since(since, f"bt_{run['id']}") if int(r["ts"]) < cov]
                 rows = extra + rows
                 start = max(since, int(run["d_from"]))
@@ -381,6 +383,9 @@ class Dashboard:
         if missing >= 86400 and not (self.bt is not None and self.bt.busy()):
             day = (cov // 86400) * 86400
             kb.append([(f"🧪 Compléter par backtest ({round(missing / 86400)} j)", f"d:btlab:{day}")])
+        elif used_bt is not None and not (self.bt is not None and self.bt.busy()):
+            day = (cov // 86400) * 86400                    # période déjà rejouée : la rejouer avec les réglages d'aujourd'hui
+            kb.append([(f"🔁 Rejouer avec mes réglages actuels ({round((cov - since) / 86400)} j)", f"d:btlab:{day}")])
         kb += [
             [("🧪 Tests rapides (1 bouton = 1 backtest)", "d:qt")],
             [(f"🧬 Scénarios perso ({len(cfg.customs)})", "d:labs"), ("⏸ Pause" if cfg.active else "▶ Reprendre", "d:labp")],
