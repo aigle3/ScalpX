@@ -258,3 +258,27 @@ async def test_tests_rapides_un_bouton_scenarios_et_backtest(svc):  # noqa: F811
     assert row["source"].startswith("⏱ Bougies après le croisement") and row["d_to"] - row["d_from"] == 7 * 86400
     await router.on_callback("d:qtgo:filtres")                       # thème sans scénario perso : seulement les 13 automatiques
     assert labo.load_config(ctx.cfg.paths.common()).customs == []
+
+
+@pytest.mark.asyncio
+async def test_labo_complete_par_backtest_meme_apres_remise_a_zero(svc):  # noqa: F811
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    now = int(time.time())
+    cfg = labo.load_config(ctx.cfg.paths.common())
+    cfg.reset = str(now - 3600)
+    labo.save_config(ctx.cfg.paths.common(), cfg)
+    old = ctx.db.bt_create("bt", now - 30 * 86400, now - 86400, "reel", "avant")       # lancé AVANT la remise à zéro
+    ctx.db.bt_update(old, "ok", "")
+    with ctx.db._lock:
+        ctx.db._cx.execute("UPDATE backtests SET created=? WHERE id=?", (now - 7200, old))
+        ctx.db._cx.commit()
+    ctx.db.add_labo(f"bt_{old}", now - 5 * 86400, "SERIE", "miroir", json.dumps({"sc": "miroir", "res": "atteint", "profit": 1}))
+    await router.on_callback("d:lab:30")
+    text, kb = dash.render()
+    assert any(d.startswith("d:btlab:") for row in kb for _, d in row)      # bouton toujours là
+    assert f"backtest #{old}" not in text                                    # ancien backtest ignoré
+    new = ctx.db.bt_create("bt", now - 30 * 86400, now - 86400, "reel", "après")
+    ctx.db.bt_update(new, "ok", "")
+    ctx.db.add_labo(f"bt_{new}", now - 5 * 86400, "SERIE", "miroir", json.dumps({"sc": "miroir", "res": "atteint", "profit": 1}))
+    await router.on_callback("d:lab:30")
+    assert f"backtest #{new}" in dash.render()[0]
