@@ -598,6 +598,7 @@ void CutTick()
    if(key == g_lastCutKey) return;
    g_lastCutKey = key;                                           // une coupure n'agit qu'une fois
    GlobalVariableSet(GVN("cutkey"), (double)key);
+   LaboOnCut(SlotText(cut));                                     // [ARCHI] 7.1.0 : coupure des objectifs virtuels du labo
    if(!g_goalActive || g_phase500) return;
    string name = SlotText(cut);
    if(st_posCount == 0)
@@ -610,6 +611,9 @@ void CutTick()
    }
 }
 // [ARCHI] fin
+
+void LaboOnSlot(string slot);   // [ARCHI] 7.1.0 : labo des filtres (défini dans SX_Labo.mqh)
+void LaboOnCut(string name);
 
 void SlotTick()
 {
@@ -625,6 +629,7 @@ void SlotTick()
    GlobalVariableSet(GVN("slotkey"), (double)key);
 
    string slot = SlotText(sl);
+   LaboOnSlot(slot);                                      // [ARCHI] 7.1.0 : objectifs virtuels du labo (même créneau)
    if(g_goalActive)
    {
       EvTyped("CRENEAU_SAUTE", 0, "⏭ Créneau " + slot + " sauté : l'objectif précédent n'est pas terminé.",

@@ -128,6 +128,10 @@ class Router:
             if len(p) > 2 and p[2].isdigit() and int(p[2]) in self.dash.SST_DAYS:
                 self.dash.sst_days = int(p[2])
             self.dash.goto("sst")
+        elif sub.startswith("lab"):                         # 🧪 labo des filtres
+            r = await self._labo_cb(sub, p)
+            if r is not None:
+                return r
         elif sub in ("lst", "act", "rpt", "logs", "gterm", "wdr"):
             self.dash.goto(sub)
             self.dash.silent = self.notifier.silent_mode
@@ -456,6 +460,84 @@ class Router:
             msg = "✅ Maintenance retirée, terminal relancé." if ok else "❌ Dossier du terminal introuvable."
         log.info("maintenance retirée à la main sur %s", inst.label)
         self.dash.flash(msg)
+        await self.dash.refresh(force=True)
+
+    async def _labo_cb(self, sub: str, p: list[str]) -> str | None:
+        """🧪 Labo des filtres : période, compte, scénarios perso, pause, remise à zéro. None = rafraîchir l'écran."""
+        from core import labo
+        common = self.ctx.cfg.paths.common()
+        arg = p[2] if len(p) > 2 else ""
+        if sub == "lab":
+            if arg.isdigit() and int(arg) in self.dash.LAB_DAYS:
+                self.dash.lab_days = int(arg)
+            self.dash.goto("lab")
+        elif sub == "laba":                                 # compte suivant ("" = tous)
+            ids = [""] + [i.id for i in self.ctx.db.list()]
+            cur = self.dash.lab_acc if self.dash.lab_acc in ids else ""
+            self.dash.lab_acc = ids[(ids.index(cur) + 1) % len(ids)]
+            self.dash.goto("lab")
+        elif sub == "labs":
+            self.dash.lab_edit = None
+            self.dash.goto("labs")
+        elif sub == "labn":
+            cfg = labo.load_config(common)
+            if len(cfg.customs) >= labo.MAX_CUSTOM:
+                self.dash.flash(f"Maximum {labo.MAX_CUSTOM} scénarios perso.")
+                self.dash.goto("labs")
+            else:
+                self.dash.lab_edit = [cfg.next_key(), ["="] * len(labo.CODES)]
+                self.dash.goto("labe")
+        elif sub == "labe":
+            c = next((c for c in labo.load_config(common).customs if c.key == arg), None)
+            if c is None:
+                self.dash.goto("labs")
+            else:
+                self.dash.lab_edit = [c.key, list(c.toks)]
+                self.dash.goto("labe")
+        elif sub == "labt" and self.dash.lab_edit and arg.isdigit() and int(arg) < len(labo.CODES):
+            i = int(arg)
+            self.dash.lab_edit[1][i] = labo.next_tok(i, self.dash.lab_edit[1][i])
+        elif sub == "labv" and self.dash.lab_edit:
+            key, toks = self.dash.lab_edit
+            if all(t == "=" for t in toks):
+                self.dash.flash("Ce scénario est identique aux réglages actuels : change au moins un filtre.")
+                return None
+            cfg = labo.load_config(common)
+            cfg.customs = [c for c in cfg.customs if c.key != key] + [labo.Custom(key, labo.auto_name(toks), list(toks))]
+            cfg.customs.sort(key=lambda c: int(c.key[1:]) if c.key[1:].isdigit() else 99)
+            labo.save_config(common, cfg)
+            self.ctx.db.add_action("", f"Labo : scénario {key} enregistré ({labo.auto_name(toks)})", True)
+            self.dash.lab_edit = None
+            self.dash.flash("💾 Scénario enregistré : les EA le prennent en compte sous 10 s.")
+            self.dash.goto("labs")
+        elif sub == "labd" and arg:
+            cfg = labo.load_config(common)
+            cfg.customs = [c for c in cfg.customs if c.key != arg]
+            labo.save_config(common, cfg)
+            self.ctx.db.add_action("", f"Labo : scénario {arg} supprimé", True)
+            self.dash.flash(f"🗑 Scénario {arg} supprimé.")
+            self.dash.goto("labs")
+        elif sub == "labp":
+            cfg = labo.load_config(common)
+            cfg.active = not cfg.active
+            labo.save_config(common, cfg)
+            self.ctx.db.add_action("", "Labo des filtres " + ("repris" if cfg.active else "mis en pause"), True)
+            self.dash.flash("▶ Labo repris." if cfg.active else "⏸ Labo en pause : les séries virtuelles en cours sont figées.")
+            self.dash.goto("lab")
+        elif sub == "labr":
+            return await self._ask("♻️ <b>Remettre le labo à zéro ?</b>\nTous les comptes virtuels repartent du solde réel actuel ; "
+                                   "les rapports ne comptent plus que ce qui suit. Le trading réel n'est pas touché.",
+                                   self._labo_reset, ("lab",), "♻️ Remettre à zéro")
+        return None
+
+    async def _labo_reset(self) -> None:
+        from core import labo
+        common = self.ctx.cfg.paths.common()
+        cfg = labo.load_config(common)
+        cfg.reset = labo.new_reset_token()
+        labo.save_config(common, cfg)
+        self.ctx.db.add_action("", "Labo des filtres remis à zéro", True)
+        self.dash.flash("♻️ Labo remis à zéro : les EA repartent de comptes virtuels neufs sous 10 s.")
         await self.dash.refresh(force=True)
 
     async def _ask(self, text: str, run, back: tuple, yes: str = "✅ Confirmer") -> str:

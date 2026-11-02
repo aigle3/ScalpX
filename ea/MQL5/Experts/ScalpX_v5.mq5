@@ -17,7 +17,7 @@
 //|   SX_Panel.mqh     panneau d'informations dynamique              |
 //+------------------------------------------------------------------+
 #property copyright   "ScalpX"
-#property version     "7.00"
+#property version     "7.01"
 #property description "ScalpX v6.1.0 — EMA 10/20 + grille ATR + TP commun + filtres multi-timeframe, pilotage par bot central (fichiers)"
 
 // [SEUIL500] début : TEST UNIQUEMENT (test B-3 de la checklist). Décommenter pour simuler un glissement de 2.0 (devise du compte)
@@ -151,6 +151,7 @@ input bool   FermerAutresGraphiques = true;              // Ferme les autres gra
 #include "SX_FilterBoard.mqh"
 #include "SX_Journal.mqh"
 #include "SX_Smart.mqh"
+#include "SX_Labo.mqh"                 // [ARCHI] 7.1.0 : labo des filtres (séries virtuelles, aucun ordre réel)
 #include "SX_Chart.mqh"
 #include "SX_Panel.mqh"
 
@@ -204,6 +205,7 @@ int OnInit()
 
    // [ARCHI] début
    ArchiInit();                       // état, créneaux, premier statut, événement DEMARRAGE_EA
+   LaboInit();                        // 7.1.0 : labo des filtres (état virtuel restauré)
    if(resumed && g_enabled)           // information silencieuse : le robot a repris sans attendre
       EvTyped("REPRISE_IMMEDIATE", 0, "▶️ Terminal relancé : le robot tournait, il a repris tout de suite." +
               "\n🎯 Objectif : " + Sgn(GoalAmount()) + " " + Cur() + " | progression " + F0(GoalProgressPct()) + " %");
@@ -228,6 +230,7 @@ void OnDeinit(const int reason)
    SaveParams();
 
    // [ARCHI] début
+   LaboDeinit();                      // 7.1.0 : sauvegarde des comptes virtuels du labo
    ArchiDeinit(reason);
    // [ARCHI] fin
    ChartShutdown(!reload);
@@ -245,6 +248,9 @@ void OnTick()
    RefreshState();
    mk_spread = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
    ulong now = GetTickCount64();
+   // [ARCHI] début : 7.1.0 labo des filtres : séries VIRTUELLES (aucun ordre, aucun effet sur le trading réel)
+   LaboTick();
+   // [ARCHI] fin
 
    //--- 1) Objectif et protections (très légers)
    GoalTick();
@@ -338,6 +344,7 @@ void OnTimer()
       FilterAlertTick();
       JournalTick1Hz();
       SmartTick1Hz();
+      LaboTimer1Hz();                    // [ARCHI] 7.1.0 : labo des filtres (mesure seulement)
       ChartDrawEMAs(false);
 
       ShotTick();                        // captures demandées par le bot
@@ -365,6 +372,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    if(trans.type == TRADE_TRANSACTION_DEAL_ADD)
    {
       OnDealAdded(trans.deal);
+      LaboOnDeal(trans.deal);            // [ARCHI] 7.1.0 : commission mesurée pour le labo
       return;
    }
    if(trans.type != TRADE_TRANSACTION_REQUEST) return;
@@ -374,6 +382,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    {
       // [ARCHI] début : un ordre accepté met fin à un blocage « marché fermé / trading désactivé »
       if(request.symbol == _Symbol && request.magic == MagicNumber) BrokerBlockClear();
+      LaboOnRequest(request, result);   // 7.1.0 : slippage réel mesuré pour le labo
       // [ARCHI] fin
       return;
    }

@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS incidents(
 CREATE TABLE IF NOT EXISTS actions(
   ts INTEGER, iid TEXT, ok INTEGER, text TEXT, result TEXT);
 CREATE INDEX IF NOT EXISTS ix_act ON actions(ts);
+CREATE TABLE IF NOT EXISTS labo(
+  iid TEXT, ts INTEGER, kind TEXT, sc TEXT, data TEXT);
+CREATE INDEX IF NOT EXISTS ix_labo ON labo(ts);
 """
 
 
@@ -204,6 +207,15 @@ class Database:
             return self._all("SELECT * FROM events WHERE ts>=? AND iid=? ORDER BY ts", (since, iid))
         return self._all("SELECT * FROM events WHERE ts>=? ORDER BY ts", (since,))
 
+    # ---- labo des filtres (EA 7.1.0) : REEL (objectif réel) / SERIE (objectif virtuel)
+    def add_labo(self, iid: str, ts: int, kind: str, sc: str, data: str) -> None:
+        self._exec("INSERT INTO labo VALUES(?,?,?,?,?)", (iid, ts, kind, sc, data))
+
+    def labo_since(self, since: int, iid: str | None = None) -> list[sqlite3.Row]:
+        if iid:
+            return self._all("SELECT * FROM labo WHERE ts>=? AND iid=? ORDER BY ts", (since, iid))
+        return self._all("SELECT * FROM labo WHERE ts>=? ORDER BY ts", (since,))
+
     def add_closure500(self, iid: str, kind: str, final_balance: float, delta: float, ts: int | None = None) -> None:
         self._exec("INSERT INTO closures500 VALUES(?,?,?,?,?)", (iid, ts or int(time.time()), kind, final_balance, delta))
 
@@ -282,3 +294,4 @@ class Database:
     def prune(self, keep_days: int = 120) -> None:
         """Purge de l'historique des soldes (1 point/min/instance) au-delà de keep_days."""
         self._exec("DELETE FROM balances WHERE ts<?", (int(time.time()) - keep_days * 86400,))
+        self._exec("DELETE FROM labo WHERE ts<?", (int(time.time()) - keep_days * 86400,))

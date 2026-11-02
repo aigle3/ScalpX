@@ -29,6 +29,10 @@ PAUSE_CHOICES = [("0", "Jusqu'à ▶ Reprise", ""), ("1h", "1 h", "1h"), ("2h", 
                  ("t8", "🌙 Jusqu'à 08:00", "08:00")]
 
 
+def _cut(s: str, n: int) -> str:
+    return s if len(s) <= n else s[:n - 1] + "…"
+
+
 class Dashboard:
     def __init__(self, ctx: Ctx, sender: Sender, chat_id: int, confirmations: Confirmations, vps=vps_load) -> None:
         self.ctx, self.sender, self.chat_id, self.conf = ctx, sender, chat_id, confirmations
@@ -46,6 +50,8 @@ class Dashboard:
         self._last_edit = 0.0
         self._retry_until = 0.0
         self._covered_at: float | None = None               # depuis quand un autre message est sous le tableau de bord
+        self.lab_days, self.lab_acc = 7, ""                 # 🧪 labo des filtres : période, compte ("" = tous)
+        self.lab_edit: list | None = None                   # scénario perso en cours d'édition : [clé, jetons]
         self._load_state()
 
     # ---- état persistant (filtre / tri / page)
@@ -157,6 +163,12 @@ class Dashboard:
             return self._render_filters(now)
         if kind == "sst":
             return self._render_slot_stats(now)
+        if kind == "lab":
+            return self._render_labo(now)
+        if kind == "labs":
+            return self._render_labo_list()
+        if kind == "labe" and self.lab_edit:
+            return self._render_labo_edit()
         if kind == "wdr":
             return self._render_withdrawals(now)
         if kind == "gterm":
@@ -263,11 +275,70 @@ class Dashboard:
                         [("⬅ Rapports", "d:rpt"), ("🏠 Accueil", "d:home")]]
         return self._with_flash(text), kb
 
+    LAB_DAYS = (1, 7, 14, 30)
+
+    def _render_labo(self, now: float) -> tuple[str, Keyboard]:
+        from core import labo
+        db = self.ctx.db
+        cfg = labo.load_config(self.ctx.cfg.paths.common())
+        reset_ts = int(cfg.reset) if cfg.reset.isdigit() else 0
+        since = int(now) - self.lab_days * 86400
+        shown_reset = reset_ts if reset_ts > since else 0
+        rows = db.labo_since(max(since, reset_ts), self.lab_acc or None)
+        real = labo.compute_real(labo.rows_of(rows, "REEL"))
+        scen = labo.compute_scen(labo.rows_of(rows, "SERIE"))
+        views = self.ctx.views()
+        cur = next((v.st.devise for v in views if v.st and v.st.devise), "")
+        inst = db.get(self.lab_acc) if self.lab_acc else None
+        if inst is None:
+            self.lab_acc = ""
+        scope = inst.label if inst is not None else f"tous les comptes ({len(views)})"
+        text = render.labo_text(real, scen, self.lab_days, scope, cur, shown_reset, cfg.active)
+        kb: Keyboard = [
+            [(("• " if d == self.lab_days else "") + f"{d} j", f"d:lab:{d}") for d in self.LAB_DAYS],
+            [("👤 " + _cut(scope, 22) + " ▸", "d:laba")],
+            [(f"🧬 Scénarios perso ({len(cfg.customs)})", "d:labs"), ("⏸ Pause" if cfg.active else "▶ Reprendre", "d:labp")],
+            [("♻️ Remise à zéro", "d:labr"), ("🔃 Actualiser", "d:lab")],
+            [("⬅ Rapports", "d:rpt"), ("🏠 Accueil", "d:home")],
+        ]
+        return self._with_flash(text), kb
+
+    def _render_labo_list(self) -> tuple[str, Keyboard]:
+        from core import labo
+        cfg = labo.load_config(self.ctx.cfg.paths.common())
+        lines = ["🧬 <b>Scénarios perso du labo</b>",
+                 "Chaque scénario joue des séries virtuelles avec ses propres réglages de filtres, sur tous les comptes, "
+                 "en plus des 13 scénarios automatiques (réglages actuels, chaque filtre inversé, aucun filtre).",
+                 "<i>Un scénario créé ou modifié repart d'un compte virtuel neuf (solde réel du moment).</i>", ""]
+        kb: Keyboard = []
+        for c in cfg.customs:
+            lines.append(f"• <b>{c.key}</b> : {render.esc(labo.auto_name(c.toks))}")
+            kb.append([("✏️ " + _cut(labo.auto_name(c.toks), 30), f"d:labe:{c.key}"), ("🗑", f"d:labd:{c.key}")])
+        if not cfg.customs:
+            lines.append("<i>Aucun scénario perso.</i>")
+        if len(cfg.customs) < labo.MAX_CUSTOM:
+            kb.append([("➕ Nouveau scénario", "d:labn")])
+        kb.append([("⬅ Labo", "d:lab"), ("🏠 Accueil", "d:home")])
+        return self._with_flash("\n".join(lines)), kb
+
+    def _render_labo_edit(self) -> tuple[str, Keyboard]:
+        from core import labo
+        key, toks = self.lab_edit
+        text = (f"🧬 <b>Scénario {key}</b>\n{render.esc(labo.auto_name(toks))}\n\n"
+                "Touche un filtre pour changer son réglage dans ce scénario :\n"
+                "comme le compte → désactivé → activé → assoupli 10 / 20 / 30 / 50 % → durci 10 / 20 / 30 %\n"
+                "<i>Assoupli = plage ATR / volume plus large, corps de bougie plus petit, fenêtre de news plus courte, "
+                "spread / extension / ancienneté du signal plus grands. Durci = l'inverse.</i>")
+        kb: Keyboard = [[(f"{labo.LABELS[i]} : {labo.tok_text(t)}", f"d:labt:{i}")] for i, t in enumerate(toks)]
+        kb.append([("💾 Enregistrer", "d:labv"), ("✖ Annuler", "d:labs")])
+        return self._with_flash(text), kb
+
     def _render_reports(self) -> tuple[str, Keyboard]:
         text = "📈 <b>Rapports</b>\n\nLe rapport quotidien arrive aussi tout seul chaque soir."
         kb: Keyboard = [
             [("📝 Rapport des 24 h", "d:rep"), ("📈 Courbe des soldes", "d:chart")],
             [("🕐 Stats par créneau", "d:sst"), ("📤 Export CSV", "d:exp")],
+            [("🧪 Labo des filtres", "d:lab")],
             [("⬅ Accueil", "d:home")],
         ]
         return self._with_flash(text), kb

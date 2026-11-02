@@ -430,3 +430,72 @@ def join_notices(lines: Iterable[str], limit: int = 3800) -> list[str]:
     if cur:
         out.append(cur)
     return out
+
+
+def _dur(sec: float) -> str:
+    s = int(sec)
+    if s < 60:
+        return f"{s} s"
+    if s < 3600:
+        return f"{s // 60} min"
+    return f"{s // 3600} h {(s % 3600) // 60:02d}"
+
+
+def labo_text(real, scen: dict, days: int, scope: str, cur: str, reset_ts: int = 0, active: bool = True,
+              max_len: int = 3900) -> str:
+    """🧪 Labo des filtres : qui bloque les objectifs réels, et ce qu'auraient donné les scénarios virtuels."""
+    from core import labo
+    head = [f"🧪 <b>Labo des filtres</b> · {days} j · {esc(scope)}"]
+    if reset_ts:
+        head.append(f"<i>Depuis la remise à zéro du {time.strftime('%d/%m %H:%M', time.localtime(reset_ts))}</i>")
+    if not active:
+        head.append("⏸ <b>Labo en pause</b> : séries virtuelles figées (le journal des blocages réels continue).")
+    head.append("<i>Séries virtuelles sur les vrais prix (spread, slippage et commission mesurés). Aucun ordre réel.</i>")
+    out = head + [""]
+    if real.goals:
+        out.append(f"<b>Réel</b> : {real.goals} objectif(s) · ✅ {real.won} · ⌛ {real.no_entry} sans série"
+                   + (f" (dont {real.no_entry_filters} bloqué(s) par les filtres)" if real.no_entry else "")
+                   + f" · {money(real.net, cur, True)}")
+        if real.signal_s:
+            out.append(f"Signal présent sans série : {_dur(real.signal_s)}, dont <b>{_dur(real.blocked_s)}</b> bloqué(s) par les filtres")
+        blk = sorted((b for b in real.filters.values() if b.seconds > 0), key=lambda b: -b.seconds)
+        if blk:
+            out += ["", "<b>⏱ Qui bloque ?</b> <i>(signal présent, aucune série)</i>"]
+            for b in blk[:8]:
+                i = labo.CODES.index(b.code)
+                out.append(f"• {labo.LABELS[i]} : {_dur(b.seconds)} (seul : {_dur(b.sole)})"
+                           + (f" · <b>{b.goals_missed} objectif(s) raté(s)</b>" if b.goals_missed else ""))
+    else:
+        out.append("<i>Aucun objectif réel terminé sur la période (le journal se remplit à chaque objectif).</i>")
+
+    ref = scen.get("miroir")
+    rows = [s for s in scen.values() if s.launched or s.skipped]
+    if not rows:
+        out += ["", "<i>Aucun objectif virtuel terminé pour l'instant.</i>"]
+        return "\n".join(out)
+    order = {"miroir": 0, "aucun": 2}
+    rows.sort(key=lambda s: (order.get(s.key, 3 if s.key.startswith("p") else 1),
+                             -(s.net - (ref.net if ref else 0))))
+    out += ["", "<b>🧬 Scénarios virtuels</b> <i>(✅ atteints · 💀 SL / stop-out · net · drawdown max)</i>"]
+    for s in rows:
+        v = labo.verdict(s, ref)
+        name = s.name
+        if s.key.startswith("p") and ref is not None:
+            name = labo.spec_diff_text(s.spec, ref.spec) or s.name
+        rate = f" ({s.rate * 100:.0f} %)" if s.rate is not None else ""
+        d_won = f" ({s.won - ref.won:+d})" if ref is not None and s is not ref else ""
+        d_net = f" ({s.net - ref.net:+.2f})" if ref is not None and s is not ref else ""
+        line = (f"{v.icon + ' ' if v.icon else ''}<b>{esc(name)}</b> : {s.launched} obj · ✅ {s.won}{rate}{d_won}"
+                f" · 💀 {s.lost} · {money(s.net, cur, True)}{d_net} · DD {s.dd_max:.1f} %")
+        if v.text:
+            line += f"\n   ↳ {v.text}"
+        out.append(line)
+    out += ["", "<i>🟢 trop restrictif / meilleur · 🛡️ évite des pertes · 🔴 moins bon · ⚪ équivalent · "
+                f"⏳ moins de {labo.MIN_GOALS} objectifs. Juger sur 2 semaines au moins.</i>"]
+    text = "\n".join(out)
+    if len(text) > max_len:                         # trop long pour Telegram : verdicts en abrégé (icônes), puis lignes en moins
+        out = [l.split("\n   ↳")[0] for l in out]
+        while len("\n".join(out)) > max_len and len(out) > 3:
+            out.pop(-2)
+        text = "\n".join(out)
+    return text

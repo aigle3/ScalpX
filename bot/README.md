@@ -66,7 +66,8 @@ Voir `LISEZMOI.txt` à la racine du dépôt : `INSTALL.bat` installe tout (BASE 
   alertes, délais des news) ; le message « ✅ Compte créé » le confirme.
 - **Capital insuffisant** : solde sous le seuil de reprise (125) → compte 🟠 sur l'accueil et alerte sonore (une fois,
   puis une autre quand le solde remonte). Dépôts et retraits : notifiés avec son.
-- **📈 Rapports** : rapport des 24 h (aussi chaque soir), courbe des soldes, export CSV.
+- **📈 Rapports** : rapport des 24 h (aussi chaque soir), courbe des soldes, export CSV, statistiques par créneau, **🧪 labo des filtres**.
+- **🧪 Labo des filtres** (📈 Rapports, EA 7.1.0) : pour chaque objectif réel, temps pendant lequel chaque filtre a bloqué une entrée (signal présent, aucune série) et objectifs ratés sans série ; comparaison avec des **séries virtuelles** jouées par l'EA sur les vrais prix (aucun ordre réel ; spread, slippage et commission mesurés) : réglages actuels, chaque filtre inversé, aucun filtre, et jusqu'à 6 scénarios perso (🧬 : chaque filtre comme le compte, désactivé, activé, assoupli ou durci de 10 à 50 %). Verdict par scénario (🟢 trop restrictif, 🛡️ évite des pertes, 🔴 moins bon, ⚪ équivalent) sur 1 / 7 / 14 / 30 jours, tous les comptes ou un seul ; ⏸ pause et ♻️ remise à zéro des comptes virtuels.
 - **🛠 Système** : versions bot/EA, VPS, BASE, GitHub (et expiration du jeton), surveillance externe, dernière sauvegarde,
   ⬆ mises à jour, 🔨 compiler l'EA, 📜 journaux, 🔄 redémarrer le bot, ⏪ revenir à la version précédente.
 - **Surveillance externe** : `HEALTHCHECK_URL` (.env, ex. healthchecks.io) reçoit un ping par minute ; s'il cesse, le service prévient.
