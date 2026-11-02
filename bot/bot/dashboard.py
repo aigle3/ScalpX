@@ -52,6 +52,9 @@ class Dashboard:
         self._covered_at: float | None = None               # depuis quand un autre message est sous le tableau de bord
         self.lab_days, self.lab_acc = 7, ""                 # 🧪 labo des filtres : période, compte ("" = tous)
         self.lab_edit: list | None = None                   # scénario perso en cours d'édition : [clé, jetons]
+        self.bt = None                                      # mt5.backtester.BacktestManager (branché par le routeur)
+        self.bt_days, self.bt_model, self.bt_src = 30, "reel", ""   # 🧪 backtest : période, modèle, réglages ("" = 1er compte)
+        self.bt_wiz: tuple[str, dict] = ("login", {})       # configuration du compte du testeur (étape, données)
         self._load_state()
 
     # ---- état persistant (filtre / tri / page)
@@ -163,6 +166,18 @@ class Dashboard:
             return self._render_filters(now)
         if kind == "sst":
             return self._render_slot_stats(now)
+        if kind in ("bt", "btl", "btw", "btr"):
+            from . import backtest_ui as bui
+            if kind == "bt":
+                return bui.render_main(self, now)
+            if kind == "btl":
+                return bui.render_list(self)
+            if kind == "btw":
+                return bui.render_wizard(self)
+            r = self._render_bt_result(int(self.screen[1]))
+            if r:
+                return r
+            return bui.render_list(self)
         if kind == "lab":
             return self._render_labo(now)
         if kind == "labs":
@@ -275,16 +290,60 @@ class Dashboard:
                         [("⬅ Rapports", "d:rpt"), ("🏠 Accueil", "d:home")]]
         return self._with_flash(text), kb
 
-    LAB_DAYS = (1, 7, 14, 30)
+    LAB_DAYS = (1, 7, 14, 30, 90)
+
+    def _labo_status(self, now: float, insts) -> str:
+        """📡 État du labo en direct (dernier LABO_ETAT de chaque compte)."""
+        import json as _json
+        n_acc = n_sc = n_open = n_act = 0
+        oldest = None
+        slip = comm = None
+        for i in insts:
+            try:
+                e = _json.loads(self.ctx.db.meta_get(f"labo_etat_{i.id}", "") or "{}")
+            except ValueError:
+                continue
+            if not e:
+                continue
+            n_acc += 1
+            sc = e.get("sc") or []
+            n_sc = max(n_sc, len(sc))
+            n_open += sum(1 for x in sc if int(x.get("pos", 0) or 0) > 0)
+            n_act += sum(1 for x in sc if x.get("actif"))
+            ts = int(e.get("ts", 0) or 0)
+            oldest = ts if oldest is None else min(oldest, ts)
+            if slip is None:
+                slip, comm = float(e.get("slip", 0) or 0), float(e.get("comm", 0) or 0)
+        if not n_acc:
+            return "📡 <i>Labo en direct : aucun état reçu (EA 7.1.0+ requis ; premier état 1 min après le démarrage).</i>"
+        return (f"📡 Labo en direct : {n_acc}/{len(insts)} compte(s) · {n_sc} scénarios · {n_act} objectif(s) virtuel(s) en cours · "
+                f"{n_open} série(s) ouverte(s) · mis à jour il y a {render.ago(now - (oldest or now))}\n"
+                f"   slippage mesuré {slip:+.1f} pts · commission {comm:.2f}/lot/côté")
 
     def _render_labo(self, now: float) -> tuple[str, Keyboard]:
-        from core import labo
+        from core import backtest as bt, labo
         db = self.ctx.db
         cfg = labo.load_config(self.ctx.cfg.paths.common())
         reset_ts = int(cfg.reset) if cfg.reset.isdigit() else 0
         since = int(now) - self.lab_days * 86400
         shown_reset = reset_ts if reset_ts > since else 0
-        rows = db.labo_since(max(since, reset_ts), self.lab_acc or None)
+        acc = self.lab_acc or None
+        live_all = [r for r in db.labo_since(reset_ts, acc) if not str(r["iid"]).startswith("bt_")]
+        cov = min((int(r["ts"]) for r in live_all), default=int(now))      # début des mesures en direct
+        rows = [r for r in live_all if int(r["ts"]) >= since]
+        notes: list[str] = []
+        missing = max(0, cov - since)
+        if missing >= 86400 and not shown_reset:
+            run = next((r for r in db.bt_list(30) if r["status"] == "ok" and r["d_to"] >= since and r["d_from"] < cov), None)
+            if run is not None:
+                extra = [r for r in db.labo_since(since, f"bt_{run['id']}") if int(r["ts"]) < cov]
+                rows = extra + rows
+                start = max(since, int(run["d_from"]))
+                notes.append(f"📅 {bt.human_date(start)} → {bt.human_date(cov)} : <b>backtest #{run['id']}</b> (1 compte simulé) · "
+                             f"ensuite : mesures en direct")
+                missing = max(0, start - since)
+            else:
+                notes.append(f"📅 Mesures en direct depuis le {bt.human_date(cov)} seulement")
         real = labo.compute_real(labo.rows_of(rows, "REEL"))
         scen = labo.compute_scen(labo.rows_of(rows, "SERIE"))
         views = self.ctx.views()
@@ -293,14 +352,37 @@ class Dashboard:
         if inst is None:
             self.lab_acc = ""
         scope = inst.label if inst is not None else f"tous les comptes ({len(views)})"
-        text = render.labo_text(real, scen, self.lab_days, scope, cur, shown_reset, cfg.active)
+        notes.append(self._labo_status(now, [inst] if inst is not None else db.list()))
+        if self.bt is not None and self.bt.busy():
+            r = self.bt.run
+            notes.append(f"⏳ Backtest #{r.rid} en cours : {bt.progress_frac(r.progress, r.d_from, r.d_to) * 100:.0f} % ({render.esc(r.stage)})")
+        text = render.labo_text(real, scen, self.lab_days, scope, cur, shown_reset, cfg.active, notes=notes)
         kb: Keyboard = [
             [(("• " if d == self.lab_days else "") + f"{d} j", f"d:lab:{d}") for d in self.LAB_DAYS],
             [("👤 " + _cut(scope, 22) + " ▸", "d:laba")],
+        ]
+        if missing >= 86400 and not shown_reset and not (self.bt is not None and self.bt.busy()):
+            day = (cov // 86400) * 86400
+            kb.append([(f"🧪 Compléter par backtest ({round(missing / 86400)} j)", f"d:btlab:{day}")])
+        kb += [
             [(f"🧬 Scénarios perso ({len(cfg.customs)})", "d:labs"), ("⏸ Pause" if cfg.active else "▶ Reprendre", "d:labp")],
             [("♻️ Remise à zéro", "d:labr"), ("🔃 Actualiser", "d:lab")],
             [("⬅ Rapports", "d:rpt"), ("🏠 Accueil", "d:home")],
         ]
+        return self._with_flash(text), kb
+
+    def _render_bt_result(self, rid: int) -> tuple[str, Keyboard] | None:
+        from core import backtest as bt, labo
+        row = self.ctx.db.bt_get(rid)
+        res = bt.Result.from_json(row["result"]) if row is not None and row["result"] else None
+        if res is None:
+            return None
+        scen = labo.compute_scen(labo.rows_of(self.ctx.db.labo_since(0, f"bt_{rid}"), "SERIE"))
+        views = self.ctx.views()
+        cur = next((v.st.devise for v in views if v.st and v.st.devise), "")
+        text = render.bt_result_text(rid, row["kind"], row["source"], row["model"], res, scen, cur,
+                                     max(0, (row["ended"] or 0) - row["created"]))
+        kb: Keyboard = [[("📈 Courbe du solde", f"d:btg:{rid}"), ("🗂 Liste", "d:btl")], [("⬅ Backtest", "d:bt"), ("🏠 Accueil", "d:home")]]
         return self._with_flash(text), kb
 
     def _render_labo_list(self) -> tuple[str, Keyboard]:
@@ -338,7 +420,7 @@ class Dashboard:
         kb: Keyboard = [
             [("📝 Rapport des 24 h", "d:rep"), ("📈 Courbe des soldes", "d:chart")],
             [("🕐 Stats par créneau", "d:sst"), ("📤 Export CSV", "d:exp")],
-            [("🧪 Labo des filtres", "d:lab")],
+            [("🧪 Labo des filtres", "d:lab"), ("🧪 Backtest", "d:bt")],
             [("⬅ Accueil", "d:home")],
         ]
         return self._with_flash(text), kb

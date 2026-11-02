@@ -101,6 +101,16 @@ class Backup(BaseModel):
     keep: int = 14                         # nombre de sauvegardes conservées
 
 
+class Backtest(BaseModel):
+    folder: Path | None = None             # None → <dossier parent des instances>\backtest
+    leverage: int = 500                    # effet de levier si le compte de référence ne le donne pas (EA < 7.2.0)
+    gmt_winter: int = -99                  # décalage GMT du serveur en hiver (h) ; -99 = lu dans le calendrier exporté par l'EA
+    us_dst: bool = True                    # le serveur du broker suit l'heure d'été américaine
+    stall_min: int = 30                    # aucun progrès (journal MT5 ni avancement) pendant N min : test arrêté
+    setup_stall_min: int = 5               # configuration du compte : abandon plus rapide
+    poll_s: float = 4.0                    # lecture de l'avancement du testeur (le message Telegram est édité au plus toutes les 5 s)
+
+
 class Config(BaseModel):
     paths: Paths = Paths()
     mt5: MT5 = MT5()
@@ -111,6 +121,7 @@ class Config(BaseModel):
     runtime: Runtime = Runtime()
     update: Update = Update()
     backup: Backup = Backup()
+    backtest: Backtest = Backtest()
 
     # secrets (depuis .env, jamais depuis config.toml)
     token: str = ""

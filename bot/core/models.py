@@ -83,6 +83,7 @@ class Statut(BaseModel):
     news_raison: str = ""
     news: list[NewsItem] = Field(default_factory=list)
     magic: int = 0
+    levier: int = 0                     # effet de levier du compte (EA 7.2.0+)
     ts: int = 0                         # secondes Unix GMT
     ts_iso: str = ""
 

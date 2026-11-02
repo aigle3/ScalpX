@@ -442,7 +442,7 @@ def _dur(sec: float) -> str:
 
 
 def labo_text(real, scen: dict, days: int, scope: str, cur: str, reset_ts: int = 0, active: bool = True,
-              max_len: int = 3900) -> str:
+              max_len: int = 3900, notes: list | None = None) -> str:
     """🧪 Labo des filtres : qui bloque les objectifs réels, et ce qu'auraient donné les scénarios virtuels."""
     from core import labo
     head = [f"🧪 <b>Labo des filtres</b> · {days} j · {esc(scope)}"]
@@ -451,6 +451,7 @@ def labo_text(real, scen: dict, days: int, scope: str, cur: str, reset_ts: int =
     if not active:
         head.append("⏸ <b>Labo en pause</b> : séries virtuelles figées (le journal des blocages réels continue).")
     head.append("<i>Séries virtuelles sur les vrais prix (spread, slippage et commission mesurés). Aucun ordre réel.</i>")
+    head += list(notes or [])
     out = head + [""]
     if real.goals:
         out.append(f"<b>Réel</b> : {real.goals} objectif(s) · ✅ {real.won} · ⌛ {real.no_entry} sans série"
@@ -499,3 +500,76 @@ def labo_text(real, scen: dict, days: int, scope: str, cur: str, reset_ts: int =
             out.pop(-2)
         text = "\n".join(out)
     return text
+
+
+# ------------------------------------------------------------------ backtest (EA 7.2.0)
+def bt_progress_text(run, cur: str, now: float | None = None) -> str:
+    """Message de suivi d'un backtest (édité en place toutes les quelques secondes)."""
+    from core import backtest as bt
+    now = now if now is not None else time.time()
+    days = max(1, round((run.d_to - run.d_from) / 86400))
+    head = "⚙️ Configuration du terminal de backtest" if run.kind == "setup" else (
+        f"🧪 <b>Backtest #{run.rid}</b>" + (" · complément du labo" if run.kind == "labo" else ""))
+    out = [head, f"📅 {bt.human_date(run.d_from)} → {bt.human_date(run.d_to)} ({bt.period_label(days)}) · {esc(bt.MODELS[run.model][1])}"]
+    if run.kind != "setup":
+        out.append(f"⚙️ Réglages : {esc(run.source)}")
+    p = run.progress
+    frac = bt.progress_frac(p, run.d_from, run.d_to)
+    elapsed = now - run.started
+    if p:
+        sim = int(p.get("sim", 0) or 0)
+        out.append(f"{bar(frac, 10)} <b>{frac * 100:.0f} %</b> · jour simulé {bt.human_date(sim)}")
+        eta = ""
+        if run.sim_started and frac > 0.02:
+            spent = now - run.sim_started
+            eta = f" · reste ≈ {_dur(spent / frac - spent)}"
+        out.append(f"⏱ {_dur(elapsed)} écoulé(es){eta}")
+        out.append(f"💰 Solde {money(float(p.get('solde', 0)), cur)} · equity {money(float(p.get('equity', 0)), cur)} · "
+                   f"DD max {float(p.get('dd_max', 0)):.1f} %")
+        out.append(f"🎯 Objectifs {p.get('objectifs', 0)} · ✅ {p.get('atteints', 0)} · ⌛ {int(p.get('annules', 0)) + int(p.get('coupes', 0))} "
+                   f"ratés · 🚨 {p.get('sl', 0)} SL · 🏁 {p.get('cycles', 0)} cycle(s) 500 · 💸 retiré {money(float(p.get('retraits', 0)), cur)}")
+        if p.get("note"):
+            out.append(f"ℹ️ {esc(p.get('note'))}")
+    else:
+        out.append(f"⏳ {esc(run.stage)} · {_dur(elapsed)}")
+        out.append("<i>Le premier test d'une période télécharge l'historique de ticks du broker : ça peut être long.</i>")
+    if run.last_line:
+        out.append(f"🖥 MT5 : <code>{esc(run.last_line[:150])}</code>")
+    if run.log:
+        out += ["", "<b>Journal</b>"] + [f"<code>{h}</code> {esc(t)}" for h, t in run.log[-6:]]
+    if run.done:
+        out += ["", ("✅ Terminé." if run.ok else f"❌ {esc(run.error or 'Échec.')}")]
+    return "\n".join(out)
+
+
+def bt_result_text(rid: int, kind: str, source: str, model: str, res, scen: dict, cur: str, duration_s: float = 0) -> str:
+    """Résultat final d'un backtest : la stratégie réelle, par créneau, et le labo des filtres sur la même période."""
+    from core import backtest as bt, labo
+    days = max(1, round((res.d_to - res.d_from) / 86400))
+    out = [f"✅ <b>Backtest #{rid} terminé</b> · {bt.period_label(days)} ({bt.human_date(res.d_from)} → {bt.human_date(res.d_to)})",
+           f"⚙️ {esc(source)} · {esc(bt.MODELS.get(model, (0, model))[1])}" + (f" · durée {_dur(duration_s)}" if duration_s else ""), ""]
+    out.append(f"💼 Dépôt {money(res.deposit, cur)} → solde final <b>{money(res.final, cur)}</b>")
+    out.append(f"💸 Retiré {money(res.withdrawn, cur)} ({res.cycles} cycle(s) 500)"
+               + (f" · 🔄 {res.reloads} recharge(s) : {money(res.reloaded, cur)}" if res.reloads else " · aucune recharge"))
+    out.append(f"📈 <b>Gain net {money(res.net, cur, True)}</b> · drawdown max {res.dd_max:.1f} %")
+    rate = f" ({res.won / res.goals * 100:.0f} %)" if res.goals else ""
+    out.append(f"🎯 Objectifs : {res.goals} lancés · ✅ {res.won}{rate} · ⌛ {res.missed} manqués "
+               f"(sans série {res.cancelled}, coupés {res.cut}) · 🚨 {res.sl} SL" + (f" · ⏭ {res.skipped} sautés" if res.skipped else ""))
+    if res.slots:
+        parts = [f"{s} {w}/{n}" for s, (n, w) in sorted(res.slots.items(), key=lambda kv: kv[0].zfill(5))]
+        out.append("🕐 Par créneau (✅/lancés) : " + " · ".join(parts))
+    if res.note:
+        out.append(f"ℹ️ {esc(res.note)}")
+    ref = scen.get("miroir")
+    rows = [s for s in scen.values() if s.launched]
+    if rows and ref is not None:
+        rows.sort(key=lambda s: -(s.net - ref.net))
+        out += ["", "<b>🧬 Labo des filtres sur cette période</b>"]
+        shown = [ref] + [s for s in rows if s is not ref][:7]
+        for s in shown:
+            v = labo.verdict(s, ref)
+            d = f" ({s.net - ref.net:+.2f})" if s is not ref else ""
+            out.append(f"{v.icon + ' ' if v.icon else ''}{esc(s.name or s.key)} : ✅ {s.won}/{s.launched} · 💀 {s.lost} · "
+                       f"{money(s.net, cur, True)}{d} · DD {s.dd_max:.0f} %")
+    out.append("<i>Commission et slippage du labo : mesurés sur tes vrais ordres. Spread : ticks réels du broker.</i>")
+    return "\n".join(out)

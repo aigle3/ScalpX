@@ -489,6 +489,12 @@ async def startup(app: Application) -> None:
     except Exception:
         log.exception("surveillance du bot : création de la tâche")
     try:
+        n = s.ctx.db.bt_interrupted()                              # 🧪 backtest en cours au redémarrage : suivi perdu
+        if n:
+            log.info("démarrage : %d backtest(s) interrompu(s)", n)
+    except Exception:
+        log.exception("démarrage : backtests interrompus")
+    try:
         n = await s.ctx.creator.cleanup_refused()                  # créations refusées laissées en suspens
         if n:
             log.info("démarrage : %d création(s) refusée(s) en suspens abandonnée(s)", n)
