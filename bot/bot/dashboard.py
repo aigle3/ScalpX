@@ -167,6 +167,14 @@ class Dashboard:
             return self._render_filters(now)
         if kind == "sst":
             return self._render_slot_stats(now)
+        if kind == "btra":
+            from core import labo
+            rid = int(self.screen[1])
+            scen = labo.compute_scen(labo.rows_of(self.ctx.db.labo_since(0, f"bt_{rid}"), "SERIE"))
+            views = self.ctx.views()
+            cur = next((v.st.devise for v in views if v.st and v.st.devise), "")
+            return (self._with_flash(render.bt_all_scen_text(rid, scen, cur)),
+                    [[("⬅ Résultat", f"d:btr:{rid}"), ("🧪 Backtest", "d:bt"), ("🏠 Accueil", "d:home")]])
         if kind in ("bt", "btl", "btw", "btr", "qt"):
             from . import backtest_ui as bui
             if kind == "qt":
@@ -393,7 +401,8 @@ class Dashboard:
         cur = next((v.st.devise for v in views if v.st and v.st.devise), "")
         text = render.bt_result_text(rid, row["kind"], row["source"], row["model"], res, scen, cur,
                                      max(0, (row["ended"] or 0) - row["created"]), brief=labo.brief(series, res.slots))
-        kb: Keyboard = [[("📈 Courbe du solde", f"d:btg:{rid}"), ("🗂 Liste", "d:btl")], [("⬅ Backtest", "d:bt"), ("🏠 Accueil", "d:home")]]
+        kb: Keyboard = [[("📈 Courbe du solde", f"d:btg:{rid}"), (f"🧬 Tous les scénarios ({len(scen)})", f"d:btra:{rid}")],
+                        [("🗂 Liste", "d:btl"), ("⬅ Backtest", "d:bt"), ("🏠 Accueil", "d:home")]]
         return self._with_flash(text), kb
 
     def _render_labo_list(self) -> tuple[str, Keyboard]:

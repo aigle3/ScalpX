@@ -446,7 +446,7 @@ def brief(rows: list[dict], slots: dict | None = None) -> list[str]:
     mid = ts[len(ts) // 2] if ts else 0
     halves = [compute_scen([d for d in rows if int(d.get("fin", 0) or 0) < mid]),
               compute_scen([d for d in rows if int(d.get("fin", 0) or 0) >= mid])]
-    sure_change, sure_keep, unsure, neutral = [], [], [], []
+    saves, sure_change, sure_keep, unsure, neutral = [], [], [], [], []
     for s in all_s.values():
         if s.key == "miroir":
             continue
@@ -454,23 +454,32 @@ def brief(rows: list[dict], slots: dict | None = None) -> list[str]:
         hv = [verdict(h[s.key], h["miroir"]).icon if s.key in h and "miroir" in h else "⏳" for h in halves]
         stable = v.icon in SURE and all(i == v.icon for i in hv)
         gain = f"{s.net - ref.net:+.2f}"
-        if v.icon == "🟢" and stable:
+        if s.lost < ref.lost and s.net >= ref.net:            # évite des comptes perdus : passe avant tout (événements rares)
+            saves.append((ref.lost - s.lost, s.net - ref.net,
+                          f"{_action(s)} (💀 {s.lost} au lieu de {ref.lost}, {gain}, DD {s.dd_max:.0f} %)"))
+        elif v.icon == "🟢" and stable and s.lost == 0:
             sure_change.append((s.net - ref.net, f"{_action(s)} ({gain}, ✅ {s.won - ref.won:+d}, DD {s.dd_max:.0f} %)"))
         elif v.icon == "🛡️":                                 # pertes / drawdown : événements rares, pas de test des moitiés
             sure_keep.append(f"{_keep(s)} (sans : 💀 {s.lost}, DD {s.dd_max:.0f} %)")
-        elif v.icon in ("🟢", "🛡️", "⚖️"):
+        elif s.lost > 0 and s.net > ref.net:
+            unsure.append(f"{s.name or s.key} (gagne plus mais 💀 {s.lost})")
+        elif v.icon in ("🟢", "⚖️"):
             unsure.append(f"{s.name or s.key} {v.icon}")
         elif v.icon in ("⚪", "🔴"):
             neutral.append(s.name or s.key)
     out = [f"🎯 <b>En bref</b> <i>({ref.launched} objectifs ; « fiable » = même résultat sur les deux moitiés de la période)</i>"]
+    if ref.lost:
+        out.append(f"🚨 <b>Tes réglages actuels perdent le compte {ref.lost} fois</b> sur la période (stop-out ou SL d'urgence).")
+    if saves:
+        out.append("🛟 <b>Évitent les pertes</b> : " + " · ".join(t for *_, t in sorted(saves, reverse=True)[:4]))
     if sure_change:
         out.append("✅ <b>Changements fiables</b> : " + " · ".join(t for _, t in sorted(sure_change, reverse=True)[:4]))
-    else:
+    elif not saves:
         out.append("✅ Aucun changement fiable : tes réglages actuels tiennent.")
     if sure_keep:
         out.append("🛡 <b>À garder</b> : " + " · ".join(sure_keep[:3]))
     if unsure:
-        out.append("❓ <b>Pas encore sûr</b> (résultat différent selon la moitié) : " + ", ".join(unsure[:5]))
+        out.append("❓ <b>Pas encore sûr</b> : " + ", ".join(unsure[:5]))
     if neutral:
         out.append(f"⚪ Peu ou pas d'effet : {len(neutral)} scénario(s)")
     weak = [f"{k} ({w}/{n})" for k, (n, w) in sorted((slots or {}).items()) if n >= 5 and w / n < 0.6]

@@ -599,6 +599,8 @@ class Router:
             d.goto("btl")
         elif sub == "btr" and arg.isdigit():
             d.goto("btr", arg)
+        elif sub == "btra" and arg.isdigit():
+            d.goto("btra", arg)
         elif sub == "btg" and arg.isdigit():
             await self._bt_chart(int(arg))
             return ""
@@ -807,7 +809,8 @@ class Router:
         self.ctx.db.bt_update(rid, status, run.result.to_json() if run.result else "", run.error)
         if run.ok:
             r = self.dash._render_bt_result(rid)
-            kb = [[("📈 Courbe du solde", f"d:btg:{rid}"), ("🧪 Labo", "d:lab")], [("✖ Fermer", "d:close")]]
+            kb = [[("📈 Courbe du solde", f"d:btg:{rid}"), ("🧬 Tous les scénarios", f"d:btra:{rid}")],
+                  [("🧪 Labo", "d:lab"), ("✖ Fermer", "d:close")]]
             await self.sender.send(self.chat_id, r[0] if r else f"✅ Backtest #{rid} terminé.", kb, False)
             await self._bt_chart(rid)
         else:
