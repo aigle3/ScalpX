@@ -226,3 +226,19 @@ def test_en_bref_fiable_si_les_deux_moities_concordent():
     assert "Pas encore sûr" in b and "Sans EMA M15" in b
     assert "13:00 (4/11)" in b and "02:00" not in b and "drawdown max 30 %" in b
     assert "pas encore assez" in labo.brief([])[0]
+
+
+def test_en_bref_les_comptes_perdus_passent_avant_tout():
+    rows = []
+    for k in range(20):
+        t = 1_760_000_000 + k * 3600
+        lost = k in (3, 12, 15)
+        rows.append({"sc": "miroir", "nom": "Réglages actuels", "res": "liquide" if lost else "atteint",
+                     "profit": -100 if lost else 0.6, "dd": 98 if lost else 30, "fin": t, "entree_s": 10})
+        rows.append({"sc": "p1", "nom": "🧱 Grille large", "res": "atteint", "profit": 0.6, "dd": 69, "fin": t, "entree_s": 10})
+        rows.append({"sc": "t10", "nom": "Sans Signal récent", "res": "liquide" if k in (3, 12) else "atteint",
+                     "profit": -100 if k in (3, 12) else 1.5, "dd": 103, "fin": t, "entree_s": 10})
+    b = "\n".join(labo.brief(rows))
+    assert "perdent le compte 3 fois" in b
+    assert "Évitent les pertes" in b and "🧱 Grille large (💀 0 au lieu de 3" in b
+    assert "désactiver Signal récent" in b and "Changements fiables" not in b      # 💀 2 < 3 : évite 1 perte, pas « fiable »

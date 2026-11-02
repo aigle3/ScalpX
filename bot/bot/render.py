@@ -553,6 +553,9 @@ def bt_result_text(rid: int, kind: str, source: str, model: str, res, scen: dict
     out.append(f"💸 Retiré {money(res.withdrawn, cur)} ({res.cycles} cycle(s) 500)"
                + (f" · 🔄 {res.reloads} recharge(s) : {money(res.reloaded, cur)}" if res.reloads else " · aucune recharge"))
     out.append(f"📈 <b>Gain net {money(res.net, cur, True)}</b> · drawdown max {res.dd_max:.1f} %")
+    if res.final <= 0.01 or res.dd_max >= 95:
+        out.append(f"💀 <b>Compte perdu</b> : le solde est tombé à {money(res.final, cur)} (stop-out du broker ; le SL d'urgence "
+                   "ne s'est pas déclenché : désactivé ou trop haut ?)")
     if brief:
         out += [""] + list(brief) + [""]
     rate = f" ({res.won / res.goals * 100:.0f} %)" if res.goals else ""
@@ -571,6 +574,7 @@ def bt_result_text(rid: int, kind: str, source: str, model: str, res, scen: dict
         customs = [s for s in rows if s.key.startswith("p")]                  # scénarios du test : tous affichés
         others = [s for s in rows if s is not ref and not s.key.startswith("p")]
         shown = [ref] + customs + others[:max(3, 8 - len(customs))]
+        out[-1] += f" · {len(rows)} scénarios testés, ici les principaux (liste complète : 🧬)"
         for s in shown:
             v = labo.verdict(s, ref)
             d = f" ({s.net - ref.net:+.2f})" if s is not ref else ""
@@ -578,3 +582,21 @@ def bt_result_text(rid: int, kind: str, source: str, model: str, res, scen: dict
                        f"{money(s.net, cur, True)}{d} · DD {s.dd_max:.0f} %")
     out.append("<i>Commission et slippage du labo : mesurés sur tes vrais ordres. Spread : ticks réels du broker.</i>")
     return "\n".join(out)
+
+
+def bt_all_scen_text(rid: int, scen: dict, cur: str) -> str:
+    """🧬 Tous les scénarios d'un backtest, du meilleur au moins bon (écart avec les réglages actuels)."""
+    from core import labo
+    ref = scen.get("miroir")
+    rows = [s for s in scen.values() if s.launched]
+    if ref is None or not rows:
+        return f"🧬 <b>Backtest #{rid}</b> : aucun scénario du labo."
+    rows.sort(key=lambda s: (s is not ref, -(s.net - ref.net)))
+    out = [f"🧬 <b>Backtest #{rid} : les {len(rows)} scénarios</b> <i>(✅ atteints · 💀 comptes perdus · net · écart · DD)</i>", ""]
+    for s in rows:
+        v = labo.verdict(s, ref)
+        d = f" ({s.net - ref.net:+.2f})" if s is not ref else ""
+        out.append(f"{v.icon + ' ' if v.icon else ''}<b>{esc(s.name or s.key)}</b> : ✅ {s.won}/{s.launched} · 💀 {s.lost} · "
+                   f"{money(s.net, cur, True)}{d} · DD {s.dd_max:.0f} %")
+    text = "\n".join(out)
+    return text if len(text) <= 3900 else text[:3890].rsplit("\n", 1)[0]
