@@ -442,7 +442,7 @@ def _dur(sec: float) -> str:
 
 
 def labo_text(real, scen: dict, days: int, scope: str, cur: str, reset_ts: int = 0, active: bool = True,
-              max_len: int = 3900, notes: list | None = None) -> str:
+              max_len: int = 3900, notes: list | None = None, brief: list | None = None) -> str:
     """🧪 Labo des filtres : qui bloque les objectifs réels, et ce qu'auraient donné les scénarios virtuels."""
     from core import labo
     head = [f"🧪 <b>Labo des filtres</b> · {days} j · {esc(scope)}"]
@@ -452,6 +452,8 @@ def labo_text(real, scen: dict, days: int, scope: str, cur: str, reset_ts: int =
         head.append("⏸ <b>Labo en pause</b> : séries virtuelles figées (le journal des blocages réels continue).")
     head.append("<i>Séries virtuelles sur les vrais prix (spread, slippage et commission mesurés). Aucun ordre réel.</i>")
     head += list(notes or [])
+    if brief:
+        head += [""] + list(brief)
     out = head + [""]
     if real.goals:
         out.append(f"<b>Réel</b> : {real.goals} objectif(s) · ✅ {real.won} · ⌛ {real.no_entry} sans série"
@@ -540,7 +542,8 @@ def bt_progress_text(run, cur: str, now: float | None = None) -> str:
     return "\n".join(out)
 
 
-def bt_result_text(rid: int, kind: str, source: str, model: str, res, scen: dict, cur: str, duration_s: float = 0) -> str:
+def bt_result_text(rid: int, kind: str, source: str, model: str, res, scen: dict, cur: str, duration_s: float = 0,
+                   brief: list | None = None) -> str:
     """Résultat final d'un backtest : la stratégie réelle, par créneau, et le labo des filtres sur la même période."""
     from core import backtest as bt, labo
     days = max(1, round((res.d_to - res.d_from) / 86400))
@@ -550,6 +553,8 @@ def bt_result_text(rid: int, kind: str, source: str, model: str, res, scen: dict
     out.append(f"💸 Retiré {money(res.withdrawn, cur)} ({res.cycles} cycle(s) 500)"
                + (f" · 🔄 {res.reloads} recharge(s) : {money(res.reloaded, cur)}" if res.reloads else " · aucune recharge"))
     out.append(f"📈 <b>Gain net {money(res.net, cur, True)}</b> · drawdown max {res.dd_max:.1f} %")
+    if brief:
+        out += [""] + list(brief) + [""]
     rate = f" ({res.won / res.goals * 100:.0f} %)" if res.goals else ""
     out.append(f"🎯 Objectifs : {res.goals} lancés · ✅ {res.won}{rate} · ⌛ {res.missed} manqués "
                f"(sans série {res.cancelled}, coupés {res.cut}) · 🚨 {res.sl} SL" + (f" · ⏭ {res.skipped} sautés" if res.skipped else ""))

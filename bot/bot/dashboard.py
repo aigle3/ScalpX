@@ -350,7 +350,9 @@ class Dashboard:
             else:
                 notes.append(f"📅 Mesures en direct depuis le {bt.human_date(cov)} seulement")
         real = labo.compute_real(labo.rows_of(rows, "REEL"))
-        scen = labo.compute_scen(labo.rows_of(rows, "SERIE"))
+        series = labo.rows_of(rows, "SERIE")
+        scen = labo.compute_scen(series)
+        short_brief = labo.brief(series, labo.real_slots(labo.rows_of(rows, "REEL")))
         views = self.ctx.views()
         cur = next((v.st.devise for v in views if v.st and v.st.devise), "")
         inst = db.get(self.lab_acc) if self.lab_acc else None
@@ -361,7 +363,7 @@ class Dashboard:
         if self.bt is not None and self.bt.busy():
             r = self.bt.run
             notes.append(f"⏳ Backtest #{r.rid} en cours : {bt.progress_frac(r.progress, r.d_from, r.d_to) * 100:.0f} % ({render.esc(r.stage)})")
-        text = render.labo_text(real, scen, self.lab_days, scope, cur, shown_reset, cfg.active, notes=notes)
+        text = render.labo_text(real, scen, self.lab_days, scope, cur, shown_reset, cfg.active, notes=notes, brief=short_brief)
         kb: Keyboard = [
             [(("• " if d == self.lab_days else "") + f"{d} j", f"d:lab:{d}") for d in self.LAB_DAYS],
             [("👤 " + _cut(scope, 22) + " ▸", "d:laba")],
@@ -383,11 +385,12 @@ class Dashboard:
         res = bt.Result.from_json(row["result"]) if row is not None and row["result"] else None
         if res is None:
             return None
-        scen = labo.compute_scen(labo.rows_of(self.ctx.db.labo_since(0, f"bt_{rid}"), "SERIE"))
+        series = labo.rows_of(self.ctx.db.labo_since(0, f"bt_{rid}"), "SERIE")
+        scen = labo.compute_scen(series)
         views = self.ctx.views()
         cur = next((v.st.devise for v in views if v.st and v.st.devise), "")
         text = render.bt_result_text(rid, row["kind"], row["source"], row["model"], res, scen, cur,
-                                     max(0, (row["ended"] or 0) - row["created"]))
+                                     max(0, (row["ended"] or 0) - row["created"]), brief=labo.brief(series, res.slots))
         kb: Keyboard = [[("📈 Courbe du solde", f"d:btg:{rid}"), ("🗂 Liste", "d:btl")], [("⬅ Backtest", "d:bt"), ("🏠 Accueil", "d:home")]]
         return self._with_flash(text), kb
 

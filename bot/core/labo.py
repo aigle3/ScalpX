@@ -313,12 +313,15 @@ def verdict(s: ScenStat, ref: ScenStat | None) -> Verdict:
     sig_net = max(2.0, 0.05 * abs(ref.net))                 # écart significatif : 5 % du gain (2 au moins)…
     sig_goals = max(3, round(0.03 * ref.launched))          # … ou 3 % des objectifs (3 au moins)
     much_deeper = ddd > 10
-    better = gain > 0 and (gain >= sig_net or dgoals >= sig_goals) and not more_losses and not much_deeper
-    worse = more_losses or gain <= -sig_net or dgoals <= -sig_goals
     every = s.key == "aucun"
     removes = every or (s.key.startswith("t") and (s.name.startswith("Sans ") or "off" in _diff_toks(s.spec, ref.spec)))
-    if not more_losses and gain > 0 and much_deeper and (gain >= sig_net or dgoals >= sig_goals):
-        return Verdict("⚖️", f"plus de gain mais drawdown + {ddd:.0f} pts : plus risqué")
+    better = gain > 0 and (gain >= sig_net or dgoals >= sig_goals) and not more_losses and not much_deeper
+    worse = more_losses or gain <= -sig_net or dgoals <= -sig_goals
+    if not more_losses and much_deeper:
+        if gain > 0 and (gain >= sig_net or dgoals >= sig_goals):
+            return Verdict("⚖️", f"plus de gain mais drawdown + {ddd:.0f} pts : plus risqué")
+        return Verdict("🛡️", (f"filtre utile : sans lui, drawdown + {ddd:.0f} pts" if removes else f"plus risqué : drawdown + {ddd:.0f} pts")
+                       + " sans gain qui le justifie")
     if not more_losses and not worse and ddd <= -10:
         return Verdict("🟢", f"moins risqué : drawdown {ddd:.0f} pts, gain équivalent")
     if better:
@@ -409,3 +412,82 @@ def apply_theme(cfg: LabConfig, theme: str) -> list[str]:
     for name, toks, opts in items[:MAX_CUSTOM]:
         cfg.customs.append(Custom(cfg.next_key(), name, list(toks), dict(opts)))
     return [c.name for c in cfg.customs]
+
+
+# ---- 🎯 En bref : conclusions lisibles, avec un test de fiabilité (même verdict sur les deux moitiés de la période)
+SURE = ("🟢", "🛡️", "🔴", "⚖️")
+
+
+def _action(s: ScenStat) -> str:
+    n = s.name or s.key
+    if s.key.startswith("t") and n.startswith("Sans "):
+        return "désactiver " + n[5:]
+    if s.key.startswith("t") and n.startswith("Avec "):
+        return "activer " + n[5:]
+    if s.key == "aucun":
+        return "tout désactiver"
+    return n
+
+
+def _keep(s: ScenStat) -> str:
+    n = s.name or s.key
+    return ("garder " + n[5:]) if n.startswith("Sans ") else ("ne pas " + _action(s))
+
+
+def brief(rows: list[dict], slots: dict | None = None) -> list[str]:
+    """rows : données LABO_SERIE (avec « fin », horodatage) de la période ; slots : créneau → [lancés, atteints].
+    Renvoie quelques lignes : ce qui est fiable, ce qui ne l'est pas encore, les créneaux faibles, le risque."""
+    rows = [d for d in rows if d.get("res") != "saute"]
+    all_s = compute_scen(rows)
+    ref = all_s.get("miroir")
+    if ref is None or ref.launched < MIN_GOALS:
+        return ["🎯 <b>En bref</b> : pas encore assez d'objectifs pour conclure (5 au moins par scénario)."]
+    ts = sorted(int(d.get("fin", 0) or 0) for d in rows)
+    mid = ts[len(ts) // 2] if ts else 0
+    halves = [compute_scen([d for d in rows if int(d.get("fin", 0) or 0) < mid]),
+              compute_scen([d for d in rows if int(d.get("fin", 0) or 0) >= mid])]
+    sure_change, sure_keep, unsure, neutral = [], [], [], []
+    for s in all_s.values():
+        if s.key == "miroir":
+            continue
+        v = verdict(s, ref)
+        hv = [verdict(h[s.key], h["miroir"]).icon if s.key in h and "miroir" in h else "⏳" for h in halves]
+        stable = v.icon in SURE and all(i == v.icon for i in hv)
+        gain = f"{s.net - ref.net:+.2f}"
+        if v.icon == "🟢" and stable:
+            sure_change.append((s.net - ref.net, f"{_action(s)} ({gain}, ✅ {s.won - ref.won:+d}, DD {s.dd_max:.0f} %)"))
+        elif v.icon == "🛡️":                                 # pertes / drawdown : événements rares, pas de test des moitiés
+            sure_keep.append(f"{_keep(s)} (sans : 💀 {s.lost}, DD {s.dd_max:.0f} %)")
+        elif v.icon in ("🟢", "🛡️", "⚖️"):
+            unsure.append(f"{s.name or s.key} {v.icon}")
+        elif v.icon in ("⚪", "🔴"):
+            neutral.append(s.name or s.key)
+    out = [f"🎯 <b>En bref</b> <i>({ref.launched} objectifs ; « fiable » = même résultat sur les deux moitiés de la période)</i>"]
+    if sure_change:
+        out.append("✅ <b>Changements fiables</b> : " + " · ".join(t for _, t in sorted(sure_change, reverse=True)[:4]))
+    else:
+        out.append("✅ Aucun changement fiable : tes réglages actuels tiennent.")
+    if sure_keep:
+        out.append("🛡 <b>À garder</b> : " + " · ".join(sure_keep[:3]))
+    if unsure:
+        out.append("❓ <b>Pas encore sûr</b> (résultat différent selon la moitié) : " + ", ".join(unsure[:5]))
+    if neutral:
+        out.append(f"⚪ Peu ou pas d'effet : {len(neutral)} scénario(s)")
+    weak = [f"{k} ({w}/{n})" for k, (n, w) in sorted((slots or {}).items()) if n >= 5 and w / n < 0.6]
+    if weak:
+        out.append("🕐 <b>Créneaux faibles</b> : " + ", ".join(weak) + " (souvent coupés ou ratés)")
+    out.append(f"⚠️ Risque des réglages actuels : drawdown max {ref.dd_max:.0f} %" + (" (élevé)" if ref.dd_max >= 30 else ""))
+    return out
+
+
+def real_slots(rows_reel: list[dict]) -> dict[str, list[int]]:
+    """Créneau → [objectifs réels lancés, atteints] (journal LABO_REEL)."""
+    out: dict[str, list[int]] = {}
+    for d in rows_reel:
+        k = str(d.get("creneau", "") or "")
+        if not k:
+            continue
+        e = out.setdefault(k, [0, 0])
+        e[0] += 1
+        e[1] += 1 if d.get("atteint") else 0
+    return out
