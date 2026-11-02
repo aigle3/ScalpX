@@ -55,6 +55,7 @@ class Dashboard:
         self.bt = None                                      # mt5.backtester.BacktestManager (branché par le routeur)
         self.bt_days, self.bt_model, self.bt_src = 30, "reel", ""   # 🧪 backtest : période, modèle, réglages ("" = 1er compte)
         self.bt_wiz: tuple[str, dict] = ("login", {})       # configuration du compte du testeur (étape, données)
+        self.qt_days = 30                                   # 🧪 tests rapides : période
         self._load_state()
 
     # ---- état persistant (filtre / tri / page)
@@ -166,8 +167,10 @@ class Dashboard:
             return self._render_filters(now)
         if kind == "sst":
             return self._render_slot_stats(now)
-        if kind in ("bt", "btl", "btw", "btr"):
+        if kind in ("bt", "btl", "btw", "btr", "qt"):
             from . import backtest_ui as bui
+            if kind == "qt":
+                return bui.render_quick(self, now)
             if kind == "bt":
                 return bui.render_main(self, now)
             if kind == "btl":
@@ -367,6 +370,7 @@ class Dashboard:
             day = (cov // 86400) * 86400
             kb.append([(f"🧪 Compléter par backtest ({round(missing / 86400)} j)", f"d:btlab:{day}")])
         kb += [
+            [("🧪 Tests rapides (1 bouton = 1 backtest)", "d:qt")],
             [(f"🧬 Scénarios perso ({len(cfg.customs)})", "d:labs"), ("⏸ Pause" if cfg.active else "▶ Reprendre", "d:labp")],
             [("♻️ Remise à zéro", "d:labr"), ("🔃 Actualiser", "d:lab")],
             [("⬅ Rapports", "d:rpt"), ("🏠 Accueil", "d:home")],

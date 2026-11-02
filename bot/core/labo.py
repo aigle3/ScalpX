@@ -51,7 +51,8 @@ def next_tok(i: int, tok: str) -> str:
 
 
 # ---- options d'un scénario (EA 7.3.0) : écart de grille, respirations du signal récent, timeframe de l'extension
-OPT_CYCLES = {"g": ["1", "1.3", "1.6", "2"], "n": ["-1", "0", "2", "3", "5"], "x": ["0", "1", "2", "3"]}
+OPT_CYCLES = {"g": ["1", "1.3", "1.6", "2"], "n": ["-1", "0", "2", "3", "5"], "x": ["0", "1", "2", "3"],
+              "b": ["0", "6", "12", "18", "24", "36"]}             # b (EA 7.4.0) : bougies max du signal récent
 EXT_TF = {"1": "TF du robot", "2": "M15", "3": "H1"}
 
 
@@ -64,11 +65,13 @@ def opt_text(k: str, v: str) -> str:
         return "signal récent : tout recroisement compte" if v == "0" else f"signal récent : respirations ≤ {v} bougies ignorées"
     if k == "x":
         return "extension comme le compte" if v in ("", "0") else f"extension mesurée en {EXT_TF.get(v, v)}"
+    if k == "b":
+        return "signal récent : bougies comme le compte" if v in ("", "0") else f"signal récent : {v} bougies max"
     return f"{k}={v}"
 
 
 def opt_default(k: str, v: str) -> bool:
-    return v in ("", "1") if k == "g" else (v in ("", "-1") if k == "n" else v in ("", "0"))
+    return v in ("", "1") if k == "g" else (v in ("", "-1") if k == "n" else v in ("", "0"))   # x et b : "0" = comme le compte
 
 
 def parse_opts(text: str) -> dict[str, str]:
@@ -349,3 +352,53 @@ def rows_of(db_rows, kind: str) -> list[dict]:
         except (TypeError, ValueError):
             continue
     return out
+
+
+# ---- 🧪 tests rapides : un thème = jusqu'à 7 scénarios perso (remplacent les actuels) + un backtest lancé d'un bouton
+def _q(name: str, opts: dict[str, str], **toks: str) -> tuple[str, list[str], dict[str, str]]:
+    return name, _toks(**toks), opts
+
+
+THEMES: dict[str, tuple[str, str, list]] = {
+    "bougies": ("⏱ Bougies après le croisement",
+                "Filtre « signal récent » : pas de nouvelle série si les EMA du robot se sont croisées il y a plus de N bougies "
+                "(M5 : 6 = 30 min, 12 = 1 h, 24 = 2 h). Avec ou sans les respirations ignorées (petit recroisement de 3 bougies "
+                "ou moins qui ne remet pas le compteur à zéro, cas du 02/11).",
+                [_q("6 bougies (30 min)", {"b": "6"}, fresh="on"),
+                 _q("12 bougies (1 h)", {"b": "12"}, fresh="on"),
+                 _q("24 bougies (2 h)", {"b": "24"}, fresh="on"),
+                 _q("6 bougies, respirations ignorées", {"b": "6", "n": "3"}, fresh="on"),
+                 _q("12 bougies, respirations ignorées", {"b": "12", "n": "3"}, fresh="on"),
+                 _q("24 bougies, respirations ignorées", {"b": "24", "n": "3"}, fresh="on"),
+                 _q("36 bougies, respirations ignorées", {"b": "36", "n": "3"}, fresh="on")]),
+    "grille": ("🧱 Écart de grille",
+               "Même stratégie, ordres de grille plus serrés ou plus espacés : plus large = moins de positions dans un repli "
+               "(drawdown plus faible) mais TP moyen plus loin.",
+               [_q(f"Grille × {g}", {"g": g}) for g in ("0.8", "1.2", "1.4", "1.6", "1.8", "2", "2.5")]),
+    "extension": ("📏 Extension (mouvement déjà épuisé)",
+                  "Pas d'entrée quand le prix est déjà loin de l'EMA lente (en ATR) : mesuré sur le TF du robot, en M15 ou en H1, "
+                  "avec le seuil du compte (2 ATR par défaut), + 25 % ou + 50 %.",
+                  [_q("Extension TF du robot, seuil du compte", {"x": "1"}, ext="on"),
+                   _q("Extension TF du robot, seuil + 50 %", {"x": "1"}, ext="+50"),
+                   _q("Extension M15, seuil du compte", {"x": "2"}, ext="on"),
+                   _q("Extension M15, seuil + 50 %", {"x": "2"}, ext="+50"),
+                   _q("Extension H1, seuil du compte", {"x": "3"}, ext="on"),
+                   _q("Extension H1, seuil + 25 %", {"x": "3"}, ext="+25"),
+                   _q("Extension H1, seuil + 50 %", {"x": "3"}, ext="+50")]),
+    "conseilles": ("🛡 Combinaisons conseillées",
+                   "Les 7 scénarios ⭐ (grille large, signal récent sans respirations, extension H1, prudent, équilibré…).",
+                   [(n, t, o) for n, t, o, _ in PACK]),
+    "filtres": ("🔎 Chaque filtre seul",
+                "Aucun scénario perso : seulement les 13 scénarios automatiques (réglages actuels, chaque filtre inversé "
+                "— « Sans X » / « Avec X » —, aucun filtre). C'est le test « toutes les possibilités des filtres » un par un.",
+                []),
+}
+
+
+def apply_theme(cfg: LabConfig, theme: str) -> list[str]:
+    """Remplace les scénarios perso par ceux du thème ; renvoie leurs noms."""
+    _, _, items = THEMES[theme]
+    cfg.customs = []
+    for name, toks, opts in items[:MAX_CUSTOM]:
+        cfg.customs.append(Custom(cfg.next_key(), name, list(toks), dict(opts)))
+    return [c.name for c in cfg.customs]

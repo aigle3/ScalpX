@@ -67,6 +67,7 @@ def render_main(dash, now: float) -> tuple[str, Keyboard]:
                [("🎚 " + ("Ticks réels" if dash.bt_model == "reel" else "OHLC M1") + " ▸", "d:btm"),
                 ("⚙️ " + _cut(source_label(dash, dash.bt_src), 22) + " ▸", "d:bts")],
                [("▶️ Lancer le backtest", "d:btgo")]]
+    kb.append([("🧪 Tests rapides par thème", "d:qt")])
     kb.append([("🗂 Derniers backtests", "d:btl"), ("🔑 Changer de compte", "d:btc")])
     kb.append([("⬅ Rapports", "d:rpt"), ("🏠 Accueil", "d:home")])
     return dash._with_flash("\n".join(lines)), kb
@@ -110,3 +111,38 @@ def render_wizard(dash) -> tuple[str, Keyboard]:
                 "<i>Ton message est effacé aussitôt ; MT5 mémorise le mot de passe, le bot ne le garde pas.</i>")
     kb.append([("✖ Annuler", "d:btq")])
     return dash._with_flash(text), kb
+
+
+QT_DAYS = (7, 30, 90, 182)
+
+
+def render_quick(dash, now: float) -> tuple[str, Keyboard]:
+    """🧪 Tests rapides : un bouton = les scénarios d'un thème installés + un backtest lancé."""
+    from core import labo
+    mgr = dash.bt
+    days = dash.qt_days
+    d_from, d_to = bt.date_range(days, now)
+    lines = ["🧪 <b>Tests rapides</b>",
+             "Un bouton = je remplace tes scénarios perso du labo par ceux du thème, puis je lance <b>un backtest</b> qui joue, "
+             "sur la même période et les mêmes prix, tes réglages actuels + les 13 scénarios automatiques + ceux du thème. "
+             "Le résultat les classe, avec un verdict pour chacun.", "",
+             f"📅 Période : <b>{bt.period_label(days)}</b> ({bt.human_date(d_from)} → {bt.human_date(d_to)}) · "
+             f"{esc(bt.MODELS[dash.bt_model][1])}",
+             f"⚙️ Réglages de base : {esc(source_label(dash, dash.bt_src))}", ""]
+    for key, (title, desc, items) in labo.THEMES.items():
+        lines.append(f"<b>{esc(title)}</b> : {esc(desc)}")
+        if items:
+            lines.append("   ↳ " + esc(" · ".join(n for n, _, _ in items)))
+    kb: Keyboard = [[(("• " if d == days else "") + bt.period_label(d), f"d:qtd:{d}") for d in QT_DAYS]]
+    if mgr is not None and mgr.busy():
+        lines += ["", f"⏳ Backtest #{mgr.run.rid} en cours : attends sa fin (ou ⏹ dans le message de suivi)."]
+    elif mgr is None or not mgr.configured():
+        lines += ["", "⚙️ Configure d'abord le terminal de backtest (🧪 Backtest)."]
+        kb.append([("⚙️ Configurer le terminal de backtest", "d:btc")])
+    else:
+        for key, (title, _, _) in labo.THEMES.items():
+            kb.append([(f"▶️ {title}", f"d:qtgo:{key}")])
+    lines += ["", "<i>Plus la période est longue, plus le verdict est fiable (7 j ≈ 25 objectifs : indicatif). "
+                  "Les scénarios du thème restent ensuite dans le labo en direct.</i>"]
+    kb.append([("🧪 Labo", "d:lab"), ("🧪 Backtest", "d:bt"), ("🏠 Accueil", "d:home")])
+    return dash._with_flash("\n".join(lines)), kb
