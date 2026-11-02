@@ -338,8 +338,10 @@ class Dashboard:
         rows = [r for r in live_all if int(r["ts"]) >= since]
         notes: list[str] = []
         missing = max(0, cov - since)
-        if missing >= 86400 and not shown_reset:
-            run = next((r for r in db.bt_list(30) if r["status"] == "ok" and r["d_to"] >= since and r["d_from"] < cov), None)
+        if missing >= 86400:
+            # après une remise à zéro : seuls les backtests lancés depuis comptent (mêmes scénarios que le labo actuel)
+            run = next((r for r in db.bt_list(30) if r["status"] == "ok" and r["d_to"] >= since and r["d_from"] < cov
+                        and r["created"] >= reset_ts), None)
             if run is not None:
                 extra = [r for r in db.labo_since(since, f"bt_{run['id']}") if int(r["ts"]) < cov]
                 rows = extra + rows
@@ -368,7 +370,7 @@ class Dashboard:
             [(("• " if d == self.lab_days else "") + f"{d} j", f"d:lab:{d}") for d in self.LAB_DAYS],
             [("👤 " + _cut(scope, 22) + " ▸", "d:laba")],
         ]
-        if missing >= 86400 and not shown_reset and not (self.bt is not None and self.bt.busy()):
+        if missing >= 86400 and not (self.bt is not None and self.bt.busy()):
             day = (cov // 86400) * 86400
             kb.append([(f"🧪 Compléter par backtest ({round(missing / 86400)} j)", f"d:btlab:{day}")])
         kb += [
