@@ -207,3 +207,22 @@ def test_verdicts_ignorent_les_ecarts_minuscules():
     assert v(won=87, net=76.69, dd_max=37.1) == "🟢"                 # gain équivalent, drawdown − 15 pts
     assert v(won=67, net=55.46, dd_max=53.7) == "🔴"
     assert v(won=95, net=10.0, dd_max=90, lost=1) == "🛡️"
+
+
+def test_en_bref_fiable_si_les_deux_moities_concordent():
+    rows = []
+    for k in range(20):
+        t = 1_760_000_000 + k * 3600
+        rows.append({"sc": "miroir", "nom": "Réglages actuels", "res": "atteint" if k % 2 else "annule", "profit": 0.6 if k % 2 else 0,
+                     "dd": 30, "fin": t, "entree_s": 10})
+        rows.append({"sc": "t9", "nom": "Sans Extension", "res": "atteint", "profit": 0.6, "dd": 25, "fin": t, "entree_s": 10})
+        rows.append({"sc": "t1", "nom": "Sans EMA M1", "res": "sl" if k == 3 else "atteint", "profit": -20 if k == 3 else 0.6,
+                     "dd": 77, "fin": t, "entree_s": 10})
+        # gagnant seulement sur la 2e moitié : pas fiable
+        rows.append({"sc": "t4", "nom": "Sans EMA M15", "res": "atteint" if (k >= 10 or k % 2) else "annule",
+                     "profit": 0.6 if (k >= 10 or k % 2) else 0, "dd": 30, "fin": t, "entree_s": 10})
+    b = "\n".join(labo.brief(rows, {"13:00": [11, 4], "02:00": [20, 19]}))
+    assert "désactiver Extension" in b and "garder EMA M1" in b
+    assert "Pas encore sûr" in b and "Sans EMA M15" in b
+    assert "13:00 (4/11)" in b and "02:00" not in b and "drawdown max 30 %" in b
+    assert "pas encore assez" in labo.brief([])[0]
