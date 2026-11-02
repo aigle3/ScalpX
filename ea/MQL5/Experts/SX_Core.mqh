@@ -3,7 +3,7 @@
 //| Noyau : variables globales, registre de paramètres (tous les     |
 //| réglages sont modifiables à chaud), persistance, presets.        |
 //+------------------------------------------------------------------+
-#define SX_VERSION   "7.2.0"
+#define SX_VERSION   "7.3.0"
 #define SX_PREFIX    "SX4_"
 #define SX_MAXQ      40
 
@@ -87,6 +87,7 @@ enum ENUM_PID
    // [ARCHI] début : 6.6.0 filtres d'extension et de signal récent, fenêtre d'entrée après le créneau (en fin de liste : clés inchangées)
    P_F_EXT, P_EXTATR, P_F_FRESH, P_FRESHBARS, P_SL_ENTRY,
    P_CT_ON, P_CT_M00, P_CT_M15, P_CT_M30, P_CT_M45,           // 7.0.0 : coupure de l'objectif (4 masques consécutifs, comme les créneaux)
+   P_FRESHNOISE, P_EXTTF,                                     // 7.3.0 : recroisements ignorés (signal récent), timeframe de l'extension
    // [ARCHI] fin
    P_COUNT
 };
@@ -130,6 +131,7 @@ int             g_hATR  = INVALID_HANDLE;
 int             g_hFastLo = INVALID_HANDLE, g_hSlowLo = INVALID_HANDLE;   // timeframe inférieur
 int             g_hFastHi = INVALID_HANDLE, g_hSlowHi = INVALID_HANDLE;   // timeframe supérieur
 int             g_hATRHi  = INVALID_HANDLE;                               // ATR du timeframe supérieur (corps de bougie)
+int             g_hSlowExt = INVALID_HANDLE, g_hATRExt = INVALID_HANDLE;  // [ARCHI] 7.3.0 : EMA lente et ATR du timeframe de l'extension (si différent du robot)
 ENUM_TIMEFRAMES g_loTF  = PERIOD_M1, g_hiTF = PERIOD_M15;
 ENUM_TIMEFRAMES g_sigTF = PERIOD_M5;
 ENUM_ORDER_TYPE_FILLING g_fillMkt  = ORDER_FILLING_IOC;
@@ -585,6 +587,11 @@ void InitParams()
        "Heures de coupure à :30 (un bit par heure, 0 à 23). Se règle avec l'écran Coupures du bot.");
    Reg(P_CT_M45, "ct_m45", "Coupures à :45", G_GOAL, PT_INT, cutMk[3], 0, 16777215, 1, "",
        "Heures de coupure à :45 (un bit par heure, 0 à 23). Se règle avec l'écran Coupures du bot.");
+   Reg(P_FRESHNOISE, "freshnoise", "Signal récent : recroisements ignorés", G_FILTERS, PT_INT, MathMax(0, MathMin(20, FreshSignalIgnoreBars)), 0, 20, 1, " bougies",
+       "Un recroisement des EMA qui ne dure pas plus de N bougies (simple respiration) ne fait pas repartir le compteur du signal récent : l'âge est compté depuis le début du mouvement. 0 = tout recroisement compte (comportement d'avant).");
+   Reg(P_EXTTF, "exttf", "Extension : timeframe", G_FILTERS, PT_ENUM, MathMax(0, MathMin(6, ExtensionTimeframe)), 0, 6, 1, "",
+       "Timeframe de l'EMA lente et de l'ATR du filtre d'extension. Un timeframe supérieur (M15, H1) voit qu'un mouvement est déjà très étendu même quand l'EMA du robot a rattrapé le prix.",
+       "TF du robot|M1|M5|M15|M30|H1|H4", PF_INDI);
    // [ARCHI] fin
 }
 

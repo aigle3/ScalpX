@@ -154,3 +154,45 @@ async def test_ecran_labo_scenarios_perso_pause_et_remise_a_zero(svc):  # noqa: 
     await _confirm(router, dash)
     assert await _until(lambda: labo.load_config(common).reset != "")
     assert "Aucun objectif virtuel" in dash.render()[0]           # les séries d'avant la remise à zéro ne comptent plus
+
+
+# ------------------------------------------------------------------ EA 7.3.0 : options par scénario et scénarios conseillés
+def test_options_de_scenario_aller_retour(tmp_path):
+    cfg = labo.LabConfig(customs=[labo.Custom("p1", "🛡 Prudent", labo._toks(ext="+25", fresh="on"), {"g": "1.6", "n": "3", "x": "3"})])
+    labo.save_config(tmp_path, cfg)
+    line = [l for l in (tmp_path / labo.SCEN_FILE).read_text(encoding="utf-8").splitlines() if l.startswith("p1|")][0]
+    assert line.endswith("|g=1.6;n=3;x=3") and ",+25,on" in line
+    back = labo.load_config(tmp_path).customs[0]
+    assert back.opts == {"g": "1.6", "n": "3", "x": "3"} and back.name == "🛡 Prudent"
+    assert labo.opts_str({"g": "1", "n": "-1", "x": "0"}) == ""
+    assert [labo.next_opt("g", v) for v in ("1", "1.3", "1.6", "2")] == ["1.3", "1.6", "2", "1"]
+    name = labo.auto_name(labo._toks(), {"g": "1.6", "x": "3"})
+    assert "écart de grille × 1.6" in name and "extension mesurée en H1" in name
+    assert len(labo.PACK) <= labo.MAX_CUSTOM and len(labo.CODES) + 2 + len(labo.PACK) <= 20
+
+
+@pytest.mark.asyncio
+async def test_scenarios_conseilles_et_options_dans_l_editeur(svc):  # noqa: F811
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    common = ctx.cfg.paths.common()
+    await router.on_callback("d:labs")
+    await router.on_callback("d:labk")
+    text, kb = dash.render()
+    assert "Scénarios conseillés" in text and "Grille large" in text
+    await router.on_callback("d:labk:0")
+    cfg = labo.load_config(common)
+    assert [c.name for c in cfg.customs] == ["🧱 Grille large"] and cfg.customs[0].opts == {"g": "1.6"}
+    await router.on_callback("d:labk:0")                          # déjà présent : pas de doublon
+    assert len(labo.load_config(common).customs) == 1
+    await router.on_callback("d:labk:all")
+    assert [c.name for c in labo.load_config(common).customs] == [p[0] for p in labo.PACK]
+    # éditeur : options (grille, respirations, extension)
+    await router.on_callback("d:labd:p1")
+    await router.on_callback("d:labn")
+    await router.on_callback("d:labo:g")
+    await router.on_callback("d:labo:x")
+    await router.on_callback("d:labo:x")
+    assert "écart de grille × 1.3" in dash.render()[0] and "extension mesurée en M15" in dash.render()[0]
+    await router.on_callback("d:labv")                            # options seules : accepté
+    c = [c for c in labo.load_config(common).customs if c.key == "p1"][0]
+    assert c.opts == {"g": "1.3", "x": "2"} and c.toks == ["="] * len(labo.CODES)

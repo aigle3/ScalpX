@@ -231,22 +231,67 @@ int BarsSinceCross(int sh, int maxBars)
    return -1;
 }
 
+// [ARCHI] début : 7.3.0 même calcul, mais un recroisement de noise bougies ou moins (respiration) ne remet pas le compteur à zéro
+int BarsSinceCrossN(int sh, int maxBars, int noise)
+{
+   if(noise <= 0) return BarsSinceCross(sh, maxBars);
+   int n = maxBars + noise + 2;
+   double a[], b[];
+   ArraySetAsSeries(a, true);
+   ArraySetAsSeries(b, true);
+   if(CopyBuffer(g_hFast, 0, sh, n, a) != n || CopyBuffer(g_hSlow, 0, sh, n, b) != n) return -1;
+   int s0 = (a[0] > b[0]) ? 1 : ((a[0] < b[0]) ? -1 : 0);
+   if(s0 == 0) return 0;
+   int k = 1;
+   while(k < n)
+   {
+      int sk = (a[k] > b[k]) ? 1 : ((a[k] < b[k]) ? -1 : 0);
+      if(sk == s0) { k++; continue; }
+      int r = 0;                                       // longueur du passage de l'autre côté
+      while(k + r < n)
+      {
+         int sr = (a[k + r] > b[k + r]) ? 1 : ((a[k + r] < b[k + r]) ? -1 : 0);
+         if(sr == s0) break;
+         r++;
+      }
+      if(r <= noise && k + r < n) { k += r; continue; }   // respiration : le mouvement continue avant elle
+      return (k - 1 > maxBars) ? -1 : k - 1;
+   }
+   return -1;
+}
+
+// Extension : distance du prix à l'EMA lente en multiple d'ATR, sur le TF du robot ou celui choisi (exttf)
+double ExtensionAtr(double s)
+{
+   if(PInt(P_EXTTF) > 0 && g_hSlowExt != INVALID_HANDLE && g_hATRExt != INVALID_HANDLE)
+   {
+      double e[1], at[1];
+      if(CopyBuffer(g_hSlowExt, 0, 0, 1, e) == 1 && CopyBuffer(g_hATRExt, 0, 1, 1, at) == 1 && at[0] > 0 && e[0] > 0)
+         return (mk_bid - e[0]) / at[0];
+      return 0;
+   }
+   return (mk_atrPts > 0) ? ((mk_bid - s) / _Point) / mk_atrPts : 0;
+}
+
+string ExtTfText() { return PInt(P_EXTTF) > 0 ? " " + OptAt(P_EXTTF, PInt(P_EXTTF)) : ""; }
+// [ARCHI] fin
+
 // Extension et signal récent : sens du signal (dir), EMA (f, s) et ATR déjà lus par UpdateFilters
 void UpdateEntryFilters(int sh, int dir, double s, bool haveEma)
 {
    f_extOK = true; f_extWhy = "";
-   mk_extAtr = (haveEma && mk_atrPts > 0) ? ((mk_bid - s) / _Point) / mk_atrPts : 0;
+   mk_extAtr = haveEma ? ExtensionAtr(s) : 0;                 // [ARCHI] 7.3.0 : timeframe réglable
    if(PBool(P_F_EXT) && haveEma && dir != 0 && mk_atrPts > 0)
    {
       double e = (dir > 0) ? mk_extAtr : -mk_extAtr;
       if(e > PDbl(P_EXTATR))
       {
          f_extOK = false;
-         f_extWhy = "Prix à " + F1(e) + " x ATR de l'EMA lente (max " + F1(PDbl(P_EXTATR)) + ") : fin de mouvement probable";
+         f_extWhy = "Prix à " + F1(e) + " x ATR de l'EMA lente" + ExtTfText() + " (max " + F1(PDbl(P_EXTATR)) + ") : fin de mouvement probable";
       }
    }
    f_freshOK = true; f_freshWhy = "";
-   mk_freshAge = haveEma ? BarsSinceCross(sh, PInt(P_FRESHBARS)) : -1;
+   mk_freshAge = haveEma ? BarsSinceCrossN(sh, PInt(P_FRESHBARS), PInt(P_FRESHNOISE)) : -1;   // [ARCHI] 7.3.0 : respirations ignorées
    if(PBool(P_F_FRESH) && haveEma && dir != 0 && (mk_freshAge < 0 || mk_freshAge > PInt(P_FRESHBARS)))
    {
       f_freshOK = false;

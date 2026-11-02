@@ -51,8 +51,10 @@ PARAMS = [
     ("volbars", "Bougies pour la moyenne", 3, "int", 5.0, 100.0, 5.0, "", []),
     ("f_ext", "Filtre d'extension", 3, "bool", 0.0, 1.0, 1.0, "", []),                     # EA 6.6.0
     ("extatr", "Extension maximum", 3, "dbl", 0.5, 10.0, 0.1, " x ATR", []),
+    ("exttf", "Extension : timeframe", 3, "enum", 0.0, 6.0, 1.0, "", ["TF du robot", "M1", "M5", "M15", "M30", "H1", "H4"]),   # EA 7.3.0
     ("f_fresh", "Filtre signal récent", 3, "bool", 0.0, 1.0, 1.0, "", []),
     ("freshbars", "Signal récent : bougies max", 3, "int", 1.0, 200.0, 1.0, " bougies", []),
+    ("freshnoise", "Signal récent : recroisements ignorés", 3, "int", 0.0, 20.0, 1.0, " bougies", []),        # EA 7.3.0
     ("f_lo", "Filtre EMA timeframe inférieur", 4, "bool", 0.0, 1.0, 1.0, "", []),
     ("lotf", "Timeframe inférieur", 4, "enum", 0.0, 5.0, 1.0, "", ["M1", "M5", "M15", "M30", "H1", "H4"]),
     ("lofast", "Inférieur : EMA rapide", 4, "int", 2.0, 200.0, 1.0, "", []),

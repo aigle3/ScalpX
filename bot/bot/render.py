@@ -480,9 +480,7 @@ def labo_text(real, scen: dict, days: int, scope: str, cur: str, reset_ts: int =
     out += ["", "<b>🧬 Scénarios virtuels</b> <i>(✅ atteints · 💀 SL / stop-out · net · drawdown max)</i>"]
     for s in rows:
         v = labo.verdict(s, ref)
-        name = s.name
-        if s.key.startswith("p") and ref is not None:
-            name = labo.spec_diff_text(s.spec, ref.spec) or s.name
+        name = s.name or s.key                         # scénarios perso : leur nom (ex. « 🛡 Prudent » ou la liste des réglages)
         rate = f" ({s.rate * 100:.0f} %)" if s.rate is not None else ""
         d_won = f" ({s.won - ref.won:+d})" if ref is not None and s is not ref else ""
         d_net = f" ({s.net - ref.net:+.2f})" if ref is not None and s is not ref else ""

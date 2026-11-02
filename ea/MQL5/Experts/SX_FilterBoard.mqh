@@ -73,7 +73,7 @@ string FbInfo(int i)
       case 5: return (mk_candleDir > 0 ? "▲ haussière" : (mk_candleDir < 0 ? "▼ baissière" : "– neutre")) + ", corps " + F0(MathAbs(mk_candleBody)) + "/" + F0(mk_candleMin) + " pts";
       case 6: return "blocage " + IntegerToString(PInt(P_T_START)) + "h–" + IntegerToString(PInt(P_T_END)) + "h";
       case 8: return F0(mk_spread) + " pts (max " + IntegerToString(PInt(P_MAXSPREAD)) + ")";
-      case 9: return F1(MathAbs(mk_extAtr)) + " x ATR de l'EMA lente (max " + F1(PDbl(P_EXTATR)) + ")";      // [ARCHI] 6.6.0
+      case 9: return F1(MathAbs(mk_extAtr)) + " x ATR de l'EMA lente" + ExtTfText() + " (max " + F1(PDbl(P_EXTATR)) + ")";      // [ARCHI] 6.6.0
       case 10: return FreshText() + " (max " + IntegerToString(PInt(P_FRESHBARS)) + ")";                    // [ARCHI] 6.6.0
       default:
       {

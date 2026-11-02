@@ -178,6 +178,7 @@ SET_INPUTS = {
     "seuil_on": "ActiverSeuil500", "seuil_arret": "SeuilArret", "seuil_reprise": "SeuilReprise",
     "f_ext": "UseExtensionFilter", "extatr": "ExtensionMaxATR", "f_fresh": "UseFreshSignalFilter",
     "freshbars": "FreshSignalMaxBars", "sl_entry": "ObjectifAutoEntreeMin", "ct_on": "ObjectifCoupureActive",
+    "freshnoise": "FreshSignalIgnoreBars", "exttf": "ExtensionTimeframe",
 }
 SLOTS_INPUT = "ObjectifAutoHeures"     # les 4 masques de créneaux (sl_m00..sl_m45) → un seul input texte « 3,6,9:30 »
 CUTS_INPUT = "ObjectifCoupureHeures"   # EA 7.0.0 : les 4 masques de coupure (ct_m00..ct_m45) → « 13:45,21 »

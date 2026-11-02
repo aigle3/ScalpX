@@ -48,6 +48,9 @@ struct LbScen
    string   name;
    int      mode[LB_NF];
    int      adj[LB_NF];        // % : > 0 seuils assouplis, < 0 durcis
+   double   gm;                // 7.3.0 : multiplicateur de l'écart de grille (1 = comme le compte)
+   int      noise;             // 7.3.0 : signal récent, recroisements ignorés (-1 = comme le compte)
+   int      extTf;             // 7.3.0 : extension mesurée sur 0 = comme le compte, 1 = TF du robot, 2 = M15, 3 = H1
    //--- compte virtuel
    double   bal;
    double   start;
@@ -115,6 +118,47 @@ int      g_lrSole[LB_NF];
 
 string LbFile() { return FileId("labo", ".dat"); }
 
+//--- 7.3.0 : options par scénario (écart de grille, respirations du signal récent, timeframe de l'extension)
+int      g_lbCurNoise = -1;
+int      g_lbCurExt   = 0;
+int      g_lbExtSlow[2] = { INVALID_HANDLE, INVALID_HANDLE };   // EMA lente M15, H1
+int      g_lbExtAtr[2]  = { INVALID_HANDLE, INVALID_HANDLE };   // ATR M15, H1
+
+void LbOptsParse(LbScen &x, string o)
+{
+   x.gm = 1.0; x.noise = -1; x.extTf = 0;
+   string p[];
+   int n = StringSplit(o, ';', p);
+   for(int i = 0; i < n; i++)
+   {
+      string kv[];
+      if(StringSplit(p[i], '=', kv) != 2) continue;
+      if(kv[0] == "g") x.gm = MathMax(0.5, MathMin(4.0, StringToDouble(kv[1])));
+      else if(kv[0] == "n") x.noise = (int)MathMax(-1, MathMin(20, StringToInteger(kv[1])));
+      else if(kv[0] == "x") x.extTf = (int)MathMax(0, MathMin(3, StringToInteger(kv[1])));
+   }
+}
+
+string LbOpts(const LbScen &x)
+{
+   string s = "";
+   if(x.gm != 1.0) s += "g=" + DoubleToString(x.gm, 2);
+   if(x.noise >= 0) s += (s != "" ? ";" : "") + "n=" + IntegerToString(x.noise);
+   if(x.extTf > 0) s += (s != "" ? ";" : "") + "x=" + IntegerToString(x.extTf);
+   return s;
+}
+
+// Extension du scénario : 1 = TF du robot, 2 = M15, 3 = H1 (multiple de l'ATR de ce timeframe)
+double LbExtAtr(int x)
+{
+   if(x == 1) return (mk_atrPts > 0 && mk_slow > 0) ? ((mk_bid - mk_slow) / _Point) / mk_atrPts : 0;
+   int k = x - 2;
+   if(k < 0 || k > 1 || g_lbExtSlow[k] == INVALID_HANDLE || g_lbExtAtr[k] == INVALID_HANDLE) return mk_extAtr;
+   double e[1], at[1];
+   if(CopyBuffer(g_lbExtSlow[k], 0, 0, 1, e) != 1 || CopyBuffer(g_lbExtAtr[k], 0, 1, 1, at) != 1 || at[0] <= 0) return 0;
+   return (mk_bid - e[0]) / at[0];
+}
+
 //+------------------------------------------------------------------+
 //| Mesures sur les vrais ordres : slippage et commission           |
 //+------------------------------------------------------------------+
@@ -172,6 +216,7 @@ void LbCopy(LbScen &d, const LbScen &s)
 {
    d.key = s.key; d.name = s.name;
    for(int i = 0; i < LB_NF; i++) { d.mode[i] = s.mode[i]; d.adj[i] = s.adj[i]; }
+   d.gm = s.gm; d.noise = s.noise; d.extTf = s.extTf;
    d.bal = s.bal; d.start = s.start; d.withdrawn = s.withdrawn; d.reloaded = s.reloaded; d.cycles = s.cycles; d.reloads = s.reloads;
    d.active = s.active; d.cutPend = s.cutPend; d.init = s.init; d.target = s.target; d.peak = s.peak; d.maxDD = s.maxDD; d.minML = s.minML;
    d.t0 = s.t0; d.tEntry = s.tEntry; d.slot = s.slot; d.maxPos = s.maxPos; d.nSeries = s.nSeries;
@@ -266,9 +311,10 @@ int LbFind(LbScen &arr[], int n, string key)
    return -1;
 }
 
-void LbDefine(LbScen &x, string key, string name, string toks)
+void LbDefine(LbScen &x, string key, string name, string toks, string opts = "")
 {
    x.key = key; x.name = name;
+   LbOptsParse(x, opts);
    string a[];
    int n = StringSplit(toks, ',', a);
    for(int i = 0; i < LB_NF; i++)
@@ -315,7 +361,7 @@ void LaboLoadScenarios()
          if(StringSplit(l, '|', f) < 3) continue;
          if(StringFind(f[0], "p") != 0 || n >= LB_MAXSC) continue;   // scénarios perso : clés p…
          if(LbFind(g_lbTmp, n, f[0]) >= 0) continue;
-         LbDefine(g_lbTmp[n], f[0], f[1], f[2]);
+         LbDefine(g_lbTmp[n], f[0], f[1], f[2], ArraySize(f) > 3 ? f[3] : "");
          n++;
       }
    }
@@ -328,8 +374,11 @@ void LaboLoadScenarios()
          int md[LB_NF], aj[LB_NF];
          for(int k = 0; k < LB_NF; k++) { md[k] = g_lbTmp[i].mode[k]; aj[k] = g_lbTmp[i].adj[k]; }
          string nm = g_lbTmp[i].name;
+         double gm = g_lbTmp[i].gm;
+         int nz = g_lbTmp[i].noise, xt = g_lbTmp[i].extTf;
          LbCopy(g_lbTmp[i], g_lb[j]);
          g_lbTmp[i].name = nm;
+         g_lbTmp[i].gm = gm; g_lbTmp[i].noise = nz; g_lbTmp[i].extTf = xt;
          for(int k = 0; k < LB_NF; k++) { g_lbTmp[i].mode[k] = md[k]; g_lbTmp[i].adj[k] = aj[k]; }
       }
       else
@@ -448,7 +497,8 @@ bool LbRaw(int i, double a, int dir, string &why)
       case 9:
       {
          if(dir == 0 || mk_atrPts <= 0) return true;
-         double e = (dir > 0) ? mk_extAtr : -mk_extAtr, mx = PDbl(P_EXTATR) * (1.0 + a);
+         double ex = (g_lbCurExt > 0) ? LbExtAtr(g_lbCurExt) : mk_extAtr;
+         double e = (dir > 0) ? ex : -ex, mx = PDbl(P_EXTATR) * (1.0 + a);
          if(e <= mx) return true;
          why = "Extension " + F1(e) + " x ATR";
          return false;
@@ -457,7 +507,7 @@ bool LbRaw(int i, double a, int dir, string &why)
       {
          if(dir == 0) return true;
          int bars = (int)MathMax(1, MathRound(PInt(P_FRESHBARS) * (1.0 + a)));
-         int age = BarsSinceCross(BarShift(), bars);
+         int age = BarsSinceCrossN(BarShift(), bars, g_lbCurNoise >= 0 ? g_lbCurNoise : PInt(P_FRESHNOISE));
          if(age >= 0 && age <= bars) return true;
          why = "Croisement trop ancien";
          return false;
@@ -477,13 +527,20 @@ void LbEvalAll()
    {
       g_lb[s].ok = true;
       g_lb[s].why = "";
+      g_lbCurNoise = g_lb[s].noise;
+      g_lbCurExt = g_lb[s].extTf;
       for(int i = 0; i < LB_NF; i++)
       {
          int m = g_lb[s].mode[i];
          bool pass;
          string w = "";
          if(m == LBM_OFF) continue;
-         if(m == LBM_SAME || (m == LBM_TOGGLE && FbOn(i)))
+         if((i == 9 && g_lb[s].extTf > 0) || (i == 10 && g_lb[s].noise >= 0))   // 7.3.0 : option du scénario : calcul propre
+         {
+            if(!LbOn(g_lb[s], i)) continue;
+            pass = LbRaw(i, (m == LBM_ON ? g_lb[s].adj[i] : 0) / 100.0, dir, w);
+         }
+         else if(m == LBM_SAME || (m == LBM_TOGGLE && FbOn(i)))
          {
             if(m == LBM_TOGGLE || !FbOn(i)) continue;  // inversé d'un filtre actif = désactivé
             pass = FbOK(i);                              // exactement le verdict du compte réel (antirebond compris)
@@ -505,6 +562,8 @@ void LbEvalAll()
          }
       }
    }
+   g_lbCurNoise = -1;
+   g_lbCurExt = 0;
 }
 
 //+------------------------------------------------------------------+
@@ -561,7 +620,7 @@ void LbGrid(LbScen &x, double bid, double ask)
    int n = x.nPos + x.nPend;
    while(x.nPend < maxp && n < LB_MAXPOS)
    {
-      double stepPts = CalcGridStep(n);
+      double stepPts = CalcGridStep(n) * (x.gm > 0 ? x.gm : 1.0);   // 7.3.0 : écart de grille du scénario
       double lot     = CalcLot(n);
       double price   = buy ? anchor - stepPts * _Point : anchor + stepPts * _Point;
       if(buy)
@@ -622,7 +681,7 @@ void LbEnd(LbScen &x, string res)
 {
    datetime now = TimeGMT();
    double profit = x.bal - x.init;
-   string d = "{" + LbJ("sc", x.key, true) + "," + LbJ("nom", LbName(x), true) + "," + LbJ("spec", LbSpec(x), true) + "," +
+   string d = "{" + LbJ("sc", x.key, true) + "," + LbJ("nom", LbName(x), true) + "," + LbJ("spec", LbSpec(x), true) + "," + LbJ("opts", LbOpts(x), true) + "," +
               LbJ("creneau", x.slot, true) + "," + LbJ("debut", IntegerToString((long)x.t0)) + "," + LbJ("fin", IntegerToString((long)now)) + "," +
               LbJ("res", res, true) + "," + LbJ("depart", NumS(x.init)) + "," + LbJ("cible", NumS(x.target)) + "," +
               LbJ("solde", NumS(x.bal)) + "," + LbJ("profit", NumS(profit)) + "," + LbJ("dd", NumS(x.maxDD)) + "," +
@@ -916,7 +975,7 @@ void LaboLoadState()
       if(StringSplit(StringSubstr(l, 2), '|', f) < 22) continue;
       int s = g_lbN;
       LbClearGoal(g_lb[s]);
-      g_lb[s].key = f[0]; g_lb[s].name = f[0];
+      g_lb[s].key = f[0]; g_lb[s].name = f[0]; g_lb[s].gm = 1.0; g_lb[s].noise = -1; g_lb[s].extTf = 0;
       for(int i = 0; i < LB_NF; i++) { g_lb[s].mode[i] = LBM_SAME; g_lb[s].adj[i] = 0; }
       g_lb[s].bal = StringToDouble(f[1]); g_lb[s].start = StringToDouble(f[2]); g_lb[s].withdrawn = StringToDouble(f[3]);
       g_lb[s].reloaded = StringToDouble(f[4]); g_lb[s].cycles = (int)StringToInteger(f[5]); g_lb[s].reloads = (int)StringToInteger(f[6]);
@@ -955,6 +1014,10 @@ void LaboInit()
    g_lbN = 0;
    if(!g_bt) LaboLoadState();
    LaboLoadScenarios();
+   g_lbExtSlow[0] = iMA(_Symbol, PERIOD_M15, PInt(P_SLOW), 0, MODE_EMA, PRICE_CLOSE);   // 7.3.0 : extension M15 / H1 des scénarios
+   g_lbExtAtr[0]  = iATR(_Symbol, PERIOD_M15, PInt(P_ATRP));
+   g_lbExtSlow[1] = iMA(_Symbol, PERIOD_H1, PInt(P_SLOW), 0, MODE_EMA, PRICE_CLOSE);
+   g_lbExtAtr[1]  = iATR(_Symbol, PERIOD_H1, PInt(P_ATRP));
    if(g_bt)
    {
       g_lbWanted = true;                             // le backtest joue toujours les scénarios
@@ -982,7 +1045,7 @@ void LbEtat()
    for(int s = 0; s < g_lbN; s++)
    {
       j += (s ? "," : "") + "{" + LbJ("sc", g_lb[s].key, true) + "," + LbJ("nom", LbName(g_lb[s]), true) + "," +
-           LbJ("spec", LbSpec(g_lb[s]), true) + "," + LbJ("solde", NumS(g_lb[s].bal)) + "," +
+           LbJ("spec", LbSpec(g_lb[s]), true) + "," + LbJ("opts", LbOpts(g_lb[s]), true) + "," + LbJ("solde", NumS(g_lb[s].bal)) + "," +
            LbJ("equity", NumS(g_lb[s].bal + LbFloating(g_lb[s], bid, ask))) + "," + LbJ("depart_labo", NumS(g_lb[s].start)) + "," +
            LbJ("cycles", IntegerToString(g_lb[s].cycles)) + "," + LbJ("retraits", NumS(g_lb[s].withdrawn)) + "," +
            LbJ("recharges", NumS(g_lb[s].reloaded)) + "," + LbJ("actif", BoolS(g_lb[s].active)) + "," +

@@ -17,7 +17,7 @@
 //|   SX_Panel.mqh     panneau d'informations dynamique              |
 //+------------------------------------------------------------------+
 #property copyright   "ScalpX"
-#property version     "7.02"
+#property version     "7.03"
 #property description "ScalpX v6.1.0 — EMA 10/20 + grille ATR + TP commun + filtres multi-timeframe, pilotage par bot central (fichiers)"
 
 // [SEUIL500] début : TEST UNIQUEMENT (test B-3 de la checklist). Décommenter pour simuler un glissement de 2.0 (devise du compte)
@@ -146,6 +146,12 @@ input int    BtGmtHiver = -99;                        // Décalage GMT du serveu
 input bool   BtHeureEteUS = true;                     // Le serveur suit l'heure d'été américaine (+1 h)
 input double BtCommissionLot = 0.0;                   // Labo : commission par lot et par côté (mesurée en réel)
 input double BtSlippagePts = 0.0;                     // Labo : slippage moyen en points (mesuré en réel)
+// [ARCHI] fin
+
+// [ARCHI] début : 7.3.0 réglages des filtres d'extension et de signal récent (valeurs par défaut = comportement inchangé)
+input group "══ Filtres : extension et signal récent ══"
+input int    FreshSignalIgnoreBars = 0;               // Signal récent : recroisements des EMA de N bougies ou moins ignorés (0 = aucun : comportement d'avant)
+input int    ExtensionTimeframe = 0;                  // Extension mesurée sur : 0 = TF du robot, 1 = M1, 2 = M5, 3 = M15, 4 = M30, 5 = H1, 6 = H4
 // [ARCHI] fin
 
 //+------------------------------------------------------------------+

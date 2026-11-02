@@ -621,7 +621,7 @@ void FilterDetail(int i, string &value, string &rule)
          break;
       }
       // [ARCHI] début : 6.6.0
-      case 9: value = F1(MathAbs(mk_extAtr)) + " x ATR de l'EMA lente"; rule = "maximum " + F1(PDbl(P_EXTATR)) + " x ATR dans le sens du signal (" + sig + ")"; break;
+      case 9: value = F1(MathAbs(mk_extAtr)) + " x ATR de l'EMA lente" + ExtTfText(); rule = "maximum " + F1(PDbl(P_EXTATR)) + " x ATR dans le sens du signal (" + sig + ")"; break;
       case 10: value = FreshText(); rule = "croisement des EMA il y a " + IntegerToString(PInt(P_FRESHBARS)) + " bougies au plus"; break;
       // [ARCHI] fin
       default: value = F0(mk_spread) + " pts"; rule = "maximum " + IntegerToString(PInt(P_MAXSPREAD)) + " pts"; break;
