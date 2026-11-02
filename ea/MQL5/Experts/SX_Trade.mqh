@@ -18,6 +18,8 @@ void ReleaseIndicators()
    if(g_hFastHi != INVALID_HANDLE) { IndicatorRelease(g_hFastHi); g_hFastHi = INVALID_HANDLE; }
    if(g_hSlowHi != INVALID_HANDLE) { IndicatorRelease(g_hSlowHi); g_hSlowHi = INVALID_HANDLE; }
    if(g_hATRHi  != INVALID_HANDLE) { IndicatorRelease(g_hATRHi);  g_hATRHi  = INVALID_HANDLE; }
+   if(g_hSlowExt != INVALID_HANDLE) { IndicatorRelease(g_hSlowExt); g_hSlowExt = INVALID_HANDLE; }   // [ARCHI] 7.3.0
+   if(g_hATRExt  != INVALID_HANDLE) { IndicatorRelease(g_hATRExt);  g_hATRExt  = INVALID_HANDLE; }
 }
 
 bool InitIndicators()
@@ -33,6 +35,14 @@ bool InitIndicators()
    g_hFastHi = iMA(_Symbol, g_hiTF, PInt(P_HIFAST), 0, MODE_EMA, PRICE_CLOSE);
    g_hSlowHi = iMA(_Symbol, g_hiTF, PInt(P_HISLOW), 0, MODE_EMA, PRICE_CLOSE);
    g_hATRHi  = iATR(_Symbol, g_hiTF, PInt(P_ATRP));
+   // [ARCHI] début : 7.3.0 extension mesurée sur un autre timeframe (facultatif : sans ces indicateurs, le filtre utilise le TF du robot)
+   if(PInt(P_EXTTF) > 0)
+   {
+      ENUM_TIMEFRAMES etf = TfFromIndex(PInt(P_EXTTF) - 1);
+      g_hSlowExt = iMA(_Symbol, etf, PInt(P_SLOW), 0, MODE_EMA, PRICE_CLOSE);
+      g_hATRExt  = iATR(_Symbol, etf, PInt(P_ATRP));
+   }
+   // [ARCHI] fin
    if(g_hFast == INVALID_HANDLE || g_hSlow == INVALID_HANDLE || g_hATR == INVALID_HANDLE ||
       g_hFastLo == INVALID_HANDLE || g_hSlowLo == INVALID_HANDLE || g_hFastHi == INVALID_HANDLE ||
       g_hSlowHi == INVALID_HANDLE || g_hATRHi == INVALID_HANDLE)
