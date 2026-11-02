@@ -489,7 +489,7 @@ def labo_text(real, scen: dict, days: int, scope: str, cur: str, reset_ts: int =
         if v.text:
             line += f"\n   ↳ {v.text}"
         out.append(line)
-    out += ["", "<i>🟢 trop restrictif / meilleur · 🛡️ évite des pertes · 🔴 moins bon · ⚪ équivalent · "
+    out += ["", "<i>🟢 trop restrictif / meilleur · ⚖️ plus de gain, plus de risque · 🛡️ évite des pertes · 🔴 moins bon · ⚪ équivalent · "
                 f"⏳ moins de {labo.MIN_GOALS} objectifs. Juger sur 2 semaines au moins.</i>"]
     text = "\n".join(out)
     if len(text) > max_len:                         # trop long pour Telegram : verdicts en abrégé (icônes), puis lignes en moins

@@ -196,3 +196,14 @@ async def test_scenarios_conseilles_et_options_dans_l_editeur(svc):  # noqa: F81
     await router.on_callback("d:labv")                            # options seules : accepté
     c = [c for c in labo.load_config(common).customs if c.key == "p1"][0]
     assert c.opts == {"g": "1.3", "x": "2"} and c.toks == ["="] * len(labo.CODES)
+
+
+def test_verdicts_ignorent_les_ecarts_minuscules():
+    ref = labo.ScenStat("miroir", launched=95, won=85, net=73.90, dd_max=51.9)
+    v = lambda **k: labo.verdict(labo.ScenStat(k.pop("key", "t2"), k.pop("name", "Sans X"), launched=95, **k), ref).icon
+    assert v(won=85, net=73.96, dd_max=51.9) == "⚪"                  # + 0,06 € : rien à conclure
+    assert v(won=115, net=118.12, dd_max=48.3) == "🟢"               # + 30 objectifs : trop restrictif
+    assert v(won=114, net=111.01, dd_max=63.0) == "⚖️"               # plus de gain mais drawdown + 11 pts
+    assert v(won=87, net=76.69, dd_max=37.1) == "🟢"                 # gain équivalent, drawdown − 15 pts
+    assert v(won=67, net=55.46, dd_max=53.7) == "🔴"
+    assert v(won=95, net=10.0, dd_max=90, lost=1) == "🛡️"
