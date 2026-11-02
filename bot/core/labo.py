@@ -461,7 +461,7 @@ def brief(rows: list[dict], slots: dict | None = None) -> list[str]:
             sure_change.append((s.net - ref.net, f"{_action(s)} ({gain}, ✅ {s.won - ref.won:+d}, DD {s.dd_max:.0f} %)"))
         elif v.icon == "🛡️":                                 # pertes / drawdown : événements rares, pas de test des moitiés
             sure_keep.append(f"{_keep(s)} (sans : 💀 {s.lost}, DD {s.dd_max:.0f} %)")
-        elif s.lost > 0 and s.net > ref.net:
+        elif s.lost > 0 and v.icon in ("🟢", "⚖️"):
             unsure.append(f"{s.name or s.key} (gagne plus mais 💀 {s.lost})")
         elif v.icon in ("🟢", "⚖️"):
             unsure.append(f"{s.name or s.key} {v.icon}")
