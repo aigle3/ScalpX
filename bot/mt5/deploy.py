@@ -229,10 +229,17 @@ class DeployManager:
         pre_cycle = pre.cycle if pre else None
         was_running = self.mgr.is_running(inst)
         self.db.set_desired(inst.id, MAINTENANCE)                         # 1) le watchdog ignore
-        await self._step(inst, f"🔧 maintenance : plus de nouvelle position (version actuelle {pre.version if pre and pre.version else '?'}"
+        await self._step(inst, ("🔧 maintenance : plus de nouvelle position" if self.cfg.timing.deploy_wait_flat else "🔧 mise à jour")
+                               + f" (version actuelle {pre.version if pre and pre.version else '?'}"
                                f", état {pre_etat or '?'}, cycle {pre_cycle if pre_cycle is not None else '?'})"
                                + ("" if was_running else " — terminal arrêté"))
-        if was_running:
+        if was_running and not self.cfg.timing.deploy_wait_flat:
+            # mise à jour immédiate : pas d'attente de la fin de la série. Les positions (avec leur TP) et les ordres de grille
+            # restent chez le broker ; le nouvel EA les retrouve (même magic) et reprend l'objectif en cours.
+            n = pre.positions if pre is not None else 0
+            await self._step(inst, "⚡ mise à jour immédiate" + (f" : {n} position(s) laissée(s) chez le broker (TP en place), "
+                                                               "reprises par le nouvel EA" if n else " : aucune position ouverte"))
+        elif was_running:
             r = await self.cmdq.send_and_wait(inst.id, "MAINTENANCE_ON", timeout=self.cfg.timing.ack_timeout_s)   # 2)
             if not r.ok:
                 self.db.set_desired(inst.id, DEMARRE)

@@ -94,7 +94,7 @@ Versions à trois niveaux, indépendantes : bot (`version.txt` du bot) et EA (`e
 ## Déploiement de l'EA sur les comptes
 
 Tout nouvel `.ex5` dans BASE (compilation automatique, bouton 🔨 ou F7 dans MetaEditor) est proposé : tous, un compte
-d'abord, une sélection ou plus tard. Compte par compte : maintenance → attente de 0 position → sauvegarde de l'ancien `.ex5`
+d'abord, une sélection ou plus tard. Compte par compte, **tout de suite** (positions et ordres laissés chez le broker avec leur TP, repris par le nouvel EA ; `deploy_wait_flat = true` dans `[timing]` pour attendre d'abord la fin de la série, comme avant) → sauvegarde de l'ancien `.ex5`
 (`ex5_backup\`) → arrêt propre → copie du seul `.ex5` → relance → vérification d'un heartbeat frais, état et cycle inchangés.
 Échec : ancien `.ex5` restauré, déploiement stoppé. Un déploiement interrompu (redémarrage du VPS) se reprend ou s'annule.
 
