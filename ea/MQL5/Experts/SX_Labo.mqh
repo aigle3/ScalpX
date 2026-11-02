@@ -51,6 +51,7 @@ struct LbScen
    double   gm;                // 7.3.0 : multiplicateur de l'écart de grille (1 = comme le compte)
    int      noise;             // 7.3.0 : signal récent, recroisements ignorés (-1 = comme le compte)
    int      extTf;             // 7.3.0 : extension mesurée sur 0 = comme le compte, 1 = TF du robot, 2 = M15, 3 = H1
+   int      fbars;             // 7.4.0 : signal récent, nombre de bougies max (0 = comme le compte)
    //--- compte virtuel
    double   bal;
    double   start;
@@ -121,12 +122,13 @@ string LbFile() { return FileId("labo", ".dat"); }
 //--- 7.3.0 : options par scénario (écart de grille, respirations du signal récent, timeframe de l'extension)
 int      g_lbCurNoise = -1;
 int      g_lbCurExt   = 0;
+int      g_lbCurBars  = 0;
 int      g_lbExtSlow[2] = { INVALID_HANDLE, INVALID_HANDLE };   // EMA lente M15, H1
 int      g_lbExtAtr[2]  = { INVALID_HANDLE, INVALID_HANDLE };   // ATR M15, H1
 
 void LbOptsParse(LbScen &x, string o)
 {
-   x.gm = 1.0; x.noise = -1; x.extTf = 0;
+   x.gm = 1.0; x.noise = -1; x.extTf = 0; x.fbars = 0;
    string p[];
    int n = StringSplit(o, ';', p);
    for(int i = 0; i < n; i++)
@@ -136,6 +138,7 @@ void LbOptsParse(LbScen &x, string o)
       if(kv[0] == "g") x.gm = MathMax(0.5, MathMin(4.0, StringToDouble(kv[1])));
       else if(kv[0] == "n") x.noise = (int)MathMax(-1, MathMin(20, StringToInteger(kv[1])));
       else if(kv[0] == "x") x.extTf = (int)MathMax(0, MathMin(3, StringToInteger(kv[1])));
+      else if(kv[0] == "b") x.fbars = (int)MathMax(0, MathMin(200, StringToInteger(kv[1])));
    }
 }
 
@@ -145,6 +148,7 @@ string LbOpts(const LbScen &x)
    if(x.gm != 1.0) s += "g=" + DoubleToString(x.gm, 2);
    if(x.noise >= 0) s += (s != "" ? ";" : "") + "n=" + IntegerToString(x.noise);
    if(x.extTf > 0) s += (s != "" ? ";" : "") + "x=" + IntegerToString(x.extTf);
+   if(x.fbars > 0) s += (s != "" ? ";" : "") + "b=" + IntegerToString(x.fbars);
    return s;
 }
 
@@ -216,7 +220,7 @@ void LbCopy(LbScen &d, const LbScen &s)
 {
    d.key = s.key; d.name = s.name;
    for(int i = 0; i < LB_NF; i++) { d.mode[i] = s.mode[i]; d.adj[i] = s.adj[i]; }
-   d.gm = s.gm; d.noise = s.noise; d.extTf = s.extTf;
+   d.gm = s.gm; d.noise = s.noise; d.extTf = s.extTf; d.fbars = s.fbars;
    d.bal = s.bal; d.start = s.start; d.withdrawn = s.withdrawn; d.reloaded = s.reloaded; d.cycles = s.cycles; d.reloads = s.reloads;
    d.active = s.active; d.cutPend = s.cutPend; d.init = s.init; d.target = s.target; d.peak = s.peak; d.maxDD = s.maxDD; d.minML = s.minML;
    d.t0 = s.t0; d.tEntry = s.tEntry; d.slot = s.slot; d.maxPos = s.maxPos; d.nSeries = s.nSeries;
@@ -375,10 +379,10 @@ void LaboLoadScenarios()
          for(int k = 0; k < LB_NF; k++) { md[k] = g_lbTmp[i].mode[k]; aj[k] = g_lbTmp[i].adj[k]; }
          string nm = g_lbTmp[i].name;
          double gm = g_lbTmp[i].gm;
-         int nz = g_lbTmp[i].noise, xt = g_lbTmp[i].extTf;
+         int nz = g_lbTmp[i].noise, xt = g_lbTmp[i].extTf, fb = g_lbTmp[i].fbars;
          LbCopy(g_lbTmp[i], g_lb[j]);
          g_lbTmp[i].name = nm;
-         g_lbTmp[i].gm = gm; g_lbTmp[i].noise = nz; g_lbTmp[i].extTf = xt;
+         g_lbTmp[i].gm = gm; g_lbTmp[i].noise = nz; g_lbTmp[i].extTf = xt; g_lbTmp[i].fbars = fb;
          for(int k = 0; k < LB_NF; k++) { g_lbTmp[i].mode[k] = md[k]; g_lbTmp[i].adj[k] = aj[k]; }
       }
       else
@@ -506,7 +510,7 @@ bool LbRaw(int i, double a, int dir, string &why)
       case 10:
       {
          if(dir == 0) return true;
-         int bars = (int)MathMax(1, MathRound(PInt(P_FRESHBARS) * (1.0 + a)));
+         int bars = (g_lbCurBars > 0) ? g_lbCurBars : (int)MathMax(1, MathRound(PInt(P_FRESHBARS) * (1.0 + a)));   // 7.4.0 : bougies du scénario
          int age = BarsSinceCrossN(BarShift(), bars, g_lbCurNoise >= 0 ? g_lbCurNoise : PInt(P_FRESHNOISE));
          if(age >= 0 && age <= bars) return true;
          why = "Croisement trop ancien";
@@ -529,13 +533,14 @@ void LbEvalAll()
       g_lb[s].why = "";
       g_lbCurNoise = g_lb[s].noise;
       g_lbCurExt = g_lb[s].extTf;
+      g_lbCurBars = g_lb[s].fbars;
       for(int i = 0; i < LB_NF; i++)
       {
          int m = g_lb[s].mode[i];
          bool pass;
          string w = "";
          if(m == LBM_OFF) continue;
-         if((i == 9 && g_lb[s].extTf > 0) || (i == 10 && g_lb[s].noise >= 0))   // 7.3.0 : option du scénario : calcul propre
+         if((i == 9 && g_lb[s].extTf > 0) || (i == 10 && (g_lb[s].noise >= 0 || g_lb[s].fbars > 0)))   // 7.3.0 : option du scénario : calcul propre
          {
             if(!LbOn(g_lb[s], i)) continue;
             pass = LbRaw(i, (m == LBM_ON ? g_lb[s].adj[i] : 0) / 100.0, dir, w);
@@ -564,6 +569,7 @@ void LbEvalAll()
    }
    g_lbCurNoise = -1;
    g_lbCurExt = 0;
+   g_lbCurBars = 0;
 }
 
 //+------------------------------------------------------------------+
@@ -975,7 +981,7 @@ void LaboLoadState()
       if(StringSplit(StringSubstr(l, 2), '|', f) < 22) continue;
       int s = g_lbN;
       LbClearGoal(g_lb[s]);
-      g_lb[s].key = f[0]; g_lb[s].name = f[0]; g_lb[s].gm = 1.0; g_lb[s].noise = -1; g_lb[s].extTf = 0;
+      g_lb[s].key = f[0]; g_lb[s].name = f[0]; g_lb[s].gm = 1.0; g_lb[s].noise = -1; g_lb[s].extTf = 0; g_lb[s].fbars = 0;
       for(int i = 0; i < LB_NF; i++) { g_lb[s].mode[i] = LBM_SAME; g_lb[s].adj[i] = 0; }
       g_lb[s].bal = StringToDouble(f[1]); g_lb[s].start = StringToDouble(f[2]); g_lb[s].withdrawn = StringToDouble(f[3]);
       g_lb[s].reloaded = StringToDouble(f[4]); g_lb[s].cycles = (int)StringToInteger(f[5]); g_lb[s].reloads = (int)StringToInteger(f[6]);

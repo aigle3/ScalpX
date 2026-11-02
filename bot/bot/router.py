@@ -134,7 +134,7 @@ class Router:
             if len(p) > 2 and p[2].isdigit() and int(p[2]) in self.dash.SST_DAYS:
                 self.dash.sst_days = int(p[2])
             self.dash.goto("sst")
-        elif sub.startswith("bt"):                          # 🧪 backtest
+        elif sub.startswith("bt") or sub.startswith("qt"):  # 🧪 backtest et tests rapides
             r = await self._bt_cb(sub, p)
             if r is not None:
                 return r
@@ -625,6 +625,30 @@ class Router:
                 else:
                     self._bg(self.start_backtest("labo", d_from, d_to, "reel", d.lab_acc or ""))
                     return "Backtest lancé"
+        elif sub == "qt":
+            d.goto("qt")
+        elif sub == "qtd" and arg.isdigit():
+            d.qt_days = int(arg)
+            d.goto("qt")
+        elif sub == "qtgo" and arg:                         # thème : scénarios installés + backtest lancé
+            from core import labo
+            if arg not in labo.THEMES:
+                d.goto("qt")
+            elif self.bt.busy():
+                d.flash("⏳ Un backtest est déjà en cours.")
+            elif not self.bt.configured():
+                d.goto("bt")
+                d.flash("⚙️ Configure d'abord le terminal de backtest.")
+            else:
+                common = self.ctx.cfg.paths.common()
+                cfg = labo.load_config(common)
+                names = labo.apply_theme(cfg, arg)
+                labo.save_config(common, cfg)
+                title = labo.THEMES[arg][0]
+                self.ctx.db.add_action("", f"Test rapide « {title} » : {len(names)} scénario(s) installé(s)", True)
+                d_from, d_to = bt.date_range(d.qt_days)
+                self._bg(self.start_backtest("bt", d_from, d_to, d.bt_model, d.bt_src, title))
+                return "Test lancé"
         elif sub == "btc":                                  # configuration du compte du testeur
             if self.bt.busy():
                 d.flash("⏳ Attends la fin du backtest en cours.")
@@ -759,7 +783,7 @@ class Router:
                 break
         return params, bui.source_label(self.dash, src), deposit, currency, leverage, comm, slip
 
-    async def start_backtest(self, kind: str, d_from: int, d_to: int, model: str, src: str) -> None:
+    async def start_backtest(self, kind: str, d_from: int, d_to: int, model: str, src: str, title: str = "") -> None:
         from core import backtest as bt
         from mt5.backtester import Run
         inputs = await self._bt_inputs(src)
@@ -768,6 +792,8 @@ class Router:
             await self.dash.refresh(force=True)
             return
         params, label, deposit, currency, leverage, comm, slip = inputs
+        if title:
+            label = f"{title} · {label}"
         rid = self.ctx.db.bt_create(kind, d_from, d_to, model, label)
         run = Run(rid, kind, d_from, d_to, model, label)
         run.note(f"📋 Réglages : {label} · dépôt {deposit:.2f} {currency} · levier 1:{leverage}")

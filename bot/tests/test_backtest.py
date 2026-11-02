@@ -229,3 +229,32 @@ def test_rapport_quotidien_essentiel(svc):  # noqa: F811
     rep = build_report(ctx, now - 86400, title="📝 Rapport quotidien")
     assert "Capital : 140.00 EUR" in rep and "1 atteints sur 2" in rep and "1 manqués" in rep
     assert "Par compte" in rep and "🎯 1/2" in rep and "Performance par compte" not in rep
+
+
+@pytest.mark.asyncio
+async def test_tests_rapides_un_bouton_scenarios_et_backtest(svc):  # noqa: F811
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    tp = TesterProcs(ctx.cfg.paths.common())
+    router.bt.procs = tp
+    ctx.cfg.backtest.poll_s = 0.01
+    folder = router.bt.folder
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / ctx.cfg.mt5.terminal_exe).write_bytes(b"MZ")
+    await router.on_callback("d:qt")
+    assert "configure" in dash.render()[0].lower()
+    ctx.db.meta_set("bt_account", json.dumps({"login": 1, "server": "S"}))
+    await router.on_callback("d:qtd:7")
+    text, kb = dash.render()
+    assert "Bougies après le croisement" in text and any(d == "d:qtgo:bougies" for row in kb for _, d in row)
+    dash.bt_src = "base"
+    await router.on_callback("d:qtgo:bougies")
+    cfg = labo.load_config(ctx.cfg.paths.common())
+    assert [c.opts.get("b") for c in cfg.customs] == ["6", "12", "24", "6", "12", "24", "36"]
+    assert all(c.toks[labo.CODES.index("fresh")] == "on" for c in cfg.customs)
+    line = (ctx.cfg.paths.common() / labo.SCEN_FILE).read_text(encoding="utf-8")
+    assert "b=6;" not in line and "|n=3;b=6" in line or "|b=6" in line
+    assert await _until(lambda: any("Backtest #" in s[1] and "terminé" in s[1] for s in sender.sent), 200)
+    row = ctx.db.bt_list(1)[0]
+    assert row["source"].startswith("⏱ Bougies après le croisement") and row["d_to"] - row["d_from"] == 7 * 86400
+    await router.on_callback("d:qtgo:filtres")                       # thème sans scénario perso : seulement les 13 automatiques
+    assert labo.load_config(ctx.cfg.paths.common()).customs == []

@@ -562,8 +562,10 @@ def bt_result_text(rid: int, kind: str, source: str, model: str, res, scen: dict
     rows = [s for s in scen.values() if s.launched]
     if rows and ref is not None:
         rows.sort(key=lambda s: -(s.net - ref.net))
-        out += ["", "<b>🧬 Labo des filtres sur cette période</b>"]
-        shown = [ref] + [s for s in rows if s is not ref][:7]
+        out += ["", "<b>🧬 Labo des filtres sur cette période</b> <i>(comparé aux réglages actuels)</i>"]
+        customs = [s for s in rows if s.key.startswith("p")]                  # scénarios du test : tous affichés
+        others = [s for s in rows if s is not ref and not s.key.startswith("p")]
+        shown = [ref] + customs + others[:max(3, 8 - len(customs))]
         for s in shown:
             v = labo.verdict(s, ref)
             d = f" ({s.net - ref.net:+.2f})" if s is not ref else ""
