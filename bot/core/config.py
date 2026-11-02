@@ -49,6 +49,8 @@ class Timing(BaseModel):
     ack_timeout_s: int = 20
     close500_wait_max_s: int = 300
     maintenance_wait_s: int = 600          # attente 0 position avant « en attente »
+    deploy_wait_flat: bool = False         # mise à jour de l'EA : attendre la fin de la série (0 position) ? Non par défaut :
+                                           # le terminal est relancé tout de suite, positions et ordres restent chez le broker
     deploy_retry_min: int = 15
     restarts_per_hour: int = 3
     muet_restart_s: int = 300              # terminal lancé mais EA muet (aucun heartbeat) depuis ce délai : relance forcée (0 = jamais)

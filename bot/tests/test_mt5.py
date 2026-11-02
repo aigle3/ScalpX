@@ -358,7 +358,7 @@ async def test_deploiement_un_compte_etat_cycle_conserves(stack):
     assert db.deployments(1)[0]["status"] == "OK"
     # chaque étape est visible en direct, le résultat dit quand le compte est revenu ; trace dans le journal des actions
     texts = [v[inst.id][1] for v in steps]
-    for key in ("maintenance", "sauvegardé", "arrêt du terminal", "terminal fermé", "copié", "terminal relancé"):
+    for key in ("mise à jour immédiate", "sauvegardé", "arrêt du terminal", "terminal fermé", "copié", "terminal relancé"):
         assert any(key in t for t in texts), (key, texts)
     assert "en ligne, connecté" in out[0].message and "terminal revenu en" in out[0].message
     assert "en ligne" in steps[-1][inst.id][1]
@@ -367,8 +367,36 @@ async def test_deploiement_un_compte_etat_cycle_conserves(stack):
 
 
 @pytest.mark.asyncio
+async def test_deploiement_immediat_sans_attendre_la_fin_de_la_serie(stack):
+    """Par défaut (deploy_wait_flat = false) : série ouverte, mise à jour tout de suite ; positions laissées chez le broker."""
+    cfg, db, procs, status, cmdq, mgr, ea = stack
+    inst = seed(stack)
+    ea.accounts[inst.id]["positions"] = 2
+    publish(cfg, "5.1")
+    ea.start()
+    try:
+        for _ in range(100):                                   # premier statut de l'EA (positions connues)
+            if status.read(inst.id) is not None:
+                break
+            await asyncio.sleep(0.05)
+        dm = DeployManager(cfg, db, mgr, status, cmdq)
+        steps = []
+
+        async def progress(view):
+            steps.extend(t for _, t in view.values())
+        out = await dm.run([inst.id], progress)
+    finally:
+        await ea.stop()
+    assert out[0].status == "ok"
+    assert (Path(inst.folder) / "MQL5" / "Experts" / "ScalpX_v5.ex5").read_text() == "5.1"
+    assert db.get(inst.id).desired_state == DEMARRE
+    assert any("mise à jour immédiate : 2 position(s)" in t for t in steps) and not any("attente de la fin" in t for t in steps)
+
+
+@pytest.mark.asyncio
 async def test_deploiement_position_ouverte_en_attente(stack):
     cfg, db, procs, status, cmdq, mgr, ea = stack
+    cfg.timing.deploy_wait_flat = True                         # option : attendre la fin de la série
     inst = seed(stack)
     ea.accounts[inst.id]["positions"] = 2
     publish(cfg, "5.1")
@@ -573,6 +601,7 @@ def test_verrou_remplace_l_ancien_bot():
 async def test_deploiement_annule_en_retirant_la_maintenance(stack):
     """Série ouverte : pendant l'attente, 🔧 retirer la maintenance annule la mise à jour ; le compte repart, les suivants ne sont pas faits."""
     cfg, db, procs, status, cmdq, mgr, ea = stack
+    cfg.timing.deploy_wait_flat = True
     a = seed(stack, login=71)
     b = seed(stack, login=72)
     ea.accounts.setdefault(a.id, {})["positions"] = 2
