@@ -279,7 +279,7 @@ async def test_ping_etat_rapport_export(svc):
     assert "pong" in sender.sent[-1][1]
     await router.cmd_rapport()
     rep = sender.sent[-1][1]
-    assert "Clôtures à 500" in rep and "Réussies : 1" in rep and "378.20" in rep
+    assert "Capital" in rep and "Retiré : 378.20" in rep and "Par compte" in rep
     await router.cmd_export("withdrawals")
     assert sender.docs and sender.docs[0][0] == "scalpx_withdrawals.csv"
     await router.cmd_export("instances")

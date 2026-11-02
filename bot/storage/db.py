@@ -51,6 +51,9 @@ CREATE INDEX IF NOT EXISTS ix_act ON actions(ts);
 CREATE TABLE IF NOT EXISTS labo(
   iid TEXT, ts INTEGER, kind TEXT, sc TEXT, data TEXT);
 CREATE INDEX IF NOT EXISTS ix_labo ON labo(ts);
+CREATE TABLE IF NOT EXISTS backtests(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, created INTEGER, kind TEXT, d_from INTEGER, d_to INTEGER, model TEXT,
+  source TEXT, status TEXT, result TEXT, ended INTEGER, error TEXT);
 """
 
 
@@ -215,6 +218,31 @@ class Database:
         if iid:
             return self._all("SELECT * FROM labo WHERE ts>=? AND iid=? ORDER BY ts", (since, iid))
         return self._all("SELECT * FROM labo WHERE ts>=? ORDER BY ts", (since,))
+
+    # ---- backtests (EA 7.2.0)
+    def bt_create(self, kind: str, d_from: int, d_to: int, model: str, source: str) -> int:
+        with self._lock:
+            cur = self._cx.execute("INSERT INTO backtests(created, kind, d_from, d_to, model, source, status, result, ended, error) "
+                                   "VALUES(?,?,?,?,?,?,?,?,?,?)", (int(time.time()), kind, d_from, d_to, model, source, "en_cours", "", 0, ""))
+            self._cx.commit()
+            return int(cur.lastrowid)
+
+    def bt_update(self, rid: int, status: str, result: str = "", error: str = "") -> None:
+        self._exec("UPDATE backtests SET status=?, result=?, error=?, ended=? WHERE id=?", (status, result, error, int(time.time()), rid))
+
+    def bt_get(self, rid: int) -> sqlite3.Row | None:
+        r = self._all("SELECT * FROM backtests WHERE id=?", (rid,))
+        return r[0] if r else None
+
+    def bt_list(self, limit: int = 8) -> list[sqlite3.Row]:
+        return self._all("SELECT * FROM backtests ORDER BY id DESC LIMIT ?", (limit,))
+
+    def bt_interrupted(self) -> int:
+        """Démarrage du bot : un backtest « en cours » ne l'est plus (suivi perdu)."""
+        rows = self._all("SELECT id FROM backtests WHERE status='en_cours'")
+        for r in rows:
+            self.bt_update(int(r["id"]), "interrompu", "", "Bot redémarré pendant le test.")
+        return len(rows)
 
     def add_closure500(self, iid: str, kind: str, final_balance: float, delta: float, ts: int | None = None) -> None:
         self._exec("INSERT INTO closures500 VALUES(?,?,?,?,?)", (iid, ts or int(time.time()), kind, final_balance, delta))

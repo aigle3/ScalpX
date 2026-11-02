@@ -42,6 +42,12 @@ class Router:
         self.awaiting_preset: tuple[str, str] | None = None   # (compte modèle, preset remplacé) : nom attendu (texte)
         self.awaiting_goal: str | None = None               # compte (ou ALL_ID) dont on attend l'objectif (message texte)
         self._dep_sel: set[str] = set()
+        from mt5.backtester import BacktestManager
+        self.bt = BacktestManager(ctx.cfg, ctx.db, ctx.mgr.procs)      # 🧪 terminal de backtest à part
+        dash.bt = self.bt
+        self.awaiting_bt: str | None = None                 # saisie attendue : login, server_text, password, date
+        self._bt_msg: int | None = None                     # message de suivi du backtest en cours
+        self._bt_last = (0.0, "")                           # dernière édition du suivi (heure, texte)
 
     def _bg(self, coro) -> None:
         """Lance une action longue sans bloquer la réception des mises à jour Telegram."""
@@ -128,6 +134,10 @@ class Router:
             if len(p) > 2 and p[2].isdigit() and int(p[2]) in self.dash.SST_DAYS:
                 self.dash.sst_days = int(p[2])
             self.dash.goto("sst")
+        elif sub.startswith("bt"):                          # 🧪 backtest
+            r = await self._bt_cb(sub, p)
+            if r is not None:
+                return r
         elif sub.startswith("lab"):                         # 🧪 labo des filtres
             r = await self._labo_cb(sub, p)
             if r is not None:
@@ -362,6 +372,9 @@ class Router:
 
     async def on_text(self, text: str) -> None:
         """Message texte libre : valeur attendue d'un paramètre, sinon le tableau de bord revient en bas."""
+        if self.awaiting_bt:
+            await self._bt_text(text)
+            return
         if self.awaiting_goal:
             iid, self.awaiting_goal = self.awaiting_goal, None
             inst = act.target(self.ctx, iid)
@@ -529,6 +542,240 @@ class Router:
                                    "les rapports ne comptent plus que ce qui suit. Le trading réel n'est pas touché.",
                                    self._labo_reset, ("lab",), "♻️ Remettre à zéro")
         return None
+
+    # ------------------------------------------------------------------ 🧪 backtest
+    def _bt_servers(self) -> list[str]:
+        seen: list[str] = []
+        for s in list(self.ctx.cfg.mt5.servers) + [i.server for i in self.ctx.db.list()]:
+            if s and s not in seen:
+                seen.append(s)
+        return seen
+
+    async def _bt_cb(self, sub: str, p: list[str]) -> str | None:
+        from core import backtest as bt
+        from . import backtest_ui as bui
+        arg = p[2] if len(p) > 2 else ""
+        d = self.dash
+        if sub == "bt":
+            if arg.isdigit() and any(int(arg) == x for x, _ in bt.PERIODS):
+                d.bt_days = int(arg)
+            self.awaiting_bt = None
+            d.goto("bt")
+        elif sub == "btm":
+            d.bt_model = "m1" if d.bt_model == "reel" else "reel"
+        elif sub == "bts":
+            srcs = bui.sources(d)
+            cur = d.bt_src if d.bt_src in srcs else (srcs[0] if srcs else "base")
+            d.bt_src = srcs[(srcs.index(cur) + 1) % len(srcs)] if srcs else "base"
+        elif sub == "btd":
+            self.awaiting_bt = "date"
+            d.flash("📅 Envoie la date de début (JJ/MM/AAAA), entre hier et il y a un an.", 120)
+        elif sub == "btl":
+            d.goto("btl")
+        elif sub == "btr" and arg.isdigit():
+            d.goto("btr", arg)
+        elif sub == "btg" and arg.isdigit():
+            await self._bt_chart(int(arg))
+            return ""
+        elif sub == "btx":
+            d.flash("⏹ Arrêt du backtest demandé…" if self.bt.cancel() else "Aucun backtest en cours.")
+        elif sub == "btgo":
+            if self.bt.busy():
+                d.flash("⏳ Un backtest est déjà en cours.")
+            else:
+                d_from, d_to = bt.date_range(d.bt_days)
+                self._bg(self.start_backtest("bt", d_from, d_to, d.bt_model, d.bt_src))
+                return "Backtest lancé"
+        elif sub == "btlab" and arg.isdigit():                # labo : compléter la période par un backtest
+            if self.bt.busy():
+                d.flash("⏳ Un backtest est déjà en cours.")
+            elif not self.bt.configured():
+                d.goto("bt")
+                d.flash("⚙️ Configure d'abord le terminal de backtest.")
+            else:
+                d_from = bt.date_range(d.lab_days)[0]
+                d_to = int(arg)
+                if d_to - d_from < 86400:
+                    d.flash("La période manquante fait moins d'un jour.")
+                else:
+                    self._bg(self.start_backtest("labo", d_from, d_to, "reel", d.lab_acc or ""))
+                    return "Backtest lancé"
+        elif sub == "btc":                                  # configuration du compte du testeur
+            if self.bt.busy():
+                d.flash("⏳ Attends la fin du backtest en cours.")
+            else:
+                self.awaiting_bt = "login"
+                d.bt_wiz = ("login", {})
+                d.goto("btw")
+        elif sub == "btsv":
+            step, data = d.bt_wiz
+            if arg == "new":
+                self.awaiting_bt = "server_text"
+                d.bt_wiz = ("server_text", data)
+            elif arg.isdigit() and int(arg) < len(data.get("servers", [])):
+                data["server"] = data["servers"][int(arg)]
+                self.awaiting_bt = "password"
+                d.bt_wiz = ("password", data)
+            d.goto("btw")
+        elif sub == "btq":
+            self.awaiting_bt = None
+            d.bt_wiz = ("login", {})
+            d.goto("bt")
+        return None
+
+    async def _bt_text(self, text: str) -> None:
+        from core import backtest as bt
+        from core.ids import valid_login, valid_server
+        step, self.awaiting_bt = self.awaiting_bt, None
+        d = self.dash
+        if step == "date":
+            days = bt.parse_date(text)
+            if days is None:
+                d.flash("❌ Date non reconnue (JJ/MM/AAAA, entre hier et il y a un an).")
+            else:
+                d.bt_days = days
+                d.flash(f"📅 Début du backtest : {text.strip()} ({days} j).")
+            d.goto("bt")
+        elif step == "login":
+            v = text.strip()
+            if not valid_login(v):
+                self.awaiting_bt = "login"
+                d.flash("❌ Numéro de compte invalide (chiffres uniquement).")
+            else:
+                d.bt_wiz = ("server", {"login": int(v), "servers": self._bt_servers()})
+                self.awaiting_bt = "server_text" if not d.bt_wiz[1]["servers"] else None
+                if self.awaiting_bt:
+                    d.bt_wiz = ("server_text", d.bt_wiz[1])
+            d.goto("btw")
+        elif step == "server_text":
+            v = text.strip()
+            data = d.bt_wiz[1]
+            if not valid_server(v):
+                self.awaiting_bt = "server_text"
+                d.flash("❌ Nom de serveur invalide.")
+            else:
+                data["server"] = v
+                self.awaiting_bt = "password"
+                d.bt_wiz = ("password", data)
+            d.goto("btw")
+        elif step == "password":
+            data = d.bt_wiz[1]
+            d.bt_wiz = ("login", {})
+            d.goto("bt")
+            if text and "login" in data and "server" in data:
+                self._bg(self._bt_setup(int(data["login"]), data["server"], text))
+        await d.refresh(force=True)
+
+    async def _bt_notify(self, run) -> None:
+        """Message de suivi du backtest : édité en place (au plus toutes les 5 s, et à chaque étape importante)."""
+        views = self.ctx.views()
+        cur = next((v.st.devise for v in views if v.st and v.st.devise), "")
+        text = render.bt_progress_text(run, cur)
+        last_t, last_text = self._bt_last
+        if text == last_text or (not run.done and time.time() - last_t < 5 and run.progress is not None):
+            return
+        kb = [[("⏹ Arrêter le backtest", "d:btx")]] if not run.done else [[("✖ Fermer", "d:close")]]
+        self._bt_last = (time.time(), text)
+        if self._bt_msg is None:
+            self._bt_msg = await self.sender.send(self.chat_id, text, kb, True)
+            return
+        from .ui import EditResult
+        r = await self.sender.edit(self.chat_id, self._bt_msg, text, kb)
+        if r == EditResult.GONE:
+            self._bt_msg = await self.sender.send(self.chat_id, text, kb, True)
+
+    async def _bt_setup(self, login: int, server: str, password: str) -> None:
+        self._bt_msg, self._bt_last = None, (0.0, "")
+        self.ctx.db.add_action("", f"Backtest : configuration du compte {login} ({server})", True)
+        run = await self.bt.setup(login, server, password, currency=self.ctx.cfg.alerts.expected_currency or "EUR",
+                                  notify=self._bt_notify, poll_s=self.ctx.cfg.backtest.poll_s)
+        del password
+        if run.ok:
+            await self.sender.send(self.chat_id, f"✅ <b>Terminal de backtest prêt</b> : compte {login} · {esc(server)}.\n"
+                                                 "Le mot de passe est mémorisé par MT5. Tu peux lancer un backtest (📈 Rapports → 🧪 Backtest).",
+                                   [[("🧪 Backtest", "d:bt"), ("✖ Fermer", "d:close")]], False)
+        else:
+            await self.sender.send(self.chat_id, f"❌ <b>Configuration du terminal de backtest impossible</b>\n{esc(run.error)}",
+                                   [[("🔑 Réessayer", "d:btc"), ("✖ Fermer", "d:close")]], False)
+        await self.dash.refresh(force=True)
+
+    async def _bt_inputs(self, src: str) -> tuple[dict[str, str], str, float, str, int, float, float] | str:
+        """Réglages et paramètres du testeur depuis la source choisie. Texte d'erreur si impossible."""
+        import json as _json
+        from . import backtest_ui as bui
+        insts = self.ctx.db.list()
+        params: dict[str, str] = {}
+        ref = None
+        if src.startswith("preset:"):
+            params = dict(self.dash.store.presets.get(src[7:], {}))
+            if not params:
+                return "Preset introuvable."
+        elif src != "base":
+            ref = self.ctx.db.get(src) if src else (insts[0] if insts else None)
+            if ref is not None:
+                raw = await pui.read_raw(self.ctx, ref)
+                if not raw:
+                    return f"Impossible de lire les réglages de {ref.label} (terminal arrêté ?). Choisis un preset ou BASE."
+                params = raw
+        st_ref = self.ctx.status.read(ref.id) if ref is not None else None
+        if st_ref is None:
+            st_ref = next((v.st for v in self.ctx.views() if v.st), None)
+        currency = (st_ref.devise if st_ref and st_ref.devise else "") or self.ctx.cfg.alerts.expected_currency or "EUR"
+        deposit = float(st_ref.seuil_reprise) if st_ref and st_ref.seuil_reprise else 125.0
+        leverage = int(st_ref.levier) if st_ref and st_ref.levier else self.ctx.cfg.backtest.leverage
+        comm = slip = 0.0
+        for i in ([ref] if ref is not None else []) + insts:
+            try:
+                e = _json.loads(self.ctx.db.meta_get(f"labo_etat_{i.id}", "") or "{}")
+            except ValueError:
+                e = {}
+            if e:
+                comm, slip = float(e.get("comm", 0) or 0), float(e.get("slip", 0) or 0)
+                break
+        return params, bui.source_label(self.dash, src), deposit, currency, leverage, comm, slip
+
+    async def start_backtest(self, kind: str, d_from: int, d_to: int, model: str, src: str) -> None:
+        from core import backtest as bt
+        from mt5.backtester import Run
+        inputs = await self._bt_inputs(src)
+        if isinstance(inputs, str):
+            self.dash.flash("❌ " + inputs)
+            await self.dash.refresh(force=True)
+            return
+        params, label, deposit, currency, leverage, comm, slip = inputs
+        rid = self.ctx.db.bt_create(kind, d_from, d_to, model, label)
+        run = Run(rid, kind, d_from, d_to, model, label)
+        run.note(f"📋 Réglages : {label} · dépôt {deposit:.2f} {currency} · levier 1:{leverage}")
+        self.ctx.db.add_action("", f"Backtest #{rid} lancé ({bt.human_date(d_from)} → {bt.human_date(d_to)}, {bt.MODELS[model][1]})", True)
+        self._bt_msg, self._bt_last = None, (0.0, "")
+        self.dash.flash(f"🧪 Backtest #{rid} lancé : suivi dans le message ci-dessous.")
+        await self.dash.refresh(force=True)
+        run = await self.bt.execute(run, params=params, deposit=deposit, currency=currency, leverage=leverage,
+                                    comm=comm, slip=slip, notify=self._bt_notify, poll_s=self.ctx.cfg.backtest.poll_s)
+        status = "ok" if run.ok else ("arrete" if run.cancelled else "erreur")
+        self.ctx.db.bt_update(rid, status, run.result.to_json() if run.result else "", run.error)
+        if run.ok:
+            r = self.dash._render_bt_result(rid)
+            kb = [[("📈 Courbe du solde", f"d:btg:{rid}"), ("🧪 Labo", "d:lab")], [("✖ Fermer", "d:close")]]
+            await self.sender.send(self.chat_id, r[0] if r else f"✅ Backtest #{rid} terminé.", kb, False)
+            await self._bt_chart(rid)
+        else:
+            await self.sender.send(self.chat_id, f"❌ <b>Backtest #{rid}</b> : {esc(run.error or 'échec')}",
+                                   [[("🧪 Backtest", "d:bt"), ("✖ Fermer", "d:close")]], False)
+        await self.dash.refresh(force=True)
+
+    async def _bt_chart(self, rid: int) -> None:
+        from core import backtest as bt
+        row = self.ctx.db.bt_get(rid)
+        res = bt.Result.from_json(row["result"]) if row is not None and row["result"] else None
+        rows = [{"ts": t, "balance": b, "equity": e} for t, b, e in (res.days if res else [])]
+        st = next((v.st for v in self.ctx.views() if v.st), None)
+        png = balance_chart(rows, f"Backtest #{rid}", st.seuil_arret if st else 500.0, st.seuil_reprise if st else 125.0) if rows else None
+        if png:
+            await self.sender.photo(self.chat_id, png, f"Backtest #{rid} : solde par jour simulé", True)
+        else:
+            self.dash.flash("📈 Pas assez de jours simulés pour une courbe.")
+            await self.dash.refresh(force=True)
 
     async def _labo_reset(self) -> None:
         from core import labo

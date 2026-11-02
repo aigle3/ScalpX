@@ -17,7 +17,7 @@
 //|   SX_Panel.mqh     panneau d'informations dynamique              |
 //+------------------------------------------------------------------+
 #property copyright   "ScalpX"
-#property version     "7.01"
+#property version     "7.02"
 #property description "ScalpX v6.1.0 — EMA 10/20 + grille ATR + TP commun + filtres multi-timeframe, pilotage par bot central (fichiers)"
 
 // [SEUIL500] début : TEST UNIQUEMENT (test B-3 de la checklist). Décommenter pour simuler un glissement de 2.0 (devise du compte)
@@ -139,6 +139,15 @@ input string ObjectifCoupureHeures = "13:45,21";      // 7.0.0 : heures de coupu
 input bool   FermerAutresGraphiques = true;              // Ferme les autres graphiques du terminal au démarrage (un compte = un graphique)
 // [ARCHI] fin
 
+// [ARCHI] début : 7.2.0 backtest piloté par le bot (ignorés hors du testeur de stratégie)
+input group "══ Backtest (bot) ══"
+input string BacktestId = "";                         // Identifiant du backtest (rempli par le bot) ; vide = backtest MT5 classique
+input int    BtGmtHiver = -99;                        // Décalage GMT du serveur en hiver (h) ; -99 = celui du calendrier exporté
+input bool   BtHeureEteUS = true;                     // Le serveur suit l'heure d'été américaine (+1 h)
+input double BtCommissionLot = 0.0;                   // Labo : commission par lot et par côté (mesurée en réel)
+input double BtSlippagePts = 0.0;                     // Labo : slippage moyen en points (mesuré en réel)
+// [ARCHI] fin
+
 //+------------------------------------------------------------------+
 //| MODULES                                                          |
 //+------------------------------------------------------------------+
@@ -151,7 +160,8 @@ input bool   FermerAutresGraphiques = true;              // Ferme les autres gra
 #include "SX_FilterBoard.mqh"
 #include "SX_Journal.mqh"
 #include "SX_Smart.mqh"
-#include "SX_Labo.mqh"                 // [ARCHI] 7.1.0 : labo des filtres (séries virtuelles, aucun ordre réel)
+#include "SX_Labo.mqh"
+#include "SX_Backtest.mqh"             // [ARCHI] 7.2.0 : backtest piloté par le bot                 // [ARCHI] 7.1.0 : labo des filtres (séries virtuelles, aucun ordre réel)
 #include "SX_Chart.mqh"
 #include "SX_Panel.mqh"
 
@@ -160,6 +170,7 @@ input bool   FermerAutresGraphiques = true;              // Ferme les autres gra
 //+------------------------------------------------------------------+
 int OnInit()
 {
+   BtPreInit();                       // [ARCHI] 7.2.0 : backtest du bot ? (horloge simulée, identifiant bt_<id>)
    Log("Initialisation ScalpX " + SX_VERSION + " sur " + _Symbol);
    InitParams();
    if(UseSavedParams)
@@ -181,6 +192,7 @@ int OnInit()
    if(!g_goalActive) g_configOK = false;
    // [ARCHI] début
    ArchiPreInit();                    // paramètres validés par défaut (robot autonome)
+   BtInit();                          // 7.2.0 : backtest du bot : réglages du compte, créneaux, calendrier des news
    // [ARCHI] fin
    SessionInit();
    RefreshState();
@@ -213,7 +225,7 @@ int OnInit()
 
    ChartRefreshAll(true);
    PanelUpdate();
-   EventSetMillisecondTimer(250);
+   if(!g_bt) EventSetMillisecondTimer(250);   // [ARCHI] 7.2.0 : backtest du bot : tâches de la seconde lancées par OnTick (temps simulé)
    return INIT_SUCCEEDED;
 }
 
@@ -231,6 +243,7 @@ void OnDeinit(const int reason)
 
    // [ARCHI] début
    LaboDeinit();                      // 7.1.0 : sauvegarde des comptes virtuels du labo
+   BtDeinit(reason);                  // 7.2.0 : résultat final du backtest
    ArchiDeinit(reason);
    // [ARCHI] fin
    ChartShutdown(!reload);
@@ -244,6 +257,7 @@ void OnDeinit(const int reason)
 void OnTick()
 {
    g_lastTickMs = GetTickCount64();
+   if(g_bt) BtTick();                 // [ARCHI] 7.2.0 : backtest du bot : une fois par seconde simulée
    if(g_closing) return;
    RefreshState();
    mk_spread = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
@@ -345,6 +359,7 @@ void OnTimer()
       JournalTick1Hz();
       SmartTick1Hz();
       LaboTimer1Hz();                    // [ARCHI] 7.1.0 : labo des filtres (mesure seulement)
+      BtLiveTick();                      // [ARCHI] 7.2.0 : calendrier des news exporté pour les backtests (1 fois/jour)
       ChartDrawEMAs(false);
 
       ShotTick();                        // captures demandées par le bot
