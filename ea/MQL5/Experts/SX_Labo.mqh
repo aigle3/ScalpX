@@ -653,7 +653,7 @@ void LbEnd(LbScen &x, string res)
 // Créneau consommé (appelé par SlotTick, mêmes conditions générales que le vrai robot)
 void LaboOnSlot(string slot)
 {
-   if(!g_lbOn) return;
+   if(!g_lbOn || !g_lbWanted) return;   // labo en pause : séries virtuelles figées
    double rep = PDbl(P_SEUIL_REPRISE), pct = PDbl(P_SL_PCT);
    for(int s = 0; s < g_lbN; s++)
    {
@@ -681,7 +681,7 @@ void LaboOnSlot(string slot)
 // Heure de coupure (appelé par CutTick)
 void LaboOnCut(string name)
 {
-   if(!g_lbOn) return;
+   if(!g_lbOn || !g_lbWanted) return;
    for(int s = 0; s < g_lbN; s++)
    {
       if(!g_lb[s].active) continue;

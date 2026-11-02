@@ -6,6 +6,7 @@ regroupe et envoie. Aucune connexion aux comptes MT5.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -69,6 +70,8 @@ def explain_stop(reason: int, expected: bool) -> str:
 
 def event_to_notice(ev: Evenement, label: str, common: Path) -> Notice | None:
     """Transforme un événement de l'EA en notification (None = stocké mais non notifié)."""
+    if ev.type.startswith("LABO_"):                   # labo des filtres : mesures, jamais notifiées
+        return None
     if ev.type == "CASHFLOW" and not ev.texte:
         return None
     prio = 2 if ev.type in CRITICAL_TYPES else (0 if ev.type in SILENT_TYPES else max(0, min(2, ev.prio)))
@@ -163,6 +166,9 @@ class Monitor:
         return n
 
     async def _handle_event(self, inst, ev: Evenement) -> None:
+        if ev.type.startswith("LABO_"):                # labo des filtres : table dédiée, ni journal ni notification
+            self._labo(inst.id, ev)
+            return
         self.db.add_event(inst.id, ev.ts or int(time.time()), ev.type, ev.prio, ev.texte)
         self._track(inst.id, ev)
         notice = event_to_notice(ev, inst.label, self.cfg.paths.common())
@@ -176,6 +182,15 @@ class Monitor:
             notice.text = explain_stop(int(reason), abs(when - closing) < 180)
         if notice is not None:
             await self.emit(notice)
+
+    def _labo(self, iid: str, ev: Evenement) -> None:
+        d = ev.data if isinstance(ev.data, dict) else {}
+        ts = ev.ts or int(time.time())
+        if ev.type == "LABO_ETAT":                     # dernier état seulement
+            self.db.meta_set(f"labo_etat_{iid}", json.dumps({"ts": ts, **d}, ensure_ascii=False))
+        elif ev.type in ("LABO_SERIE", "LABO_REEL"):
+            kind = ev.type[5:]
+            self.db.add_labo(iid, ts, kind, str(d.get("sc", "")), json.dumps(d, ensure_ascii=False))
 
     def _track(self, iid: str, ev: Evenement) -> None:
         d = ev.data if isinstance(ev.data, dict) else {}
