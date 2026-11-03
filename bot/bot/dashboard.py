@@ -56,6 +56,7 @@ class Dashboard:
         self.bt_days, self.bt_model, self.bt_src = 30, "reel", ""   # 🧪 backtest : période, modèle, réglages ("" = 1er compte)
         self.bt_wiz: tuple[str, dict] = ("login", {})       # configuration du compte du testeur (étape, données)
         self.qt_days = 30                                   # 🧪 tests rapides : période
+        self.optim = None                                   # bot.optim.Optimizer (branché par le routeur)
         self._load_state()
 
     # ---- état persistant (filtre / tri / page)
@@ -167,6 +168,17 @@ class Dashboard:
             return self._render_filters(now)
         if kind == "sst":
             return self._render_slot_stats(now)
+        if kind == "opt" and self.optim is not None:
+            o = self.optim
+            kb: Keyboard = [
+                [("⏸ Suspendre" if o.on else "✅ Activer", "d:opton"), (f"🕐 {o.hour:02d}:00 ▸", "d:opth")],
+                [("▶️ Lancer maintenant", "d:optgo"), ("📜 Journal", "d:optj")],
+                [("❓ Guide", "d:optg"), ("⬅ Rapports", "d:rpt"), ("🏠 Accueil", "d:home")],
+            ]
+            last = next((r for r in self.ctx.db.opt_list(5) if r["status"] == "change" and not r["reverted"]), None)
+            if last is not None:
+                kb.insert(2, [(f"↩️ Annuler le dernier changement", f"d:opu:{last['id']}")])
+            return self._with_flash(o.status_text()), kb
         if kind == "btra":
             from core import labo
             rid = int(self.screen[1])
@@ -362,7 +374,7 @@ class Dashboard:
         if missing >= 86400:
             # après une remise à zéro : seuls les backtests lancés depuis comptent (mêmes scénarios que le labo actuel)
             run = next((r for r in db.bt_list(30) if r["status"] == "ok" and r["d_to"] >= since and r["d_from"] < cov
-                        and r["created"] >= reset_ts), None)
+                        and r["created"] >= reset_ts and r["kind"] != "opt"), None)     # pas les backtests de l'optimiseur
             if run is not None:
                 used_bt = run
                 extra = [r for r in db.labo_since(since, f"bt_{run['id']}") if int(r["ts"]) < cov]
@@ -416,8 +428,15 @@ class Dashboard:
         scen = labo.compute_scen(series)
         views = self.ctx.views()
         cur = next((v.st.devise for v in views if v.st and v.st.devise), "")
+        prev = None
+        for r in self.ctx.db.bt_list(40):                    # backtest précédent (pour « ce qui a changé »)
+            if r["id"] < rid and r["status"] == "ok" and r["kind"] != "opt" and r["result"]:
+                pr = bt.Result.from_json(r["result"])
+                if pr is not None and pr.params:
+                    prev = (r["id"], pr.params)
+                    break
         text = render.bt_result_text(rid, row["kind"], row["source"], row["model"], res, scen, cur,
-                                     max(0, (row["ended"] or 0) - row["created"]), brief=labo.brief(series, res.slots))
+                                     max(0, (row["ended"] or 0) - row["created"]), brief=labo.brief(series, res.slots), prev=prev)
         kb: Keyboard = [[("📈 Courbe du solde", f"d:btg:{rid}"), (f"🧬 Tous les scénarios ({len(scen)})", f"d:btra:{rid}")],
                         [("🗂 Liste", "d:btl"), ("⬅ Backtest", "d:bt"), ("🏠 Accueil", "d:home")]]
         return self._with_flash(text), kb
@@ -485,6 +504,7 @@ class Dashboard:
         kb: Keyboard = [
             [("📝 Rapport des 24 h", "d:rep"), ("📈 Courbe des soldes", "d:chart")],
             [("🕐 Stats par créneau", "d:sst"), ("📤 Export CSV", "d:exp")],
+            [("🤖 Optimiseur automatique", "d:opt")],
             [("🧪 Labo des filtres", "d:lab"), ("🧪 Backtest", "d:bt")],
             [("⬅ Accueil", "d:home")],
         ]
@@ -689,7 +709,7 @@ class Dashboard:
         if not force and self._covered_at is not None:
             if now - self._covered_at >= cfg.repost_s:                      # recouvert depuis 5 min : republié en bas
                 # republié en bas en revenant à l'accueil : un rapport (labo, backtest…) laissé ouvert n'est pas renvoyé tout seul
-                await self.bring_down(home=self.screen[0] in ("lab", "labs", "labk", "bt", "btl", "btr", "btra", "qt", "sst", "wdr"))
+                await self.bring_down(home=self.screen[0] in ("lab", "labs", "labk", "labth", "bt", "btl", "btr", "btra", "qt", "sst", "wdr", "opt"))
                 return "recreated"
             return "skip"                                                   # recouvert : plus d'éditions automatiques
         if not force and now - self._last_edit < cfg.refresh_s:
