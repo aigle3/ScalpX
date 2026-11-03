@@ -66,6 +66,21 @@ class Optimizer:
         except ValueError:
             return 0
 
+    def schedule_safety(self, lost: bool, was_safety: bool) -> int:
+        """Nuit 🛟 Sécurité seulement si le compte est VRAIMENT perdu (💀) sur 60 j, et au plus une fois par tour complet :
+        après une nuit de sécurité, les 4 groupes normaux passent d'abord, même si le danger persiste. Renvoie l'attente."""
+        try:
+            wait = int(self.ctx.db.meta_get("opt_safety_wait", "0") or 0)
+        except ValueError:
+            wait = 0
+        if was_safety:
+            wait = len(optim.GROUPS)
+        elif wait > 0:
+            wait -= 1
+        self.ctx.db.meta_set("opt_safety_wait", str(wait))
+        self.ctx.db.meta_set("opt_safety", "1" if (lost and not was_safety and wait == 0) else "0")
+        return wait
+
     @property
     def safety_next(self) -> bool:
         return self.ctx.db.meta_get("opt_safety", "0") == "1"
@@ -208,7 +223,10 @@ class Optimizer:
         dec = optim.decide(rows, vs, d_to)
         # après une nuit normale où les réglages actuels sont dangereux : la nuit suivante est une nuit 🛟 Sécurité
         # (après une nuit de sécurité, on revient à la rotation, qui revérifiera)
-        self.ctx.db.meta_set("opt_safety", "1" if (dec.ref_unsafe and not safety) else "0")
+        lost = bool(dec.table) and dec.table[0].lost60 > 0
+        wait = self.schedule_safety(lost, safety)
+        if lost and not safety and wait > 0:
+            self.note(f"compte perdu sur 60 j, mais nuit de sécurité déjà faite récemment : prochaine possible dans {wait} nuit(s)")
         for r in dec.table:
             log.info("  %-34s 30 j : ✅ %d/%d %+.2f € | 60 j : 💀 %d DD %.0f %% %+.2f € %s", r.name, r.won30, r.n30, r.net30,
                      r.lost60, r.dd60, r.net60, "sûr" if r.safe else "NON SÛR")
@@ -317,7 +335,7 @@ GUIDE = """❓ <b>L'optimiseur, en bref</b>
 <b>Comment il choisit</b>
 • Il ne garde qu'une variante qui <b>ne perd jamais le compte</b> sur 60 jours et 30 jours, avec un drawdown sous 90 %.
 • Si tes réglages actuels sont sûrs, la variante doit <b>gagner nettement plus sur les 30 derniers jours</b> (marché récent) sans faire moins bien sur 60 jours.
-• Si tes réglages actuels perdent le compte ou frôlent la perte (drawdown ≥ 90 %), la nuit suivante est une nuit 🛟 <b>Sécurité</b> : il teste une échelle de prudence (lot moins multiplié, moins d'ordres, grille plus large, et des combinaisons légères) et prend la variante sûre la <b>plus rentable sur 60 jours, pertes de compte comprises</b>, à condition qu'elle garde au moins <b>80 % de ton gain</b> sur 30 jours. Sinon il ne change rien (pas de « trop prudent »). Ensuite la rotation reprend ; les nuits normales retestent des réglages moins prudents, donc il remonte tout seul quand le marché se calme.
+• Si tes réglages actuels <b>perdent vraiment le compte</b> (💀) sur 60 jours, la nuit suivante est une nuit 🛟 <b>Sécurité</b> (au plus une par tour de 4 nuits) : il teste une échelle de prudence (lot moins multiplié, moins d'ordres, grille plus large, et des combinaisons légères) et prend la variante sûre la <b>plus rentable sur 60 jours, pertes de compte comprises</b>, à condition qu'elle garde au moins <b>80 % de ton gain</b> sur 30 jours. Sinon il ne change rien (pas de « trop prudent »). Ensuite la rotation reprend ; les nuits normales retestent des réglages moins prudents, donc il remonte tout seul quand le marché se calme.
 • Chaque variante bouge les réglages d'<b>un seul cran</b> : seule, ou à deux réglages <b>combinés et testés ensemble</b> (ex. ATR + minimum de grille). Il applique la meilleure variante sûre telle quelle. Les nuits suivantes, il reteste autour des nouvelles valeurs : il s'affine tout seul et suit le marché.
 
 <b>Ce que tu reçois</b> : un message par nuit avec l'ancienne valeur, la nouvelle, la raison, les meilleures variantes et un bouton <b>↩️ Annuler ce changement</b>. Le réglage est appliqué à tous les comptes lancés et au preset ⭐ actif.
