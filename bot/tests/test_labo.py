@@ -242,3 +242,16 @@ def test_en_bref_les_comptes_perdus_passent_avant_tout():
     assert "perdent le compte 3 fois" in b
     assert "Évitent les pertes" in b and "🧱 Grille large (💀 0 au lieu de 3" in b
     assert "désactiver Signal récent" in b and "Changements fiables" not in b      # 💀 2 < 3 : évite 1 perte, pas « fiable »
+
+
+@pytest.mark.asyncio
+async def test_labo_laisse_ouvert_pas_renvoye_tout_seul(svc):  # noqa: F811
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    ctx.cfg.dashboard.repost_s = 0
+    await dash.ensure()
+    await router.on_callback("d:lab")
+    mid = int(ctx.db.meta_get("dash_msg_id"))
+    dash.note_message(mid + 50)                                   # un autre message passe dessous
+    dash._covered_at = time.time() - 1
+    assert await dash.refresh() == "recreated"
+    assert dash.screen == ("dash",) and "Labo des filtres" not in sender.sent[-1][1]

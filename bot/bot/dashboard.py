@@ -675,7 +675,8 @@ class Dashboard:
         cfg = self.ctx.cfg.dashboard
         if not force and self._covered_at is not None:
             if now - self._covered_at >= cfg.repost_s:                      # recouvert depuis 5 min : republié en bas
-                await self.bring_down(home=False)
+                # republié en bas en revenant à l'accueil : un rapport (labo, backtest…) laissé ouvert n'est pas renvoyé tout seul
+                await self.bring_down(home=self.screen[0] in ("lab", "labs", "labk", "bt", "btl", "btr", "btra", "qt", "sst", "wdr"))
                 return "recreated"
             return "skip"                                                   # recouvert : plus d'éditions automatiques
         if not force and now - self._last_edit < cfg.refresh_s:
