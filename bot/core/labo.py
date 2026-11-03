@@ -52,7 +52,8 @@ def next_tok(i: int, tok: str) -> str:
 
 # ---- options d'un scénario (EA 7.3.0) : écart de grille, respirations du signal récent, timeframe de l'extension
 OPT_CYCLES = {"g": ["1", "1.3", "1.6", "2"], "n": ["-1", "0", "2", "3", "5"], "x": ["0", "1", "2", "3"],
-              "b": ["0", "6", "12", "18", "24", "36"]}             # b (EA 7.4.0) : bougies max du signal récent
+              "b": ["0", "6", "12", "18", "24", "36"],             # b (EA 7.4.0) : bougies max du signal récent
+              "o": ["0", "0.3", "0.5", "0.75", "1", "1.5", "2"]}    # o (EA 7.5.0) : objectif en %
 EXT_TF = {"1": "TF du robot", "2": "M15", "3": "H1"}
 
 
@@ -67,6 +68,8 @@ def opt_text(k: str, v: str) -> str:
         return "extension comme le compte" if v in ("", "0") else f"extension mesurée en {EXT_TF.get(v, v)}"
     if k == "b":
         return "signal récent : bougies comme le compte" if v in ("", "0") else f"signal récent : {v} bougies max"
+    if k == "o":
+        return "objectif comme le compte" if v in ("", "0") else f"objectif {v.replace('.', ',')} %"
     return f"{k}={v}"
 
 
@@ -398,6 +401,10 @@ THEMES: dict[str, tuple[str, str, list]] = {
     "conseilles": ("🛡 Combinaisons conseillées",
                    "Les 7 scénarios ⭐ (grille large, signal récent sans respirations, extension H1, prudent, équilibré…).",
                    [(n, t, o) for n, t, o, _ in PACK]),
+    "objectif": ("🎯 Objectif (% par créneau)",
+                 "Même stratégie, objectif différent à chaque créneau : 0,3 % à 2 % du solde. Plus haut = plus de gain par "
+                 "objectif mais séries plus longues (plus de coupures et de risque). Les autres réglages restent ceux du compte.",
+                 [_q(f"Objectif {o.replace('.', ',')} %", {"o": o}) for o in ("0.3", "0.5", "0.75", "1", "1.25", "1.5", "2")]),
     "filtres": ("🔎 Chaque filtre seul",
                 "Aucun scénario perso : seulement les 13 scénarios automatiques (réglages actuels, chaque filtre inversé "
                 "— « Sans X » / « Avec X » —, aucun filtre). C'est le test « toutes les possibilités des filtres » un par un.",

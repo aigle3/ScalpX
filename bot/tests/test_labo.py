@@ -267,3 +267,12 @@ def test_en_bref_un_scenario_qui_perd_encore_le_compte_n_est_pas_une_solution():
                      "profit": -150 if k == 3 else 5, "dd": 101, "fin": t, "entree_s": 10})
     b = "\n".join(labo.brief(rows))
     assert "Évitent les pertes" not in b and "Aucun filtre (💀 1 au lieu de 2 : perd encore le compte)" in b
+
+
+def test_theme_objectif_et_option_o(tmp_path):
+    cfg = labo.LabConfig()
+    names = labo.apply_theme(cfg, "objectif")
+    assert names[0] == "Objectif 0,3 %" and [c.opts["o"] for c in cfg.customs] == ["0.3", "0.5", "0.75", "1", "1.25", "1.5", "2"]
+    labo.save_config(tmp_path, cfg)
+    assert "|o=0.5" in (tmp_path / labo.SCEN_FILE).read_text(encoding="utf-8")
+    assert labo.opt_text("o", "0.75") == "objectif 0,75 %" and labo.next_opt("o", "0") == "0.3"
