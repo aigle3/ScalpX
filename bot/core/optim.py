@@ -114,7 +114,11 @@ def _raw(key: str, v: float) -> str:
     return str(int(v)) if float(v).is_integer() and key in ("gridmin", "gridmax", "maxpend", "freshbars") else f"{v:g}"
 
 
-def variants(params: dict[str, str], group: str) -> list[Variant]:
+MAX_SCALE = 4                       # portée de recherche maximum : 4 crans
+FLAT_PCT = 0.03                     # « aucune différence nette » : toutes les variantes à moins de 3 % du gain actuel (2 € au moins)
+
+
+def variants(params: dict[str, str], group: str, scale: dict[str, int] | None = None) -> list[Variant]:
     """Variantes de la nuit. Réglages numériques : chacun à −1 et +1 cran, PUIS les combinaisons de deux réglages
     (±1 cran chacun), testées ensemble dans le même backtest ; filtres : chacun inversé."""
     if group == SAFETY[0]:
@@ -146,6 +150,7 @@ def variants(params: dict[str, str], group: str) -> list[Variant]:
             except ValueError:
                 continue
             _, step, lo, hi, _, _ = NUM[key]
+            step *= max(1, min(MAX_SCALE, int((scale or {}).get(key, 1))))   # portée élargie après des nuits sans différence
             m = []
             for d in (-1, 1):
                 v = round(min(hi, max(lo, cur + d * step)), 4)
@@ -182,6 +187,31 @@ def variants(params: dict[str, str], group: str) -> list[Variant]:
     for n, v in enumerate(out[:19], 1):
         v.key = f"p{n}"
     return out[:19]
+
+
+def is_flat(dec: "Decision") -> bool:
+    """Toutes les variantes donnent (presque) le même résultat que les réglages actuels : chercher plus loin."""
+    if not dec.table or dec.change is not None:
+        return False
+    ref = dec.table[0]
+    tol = max(2.0, FLAT_PCT * abs(ref.net30))
+    rows = [r for r in dec.table[1:] if r.n30]
+    return bool(rows) and all(abs(r.net30 - ref.net30) <= tol and r.lost60 == ref.lost60 for r in rows)
+
+
+def next_scale(scale: dict[str, int], keys: list[str], dec: "Decision") -> dict[str, int]:
+    """Portée suivante des réglages du groupe : ×2 si la nuit n'a rien distingué (1 → 2 → 4 crans), puis retour à 1 cran
+    si même 4 crans n'ont rien distingué ; retour à 1 cran dès qu'un changement est appliqué (on affine autour de la
+    nouvelle valeur) ; inchangée sinon."""
+    out = dict(scale)
+    if dec.change is not None:
+        for k in keys:
+            out[k] = 1
+    elif is_flat(dec):
+        for k in keys:
+            cur = max(1, int(out.get(k, 1)))
+            out[k] = 1 if cur >= MAX_SCALE else cur * 2         # rien même à 4 crans : retour à 1 cran, nouveau cycle
+    return out
 
 
 def safety_variants(params: dict[str, str]) -> list[Variant]:

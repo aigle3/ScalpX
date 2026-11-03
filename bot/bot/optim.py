@@ -81,6 +81,14 @@ class Optimizer:
         self.ctx.db.meta_set("opt_safety", "1" if (lost and not was_safety and wait == 0) else "0")
         return wait
 
+    def scale(self) -> dict[str, int]:
+        """Portée de recherche par réglage (en crans), élargie quand les nuits ne distinguent rien."""
+        try:
+            d = json.loads(self.ctx.db.meta_get("opt_scale", "{}") or "{}")
+            return {k: int(v) for k, v in d.items()}
+        except (ValueError, TypeError):
+            return {}
+
     @property
     def safety_next(self) -> bool:
         return self.ctx.db.meta_get("opt_safety", "0") == "1"
@@ -167,7 +175,7 @@ class Optimizer:
             gi = self.group_index()
             for k in range(len(optim.GROUPS)):                 # groupe sans objet (ex. grille fixe) : groupe suivant
                 gi = (self.group_index() + k) % len(optim.GROUPS)
-                vs = optim.variants(params, optim.GROUPS[gi][0])
+                vs = optim.variants(params, optim.GROUPS[gi][0], self.scale())
                 if vs:
                     break
             self.ctx.db.meta_set("opt_grp", str((gi + 1) % len(optim.GROUPS)))
@@ -221,6 +229,14 @@ class Optimizer:
         rows = labo.rows_of(self.ctx.db.labo_since(0, f"bt_{rid}"), "SERIE")
         self.note(f"backtest #{rid} terminé en {int((time.time() - self.started) / 60)} min : {len(rows)} objectifs virtuels")
         dec = optim.decide(rows, vs, d_to)
+        if not safety and gparams:                             # portée de recherche du groupe pour son prochain tour
+            before = self.scale()
+            after = optim.next_scale(before, gparams, dec)
+            self.ctx.db.meta_set("opt_scale", json.dumps(after))
+            wider = [k for k in gparams if after.get(k, 1) > before.get(k, 1)]
+            if wider:
+                self.note("résultats identiques à 3 % près : au prochain tour, recherche plus loin (" +
+                          ", ".join(f"{k} ±{after[k]} crans" for k in wider) + ")")
         # après une nuit normale où les réglages actuels sont dangereux : la nuit suivante est une nuit 🛟 Sécurité
         # (après une nuit de sécurité, on revient à la rotation, qui revérifiera)
         lost = bool(dec.table) and dec.table[0].lost60 > 0
@@ -258,6 +274,10 @@ class Optimizer:
             lines.append(f"{'🟢' if r.safe else '💀'} {esc(r.name)} : ✅ {r.won30}/{r.n30} · {money(r.net30, currency, True)} · "
                          f"DD {r.dd60:.0f} %" + (f" · 💀 {r.lost60}" if r.lost60 else ""))
         nxt = optim.SAFETY[1] if self.safety_next else optim.GROUPS[self.group_index()][1]
+        if not safety and gparams and optim.is_flat(dec):
+            sc = self.scale()
+            lines.append("🔭 Résultats identiques à 3 % près : au prochain tour de ce groupe, je cherche plus loin ("
+                         + ", ".join(f"{esc(optim.NUM[k][0])} ±{sc.get(k, 1)} crans" for k in gparams if k in optim.NUM) + ").")
         lines.append(f"\n<i>Prochaine nuit ({self.hour:02d}:00) : {esc(nxt)}</i>")
         oid = self.ctx.db.opt_add(gkey, "change" if applied else "inchange", "\n".join(lines), json.dumps(applied), rid)
         kb = ([[("↩️ Annuler ce changement", f"d:opu:{oid}")]] if applied else []) + [[("🤖 Optimiseur", "d:opt"), ("✖ Fermer", "d:close")]]
@@ -306,6 +326,9 @@ class Optimizer:
                  f"Prochain groupe : {esc(optim.SAFETY[1] if self.safety_next else optim.GROUPS[self.group_index()][1])}"]
         if self.running:
             lines.append(f"⏳ En cours depuis {int((time.time() - self.started) / 60)} min : {esc(self.stage)}")
+        sc = {k: v for k, v in self.scale().items() if v > 1}
+        if sc:
+            lines.append("🔭 Recherche élargie : " + ", ".join(f"{esc(optim.NUM[k][0])} ±{v} crans" for k, v in sc.items() if k in optim.NUM))
         rows = self.ctx.db.opt_list(6)
         if rows:
             lines += ["", "<b>Dernières nuits</b>"]
@@ -337,6 +360,7 @@ GUIDE = """❓ <b>L'optimiseur, en bref</b>
 • Si tes réglages actuels sont sûrs, la variante doit <b>gagner nettement plus sur les 30 derniers jours</b> (marché récent) sans faire moins bien sur 60 jours.
 • Si tes réglages actuels <b>perdent vraiment le compte</b> (💀) sur 60 jours, la nuit suivante est une nuit 🛟 <b>Sécurité</b> (au plus une par tour de 4 nuits) : il teste une échelle de prudence (lot moins multiplié, moins d'ordres, grille plus large, et des combinaisons légères) et prend la variante sûre la <b>plus rentable sur 60 jours, pertes de compte comprises</b>, à condition qu'elle garde au moins <b>80 % de ton gain</b> sur 30 jours. Sinon il ne change rien (pas de « trop prudent »). Ensuite la rotation reprend ; les nuits normales retestent des réglages moins prudents, donc il remonte tout seul quand le marché se calme.
 • Chaque variante bouge les réglages d'<b>un seul cran</b> : seule, ou à deux réglages <b>combinés et testés ensemble</b> (ex. ATR + minimum de grille). Il applique la meilleure variante sûre telle quelle. Les nuits suivantes, il reteste autour des nouvelles valeurs : il s'affine tout seul et suit le marché.
+• Si une nuit ne montre <b>aucune différence nette</b> (toutes les variantes à 3 % près), il cherche <b>deux fois plus loin</b> au tour suivant de ce groupe (2 puis 4 crans). Si même à 4 crans rien ne se distingue, il revient à 1 cran et recommence. Dès qu'il trouve mieux, il revient à 1 cran pour affiner. Tant qu'il ne trouve rien, tes réglages ne bougent pas.
 
 <b>Ce que tu reçois</b> : un message par nuit avec l'ancienne valeur, la nouvelle, la raison, les meilleures variantes et un bouton <b>↩️ Annuler ce changement</b>. Le réglage est appliqué à tous les comptes lancés et au preset ⭐ actif.
 

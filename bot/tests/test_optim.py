@@ -182,3 +182,22 @@ def test_securite_au_plus_une_fois_par_tour():
     meta.clear()
     o.schedule_safety(lost=False, was_safety=False)                # drawdown haut sans compte perdu : jamais de sécurité
     assert not o.safety_next
+
+
+def test_portee_elargie_si_rien_ne_change():
+    d_to = 1_765_000_000
+    vs = optim.variants(P, "grille")
+    flat = optim.decide(_rows(d_to, {"miroir": 1.0, "p1": 1.01, "p3": 0.99}), vs, d_to)
+    assert flat.change is None and optim.is_flat(flat)
+    sc = optim.next_scale({}, ["gridatr", "gridmin", "gridmax"], flat)
+    assert sc == {"gridatr": 2, "gridmin": 2, "gridmax": 2}
+    sc = optim.next_scale(sc, ["gridatr"], flat)
+    assert sc["gridatr"] == optim.MAX_SCALE                         # 1 → 2 → 4 crans
+    sc = optim.next_scale(sc, ["gridatr"], flat)
+    assert sc["gridatr"] == 1                                       # rien même à 4 crans : retour à 1 cran
+    wide = optim.variants(P, "grille", {"gridmin": 2})
+    assert {"gn": "100"} in [v.opts for v in wide] and {"gn": "300"} in [v.opts for v in wide]   # ±100 pts au lieu de ±50
+    won = optim.decide(_rows(d_to, {"miroir": 1.0, "p2": 1.5}), vs, d_to)
+    assert won.change is not None and optim.next_scale(sc, ["gridatr"], won)["gridatr"] == 1     # trouvé : on affine
+    diff = optim.decide(_rows(d_to, {"miroir": 1.0, "p1": 0.5}), vs, d_to)
+    assert not optim.is_flat(diff) and optim.next_scale({"gridatr": 2}, ["gridatr"], diff) == {"gridatr": 2}
