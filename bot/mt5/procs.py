@@ -131,6 +131,13 @@ class PsutilProcesses:
         pids = lambda: {p.pid for p in self.find(exe)} | ({extra_pid} if extra_pid else set())   # noqa: E731
         arrange_in_background(self.win_api, pids, opts, Path(exe).parent.name)
 
+    def ensure_minimized(self, exe: Path) -> str:
+        """Contrôle périodique de la fenêtre de ce terminal (voir window.ensure_arranged)."""
+        if self.window_opts is None or self.win_api is None:
+            return ""
+        from .window import ensure_arranged
+        return ensure_arranged(self.win_api, lambda: {p.pid for p in self.find(exe)}, self.window_opts, Path(exe).parent.name)
+
     def kill(self, exe: Path) -> int:
         """Termine tous les processus de CET exécutable ; renvoie le nombre tué."""
         n = 0

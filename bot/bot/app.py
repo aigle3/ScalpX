@@ -366,6 +366,25 @@ async def j_flush(context: ContextTypes.DEFAULT_TYPE) -> None:
     await svc(context).notifier.flush()
 
 
+async def j_windows(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Fenêtres MT5 : un terminal dont la fenêtre n'a pas pu être rangée au lancement (VPS chargé), ou rouverte,
+    est rangé / réduit (comptes et terminal de backtest)."""
+    s = svc(context)
+    procs = s.ctx.mgr.procs
+    if not s.ctx.cfg.mt5.minimize or not hasattr(procs, "ensure_minimized"):
+        return
+    exes = [s.ctx.mgr.exe(i) for i in s.ctx.db.list() if s.ctx.mgr.is_running(i)]
+    bt = getattr(s.router, "bt", None)
+    if bt is not None and bt.is_running():
+        exes.append(bt.exe)
+
+    def run() -> list[str]:
+        return [r for r in (procs.ensure_minimized(e) for e in exes) if r]
+    done = await asyncio.to_thread(run)
+    if done:
+        log.info("fenêtres MT5 : %d rangée(s) ou réduite(s) au contrôle périodique", len(done))
+
+
 async def j_watchdog(context: ContextTypes.DEFAULT_TYPE) -> None:
     await svc(context).ctx.watchdog.tick()
 
@@ -562,6 +581,8 @@ def build_application(cfg: Config, ctx_factory) -> Application:
     jq.run_repeating(timed(j_presets), interval=300, first=90, job_kwargs=JOB_KW)  # robots conformes au preset ⭐ actif ?
     jq.run_repeating(timed(j_dash), interval=2, first=5, job_kwargs=JOB_KW)        # refresh() : toutes les refresh_s, republication après repost_s
     jq.run_repeating(timed(j_watchdog), interval=t.watchdog_interval_s, first=20, job_kwargs=JOB_KW)
+    if cfg.mt5.minimize and cfg.mt5.minimize_check_s > 0:
+        jq.run_repeating(timed(j_windows), interval=cfg.mt5.minimize_check_s, first=180, job_kwargs=JOB_KW)
     jq.run_repeating(timed(j_build), interval=20, first=40, job_kwargs=JOB_KW)
     jq.run_repeating(timed(j_update), interval=max(20, cfg.update.check_s), first=60, job_kwargs=JOB_KW)
     jq.run_repeating(timed(j_health), interval=60, first=15, job_kwargs=JOB_KW)

@@ -55,3 +55,45 @@ def test_menu_affichage_decoche_tout_sauf_le_graphique():
     api = MenuWin()
     res = arrange(api, lambda: {42}, WindowOptions(settle_s=0), sleep=lambda s: None)
     assert res["hidden"] == ["market watch", "navigator", "toolbox", "standard"] and api.calls[0] == ("menu",)
+
+
+def test_controle_periodique_range_ou_reduit():
+    from mt5 import window as wm
+
+    class Api:
+        def __init__(self):
+            self.mini, self.calls = False, []
+
+        def main_window(self, pids):
+            return 42
+
+        def view_hide(self, h):
+            self.calls.append("view")
+            return ["Navigateur"]
+
+        def panels(self, h):
+            return []
+
+        def hide_panel(self, *a):
+            return True
+
+        def maximize_chart(self, h):
+            self.calls.append("chart")
+            return True
+
+        def minimize(self, h):
+            self.mini = True
+            self.calls.append("min")
+
+        def is_minimized(self, h):
+            return self.mini
+
+    api = Api()
+    opts = wm.WindowOptions(settle_s=0)
+    wm.LAST.pop("t1", None)
+    wm.LAST["t1"] = (0, {"window": False})                       # introuvable au lancement
+    assert wm.ensure_arranged(api, lambda: {1}, opts, "t1") == "arrange" and "chart" in api.calls and api.mini
+    assert wm.ensure_arranged(api, lambda: {1}, opts, "t1") == ""                   # déjà réduite
+    api.mini = False                                                                # rouverte à la main
+    assert wm.ensure_arranged(api, lambda: {1}, opts, "t1") == "minimize" and api.mini
+    assert wm.ensure_arranged(api, lambda: {1}, wm.WindowOptions(minimize=False), "t1") == ""
