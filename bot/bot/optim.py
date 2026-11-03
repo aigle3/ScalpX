@@ -203,14 +203,17 @@ class Optimizer:
                  f"<i>{len(vs)} variantes testées · choix sur {optim.CHOOSE_DAYS} j, sécurité sur {optim.SAFETY_DAYS} j · backtest #{rid}</i>", ""]
         if dec.change is not None:
             v = dec.change
-            ok_n = await self._apply(running, v.param, dec.applied)
-            applied = {v.param: [v.old, dec.applied]}
-            lines.append(f"✅ <b>Changé</b> : {esc(optim.label_of(v.param, v.old).split(' : ')[0])} "
-                         f"<b>{esc(optim.value_text(v.param, v.old))} → {esc(optim.value_text(v.param, dec.applied))}</b>"
-                         + (f" (meilleur testé : {esc(optim.value_text(v.param, v.new))})" if dec.applied != v.new else ""))
+            oks = []
+            for param, (old, new) in v.changes.items():
+                oks.append(await self._apply(running, param, new))
+                applied[param] = [old, new]
+            what = " · ".join(f"{optim.label_of(p_, o).split(' : ')[0]} <b>{esc(optim.value_text(p_, o))} → {esc(optim.value_text(p_, n))}</b>"
+                              for p_, (o, n) in v.changes.items())
+            lines.append(f"✅ <b>Changé</b> : {what}" + (" <i>(combinaison testée ensemble)</i>" if len(v.changes) > 1 else ""))
             lines.append(f"   pourquoi : {esc(dec.reason)}")
-            lines.append(f"   appliqué à {ok_n}/{len(running)} compte(s)" + (" + preset ⭐" if self.r.dash.store.active else ""))
-            self.note(f"CHANGEMENT {v.param} : {v.old} → {dec.applied} ({dec.reason}) ; appliqué à {ok_n}/{len(running)}")
+            lines.append(f"   appliqué à {min(oks)}/{len(running)} compte(s)" + (" + preset ⭐" if self.r.dash.store.active else ""))
+            self.note("CHANGEMENT " + " ; ".join(f"{p_} : {o} → {n}" for p_, (o, n) in v.changes.items())
+                      + f" ({dec.reason}) ; appliqué à {min(oks)}/{len(running)}")
         else:
             lines.append(f"⏸ <b>Aucun changement</b> : {esc(dec.note)}")
             self.note(f"aucun changement : {dec.note}")
@@ -281,8 +284,8 @@ class Optimizer:
                 except ValueError:
                     ap = {}
                 if ap:
-                    k, (o, n) = next(iter(ap.items()))
-                    what = f"{optim.label_of(k, o).split(' : ')[0]} {optim.value_text(k, o)} → {optim.value_text(k, n)}"
+                    what = " · ".join(f"{optim.label_of(k, o).split(' : ')[0]} {optim.value_text(k, o)} → {optim.value_text(k, n)}"
+                                      for k, (o, n) in ap.items())
                     what += " (annulé)" if r["reverted"] else ""
                 else:
                     what = "aucun changement" if r["status"] == "inchange" else f"échec : {r['summary'][:60]}"
@@ -301,7 +304,7 @@ GUIDE = """❓ <b>L'optimiseur, en bref</b>
 • Il ne garde qu'une variante qui <b>ne perd jamais le compte</b> sur 60 jours et 30 jours, avec un drawdown sous 90 %.
 • Si tes réglages actuels sont sûrs, la variante doit <b>gagner nettement plus sur les 30 derniers jours</b> (marché récent) sans faire moins bien sur 60 jours.
 • Si tes réglages actuels perdent le compte ou frôlent la perte, il prend la variante sûre la plus rentable.
-• Il ne change qu'<b>un seul réglage, d'un seul cran</b>, par nuit. Les nuits suivantes, il reteste autour de la nouvelle valeur : il s'affine tout seul et suit le marché.
+• Chaque variante bouge les réglages d'<b>un seul cran</b> : seule, ou à deux réglages <b>combinés et testés ensemble</b> (ex. ATR + minimum de grille). Il applique la meilleure variante sûre telle quelle. Les nuits suivantes, il reteste autour des nouvelles valeurs : il s'affine tout seul et suit le marché.
 
 <b>Ce que tu reçois</b> : un message par nuit avec l'ancienne valeur, la nouvelle, la raison, les meilleures variantes et un bouton <b>↩️ Annuler ce changement</b>. Le réglage est appliqué à tous les comptes lancés et au preset ⭐ actif.
 

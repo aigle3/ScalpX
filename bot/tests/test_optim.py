@@ -14,21 +14,24 @@ P = {"gridatr": "0.7", "gridmin": "200", "gridmax": "500", "dyngrid": "1", "maxp
      "sl_pct": "0.5", "f_fresh": "1", "freshbars": "12", "f_vol": "0", "f_atr": "1", "news_block": "1"}
 
 
-def test_variantes_valeurs_absolues_et_un_cran():
+def test_variantes_simples_puis_combinaisons():
     vs = optim.variants(P, "grille")
-    assert [v.opts for v in vs[:4]] == [{"ga": "0.5"}, {"ga": "0.6"}, {"ga": "0.8"}, {"ga": "0.9"}]
-    assert [v.key for v in vs] == [f"p{i}" for i in range(1, 13)]
-    assert {"gn": "100"} in [v.opts for v in vs] and {"gx": "700"} in [v.opts for v in vs]
+    assert [v.opts for v in vs[:6]] == [{"ga": "0.6"}, {"ga": "0.8"}, {"gn": "150"}, {"gn": "250"}, {"gx": "400"}, {"gx": "600"}]
+    assert len(vs) == 18 and [v.key for v in vs] == [f"p{i}" for i in range(1, 19)]
+    combo = vs[6]
+    assert combo.opts == {"ga": "0.6", "gn": "150"} and combo.changes == {"gridatr": ("0.7", "0.6"), "gridmin": ("200", "150")}
+    assert combo.name == "ATR grille 0,6 × ATR + Grille min 150 pts"
     f = optim.scenario_file(vs)
-    assert f.startswith("# ") and "auto=0" in f and "p1|Multiplicateur ATR de la grille 0,5 × ATR|" in f and f.rstrip().endswith("gx=700")
+    assert f.startswith("# ") and "auto=0" in f and "p1|Multiplicateur ATR de la grille 0,6 × ATR|" in f and "|ga=0.6;gn=150" in f
+    # min doit rester sous max, même combiné
+    near = optim.variants({**P, "gridmin": "400", "gridmax": "500"}, "grille")
+    assert all(float(v.changes.get("gridmin", ("", "400"))[1]) < float(v.changes.get("gridmax", ("", "500"))[1]) for v in near)
     assert optim.variants({**P, "dyngrid": "0"}, "grille") == []                     # grille fixe : rien à tester
-    assert optim.variants({**P, "f_fresh": "0"}, "objectif")[-1].param == "sl_pct"   # signal récent coupé : bougies ignorées
+    assert {v.param for v in optim.variants({**P, "f_fresh": "0"}, "objectif")} == {"sl_pct"}
     lots = optim.variants(P, "lots")
-    assert {"lm": "1.1"} in [v.opts for v in lots] and all(float(v.new) >= 1.0 for v in lots if v.param == "lotmult")
+    assert len(lots) == 8 and {"mp": "9", "lm": "1.25"} in [v.opts for v in lots]
     flt = optim.variants(P, "filtres")
     assert len(flt) == 4 and flt[0].toks[labo.CODES.index("atr")] == "~" and flt[0].new == "0"
-    assert optim.one_notch("gridatr", "0.7", "0.9") == "0.8" and optim.one_notch("maxpend", "8", "6") == "7"
-    assert optim.one_notch("gridatr", "0.7", "0.6") == "0.6" and optim.one_notch("f_vol", "0", "1") == "1"
     assert optim.label_of("sl_pct", "0.5") == "Objectif : 0,5 %" and optim.value_text("f_vol", "1") == "activé"
 
 
@@ -46,9 +49,9 @@ def _rows(d_to, profits: dict, lost: tuple = (), n=20):
 def test_decision_securite_et_gain():
     d_to = 1_765_000_000
     vs = optim.variants(P, "grille")
-    # p1 rapporte plus mais perd le compte une fois ; p3 rapporte plus et reste sûr → p3 (un cran : 0,8)
-    d = optim.decide(_rows(d_to, {"miroir": 0.5, "p1": 2.0, "p3": 1.0}, lost=(("p1", 4),)), vs, d_to)
-    assert d.change is not None and d.change.key == "p3" and d.applied == "0.8" and "aucun compte perdu" in d.reason
+    # p1 rapporte plus mais perd le compte une fois ; p7 (combinaison) rapporte plus et reste sûre → p7 appliquée entière
+    d = optim.decide(_rows(d_to, {"miroir": 0.5, "p1": 2.0, "p7": 1.0}, lost=(("p1", 4),)), vs, d_to)
+    assert d.change is not None and d.change.key == "p7" and len(d.change.changes) == 2 and "aucun compte perdu" in d.reason
     # rien de nettement meilleur → aucun changement
     d = optim.decide(_rows(d_to, {"miroir": 0.5, "p3": 0.51}), vs, d_to)
     assert d.change is None and "rien n'est changé" in d.note

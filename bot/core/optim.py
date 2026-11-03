@@ -5,7 +5,8 @@ Choix sur les 30 derniers jours, sécurité sur 60 jours :
   - une variante n'est retenue que si elle ne perd JAMAIS le compte (60 j et 30 j) et reste sous DD_LIMIT de drawdown ;
   - réglages actuels sûrs : la variante doit gagner nettement plus sur 30 j sans perdre sur 60 j ;
   - réglages actuels dangereux (compte perdu ou drawdown ≥ DD_LIMIT sur 60 j) : la variante sûre la plus rentable sur 30 j ;
-  - on n'applique qu'UN cran (pas) dans la direction gagnante, un seul réglage par nuit.
+  - chaque variante bouge d'UN cran (pas) ; les combinaisons de deux réglages sont testées ensemble la même nuit,
+    donc la meilleure variante (simple ou combinée) est appliquée telle quelle.
 Les groupes tournent d'une nuit à l'autre ; comme les variantes sont toujours centrées sur les valeurs du moment,
 la recherche s'affine d'elle-même autour des meilleures valeurs.
 """
@@ -68,15 +69,29 @@ def value_text(key: str, raw: str) -> str:
     return "activé" if raw == "1" else "désactivé"
 
 
+SHORT = {"gridatr": "ATR grille", "gridmin": "Grille min", "gridmax": "Grille max", "maxpend": "Ordres max",
+         "lotmult": "Mult. lot", "sl_pct": "Objectif", "freshbars": "Signal récent"}
+
+
 @dataclass
 class Variant:
     key: str                      # clé du scénario du labo (p1…)
     name: str
-    param: str                    # réglage de l'EA modifié
-    old: str
-    new: str                      # valeur testée
+    changes: dict                 # réglage de l'EA → (valeur actuelle, valeur testée) ; plusieurs = combinaison testée ensemble
     toks: list[str] = field(default_factory=lambda: ["="] * len(labo.CODES))
     opts: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def param(self) -> str:
+        return next(iter(self.changes))
+
+    @property
+    def old(self) -> str:
+        return self.changes[self.param][0]
+
+    @property
+    def new(self) -> str:
+        return self.changes[self.param][1]
 
     def line(self) -> str:
         name = self.name.replace("|", "/")
@@ -88,8 +103,13 @@ def group_applies(params: dict[str, str], group: str) -> bool:
     return bool(variants(params, group))
 
 
+def _raw(key: str, v: float) -> str:
+    return str(int(v)) if float(v).is_integer() and key in ("gridmin", "gridmax", "maxpend", "freshbars") else f"{v:g}"
+
+
 def variants(params: dict[str, str], group: str) -> list[Variant]:
-    """Variantes de la nuit : pour chaque réglage du groupe, −2, −1, +1, +2 pas autour de la valeur actuelle (bornées)."""
+    """Variantes de la nuit. Réglages numériques : chacun à −1 et +1 cran, PUIS les combinaisons de deux réglages
+    (±1 cran chacun), testées ensemble dans le même backtest ; filtres : chacun inversé."""
     g = next((x for x in GROUPS if x[0] == group), None)
     if g is None:
         return []
@@ -102,8 +122,9 @@ def variants(params: dict[str, str], group: str) -> list[Variant]:
             toks = ["="] * len(labo.CODES)
             toks[i] = "~"
             new = "0" if params[key] == "1" else "1"
-            out.append(Variant("", f"{labo.LABELS[i]} {'désactivé' if new == '0' else 'activé'}", key, params[key], new, toks))
+            out.append(Variant("", f"{labo.LABELS[i]} {'désactivé' if new == '0' else 'activé'}", {key: (params[key], new)}, toks))
     else:
+        moves: dict[str, list[str]] = {}
         for key in g[2]:
             if key not in params or key not in NUM:
                 continue
@@ -115,20 +136,40 @@ def variants(params: dict[str, str], group: str) -> list[Variant]:
                 cur = float(params[key])
             except ValueError:
                 continue
-            name, step, lo, hi, opt, unit = NUM[key]
-            seen = set()
-            for d in (-2, -1, 1, 2):
+            _, step, lo, hi, _, _ = NUM[key]
+            m = []
+            for d in (-1, 1):
                 v = round(min(hi, max(lo, cur + d * step)), 4)
-                if abs(v - cur) < 1e-9 or v in seen:
-                    continue
-                if key == "gridmin" and v >= float(params.get("gridmax", "1e9")):
-                    continue
-                if key == "gridmax" and v <= float(params.get("gridmin", "0")):
-                    continue
-                seen.add(v)
-                raw = str(int(v)) if float(v).is_integer() and key in ("gridmin", "gridmax", "maxpend", "freshbars") else f"{v:g}"
-                toks = ["="] * len(labo.CODES)
-                out.append(Variant("", f"{name} {fnum(v)}{unit}", key, params[key], raw, toks, {opt: raw}))
+                if abs(v - cur) > 1e-9:
+                    m.append(_raw(key, v))
+            if m:
+                moves[key] = m
+
+        def valid(vals: dict[str, str]) -> bool:
+            mn = float(vals.get("gridmin", params.get("gridmin", "0")) or 0)
+            mx = float(vals.get("gridmax", params.get("gridmax", "1e9")) or 1e9)
+            return mn < mx
+
+        def add(vals: dict[str, str]) -> None:
+            if not valid(vals):
+                return
+            if len(vals) == 1:
+                k, r = next(iter(vals.items()))
+                name = f"{NUM[k][0]} {fnum(float(r))}{NUM[k][5]}"
+            else:
+                name = " + ".join(f"{SHORT[k]} {fnum(float(r))}{NUM[k][5]}" for k, r in vals.items())
+            out.append(Variant("", name, {k: (params[k], r) for k, r in vals.items()}, ["="] * len(labo.CODES),
+                               {NUM[k][4]: r for k, r in vals.items()}))
+
+        keys = list(moves)
+        for k in keys:
+            for r in moves[k]:
+                add({k: r})
+        for i, k1 in enumerate(keys):
+            for k2 in keys[i + 1:]:
+                for r1 in moves[k1]:
+                    for r2 in moves[k2]:
+                        add({k1: r1, k2: r2})
     for n, v in enumerate(out[:19], 1):
         v.key = f"p{n}"
     return out[:19]
@@ -169,7 +210,6 @@ class Row:
 @dataclass
 class Decision:
     change: Variant | None = None
-    applied: str = ""             # valeur appliquée (un cran)
     reason: str = ""
     table: list[Row] = field(default_factory=list)
     ref_unsafe: bool = False
@@ -210,7 +250,7 @@ def decide(rows: list[dict], vs: list[Variant], d_to: int) -> Decision:
                     "cette nuit n'est sûre" if dec.ref_unsafe else "aucune variante nettement meilleure et sûre : rien n'est changé")
         return dec
     _, v, r = best
-    dec.change, dec.applied = v, one_notch(v.param, v.old, v.new)
+    dec.change = v
     why = (f"{r.net30 - ref.net30:+.2f} € sur {CHOOSE_DAYS} j (✅ {r.won30 - ref.won30:+d} objectifs), "
            f"aucun compte perdu sur {SAFETY_DAYS} j, drawdown max {r.dd60:.0f} %")
     if dec.ref_unsafe:
