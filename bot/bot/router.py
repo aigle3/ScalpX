@@ -513,6 +513,16 @@ class Router:
         elif sub == "labo" and self.dash.lab_edit and arg in labo.OPT_CYCLES:
             opts = self.dash.lab_edit[2]
             opts[arg] = labo.next_opt(arg, opts.get(arg, ""))
+        elif sub == "labth":                                # 📦 thème installé dans le labo (sans backtest)
+            if arg in labo.THEMES and labo.THEMES[arg][2]:
+                cfg = labo.load_config(common)
+                names = labo.apply_theme(cfg, arg)
+                labo.save_config(common, cfg)
+                self.ctx.db.add_action("", f"Labo : thème « {labo.THEMES[arg][0]} » installé ({len(names)} scénarios)", True)
+                self.dash.flash(f"📦 {labo.THEMES[arg][0]} : {len(names)} scénario(s) installé(s), joués par les EA sous 10 s.")
+                self.dash.goto("labs")
+            else:
+                self.dash.goto("labth")
         elif sub == "labk":                                 # ⭐ scénarios conseillés
             if arg == "all" or arg.isdigit():
                 cfg = labo.load_config(common)

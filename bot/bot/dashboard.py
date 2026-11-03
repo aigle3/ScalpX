@@ -197,6 +197,18 @@ class Dashboard:
             return self._render_labo_edit()
         if kind == "labk":
             return self._render_labo_pack()
+        if kind == "labth":
+            from core import labo
+            lines = ["📦 <b>Remplacer mes scénarios perso par un thème</b>",
+                     "Les 7 scénarios perso actuels sont remplacés ; le labo en direct les joue aussitôt (sans backtest).", ""]
+            kb = []
+            for key, (title, desc, items) in labo.THEMES.items():
+                if not items:
+                    continue
+                lines.append(f"<b>{render.esc(title)}</b> : " + render.esc(" · ".join(n for n, _, _ in items)))
+                kb.append([(f"📦 {title}", f"d:labth:{key}")])
+            kb.append([("⬅ Scénarios", "d:labs"), ("🏠 Accueil", "d:home")])
+            return self._with_flash("\n".join(lines)), kb
         if kind == "wdr":
             return self._render_withdrawals(now)
         if kind == "gterm":
@@ -425,6 +437,7 @@ class Dashboard:
         if not cfg.customs:
             lines.append("<i>Aucun scénario perso.</i>")
         lines.append(f"\n<i>{len(cfg.customs)}/{labo.MAX_CUSTOM} scénarios perso.</i>")
+        kb.append([("📦 Remplacer par un thème (objectif, bougies, grille…)", "d:labth")])
         row = [("⭐ Scénarios conseillés", "d:labk")]
         if len(cfg.customs) < labo.MAX_CUSTOM:
             row.append(("➕ Nouveau", "d:labn"))

@@ -276,3 +276,15 @@ def test_theme_objectif_et_option_o(tmp_path):
     labo.save_config(tmp_path, cfg)
     assert "|o=0.5" in (tmp_path / labo.SCEN_FILE).read_text(encoding="utf-8")
     assert labo.opt_text("o", "0.75") == "objectif 0,75 %" and labo.next_opt("o", "0") == "0.3"
+
+
+@pytest.mark.asyncio
+async def test_installer_un_theme_depuis_les_scenarios(svc):  # noqa: F811
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    await router.on_callback("d:labs")
+    assert any(d == "d:labth" for row in dash.render()[1] for _, d in row)
+    await router.on_callback("d:labth")
+    assert any(d == "d:labth:objectif" for row in dash.render()[1] for _, d in row)
+    await router.on_callback("d:labth:objectif")
+    assert [c.name for c in labo.load_config(ctx.cfg.paths.common()).customs][0] == "Objectif 0,3 %"
+    assert dash.screen == ("labs",)
