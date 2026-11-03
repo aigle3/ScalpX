@@ -161,3 +161,24 @@ async def test_nuit_de_securite_apres_une_nuit_dangereuse(svc):  # noqa: F811
     o = router.optim
     ctx.db.meta_set("opt_safety", "1")
     assert o.safety_next and "Sécurité" in o.status_text()
+
+
+def test_securite_au_plus_une_fois_par_tour():
+    """Logique du compteur : après une nuit de sécurité, 4 nuits normales avant la suivante."""
+    import types
+    from bot.optim import Optimizer
+    meta = {}
+    db = types.SimpleNamespace(meta_get=lambda k, d="": meta.get(k, d), meta_set=lambda k, v: meta.__setitem__(k, v))
+    o = Optimizer.__new__(Optimizer)
+    o.ctx = types.SimpleNamespace(db=db)
+    nights = []
+    o.schedule_safety(lost=True, was_safety=False)                 # nuit normale, compte perdu → sécurité demain
+    nights.append(o.safety_next)
+    for _ in range(6):                                             # le danger persiste chaque nuit
+        o.schedule_safety(lost=True, was_safety=o.safety_next)
+        nights.append(o.safety_next)
+    # sécurité, puis 4 nuits normales, puis sécurité de nouveau
+    assert nights == [True, False, False, False, False, True, False]
+    meta.clear()
+    o.schedule_safety(lost=False, was_safety=False)                # drawdown haut sans compte perdu : jamais de sécurité
+    assert not o.safety_next
