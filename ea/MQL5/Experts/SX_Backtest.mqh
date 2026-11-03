@@ -19,6 +19,10 @@
 //--- compteurs (progression et résultat)
 int      g_btGoals = 0, g_btWon = 0, g_btCancel = 0, g_btCut = 0, g_btSL = 0, g_btSkip = 0, g_btReloads = 0, g_btEvents = 0;
 double   g_btWd = 0, g_btDep = 0, g_btPeak = 0, g_btMaxDD = 0, g_btStart = 0;
+datetime g_btDDTs = 0;                // 7.6.0 : pire drawdown : moment (GMT), equity de référence (pic) et equity au plus bas
+double   g_btDDPeak = 0, g_btDDEq = 0;
+int      g_btStopOuts = 0;            // 7.6.0 : stop-out du broker (fermetures forcées par le testeur, DEAL_REASON_SO)
+datetime g_btLastSO = 0;
 datetime g_btLastSec = 0;
 int      g_btLastDay = -1;
 ulong    g_btProgMs = 0;
@@ -273,6 +277,8 @@ string BtJson(bool fin, int reason)
           ",\"annules\":" + IntegerToString(g_btCancel) + ",\"coupes\":" + IntegerToString(g_btCut) + ",\"sl\":" + IntegerToString(g_btSL) +
           ",\"sautes\":" + IntegerToString(g_btSkip) + ",\"cycles\":" + IntegerToString(g_cycle) + ",\"retraits\":" + NumS(g_btWd) +
           ",\"recharges\":" + NumS(g_btDep) + ",\"nb_recharges\":" + IntegerToString(g_btReloads) + ",\"dd_max\":" + NumS(g_btMaxDD) +
+          ",\"dd_ts\":" + IntegerToString((long)g_btDDTs) + ",\"dd_pic\":" + NumS(g_btDDPeak) + ",\"dd_eq\":" + NumS(g_btDDEq) +
+          ",\"stopouts\":" + IntegerToString(g_btStopOuts) +
           ",\"positions\":" + IntegerToString(st_posCount) + ",\"objectif_actif\":" + BoolS(g_goalActive) +
           ",\"evenements\":" + IntegerToString(g_btEvents) + ",\"note\":\"" + JsonEsc(g_btNote) + "\"" +
           ",\"fin\":" + BoolS(fin) + (fin ? ",\"raison\":" + IntegerToString(reason) : "") + ",\"version\":\"" + SX_VERSION + "\"}";
@@ -301,7 +307,11 @@ void BtSecond()
    BtCash();
    double eq = AccountInfoDouble(ACCOUNT_EQUITY);
    if(eq > g_btPeak) g_btPeak = eq;
-   if(g_btPeak > 0) { double dd = (g_btPeak - eq) / g_btPeak * 100.0; if(dd > g_btMaxDD) g_btMaxDD = dd; }
+   if(g_btPeak > 0)
+   {
+      double dd = (g_btPeak - eq) / g_btPeak * 100.0;
+      if(dd > g_btMaxDD) { g_btMaxDD = dd; g_btDDTs = TimeGMT(); g_btDDPeak = g_btPeak; g_btDDEq = eq; }
+   }
    MqlDateTime d;
    TimeToStruct(TimeGMT(), d);
    if(d.day_of_year != g_btLastDay)                  // un point par jour simulé (courbe du solde)
@@ -319,6 +329,18 @@ void BtTick()
    if(t == g_btLastSec) return;
    g_btLastSec = t;
    BtSecond();
+}
+
+// 7.6.0 : un stop-out du broker (testeur) ferme toutes les positions en même temps : compté une fois par minute
+void BtOnDeal(ulong deal)
+{
+   if(!g_bt || !HistoryDealSelect(deal)) return;
+   if(HistoryDealGetInteger(deal, DEAL_REASON) != DEAL_REASON_SO) return;
+   datetime t = (datetime)HistoryDealGetInteger(deal, DEAL_TIME);
+   if(g_btLastSO != 0 && t - g_btLastSO < 60) return;
+   g_btLastSO = t;
+   g_btStopOuts++;
+   EvTyped("BT_STOPOUT", 0, "", "{\"solde\":" + NumS(AccountInfoDouble(ACCOUNT_BALANCE)) + "}");
 }
 
 void BtDeinit(int reason)

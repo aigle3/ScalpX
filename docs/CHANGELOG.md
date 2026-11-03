@@ -6,6 +6,7 @@ Les numéros de ligne sont ceux des fichiers v5.
 ## Versions
 | Version | Date | Changement |
 |---|---|---|
+| 7.6.0 | 2026-11-03 | **Optimiseur** (mesure seulement, trading inchangé). Labo : options de scénario en **valeurs absolues** `ga=` multiplicateur ATR de la grille, `gn=` / `gx=` grille min / max (pts), `lm=` multiplicateur de lot, `mp=` ordres en attente max ; ligne `auto=0` = sans les 12 scénarios automatiques ; dans un backtest, fichier de scénarios propre `bt_<id>_scen.txt` (le labo en direct n'est pas touché). Backtest : **pire drawdown** détaillé (`dd_ts`, `dd_pic`, `dd_eq`) et **stop-out du broker** comptés (`stopouts`, événement `BT_STOPOUT`). |
 | 7.5.0 | 2026-11-03 | Labo : nouvelle option de scénario `o=` = objectif en % du solde au créneau (0,3 à 2 %…), indépendant du réglage du compte (test rapide « 🎯 Objectif » du bot). Mesure seulement : trading inchangé. |
 | 7.4.1 | 2026-11-03 | Export du calendrier des news (pour les backtests) : premier contrôle 5 à 60 min après le démarrage de l'EA, décalé selon le compte, au lieu de tous les comptes en même temps juste après une mise à jour (moins de charge au redémarrage). Trading inchangé. |
 | 7.4.0 | 2026-11-02 | Labo : nouvelle option de scénario `b=` = nombre de bougies maximum du filtre « signal récent » (6, 12, 24…), indépendant du réglage du compte (tests rapides « bougies après le croisement » du bot). Mesure seulement : trading inchangé. |
