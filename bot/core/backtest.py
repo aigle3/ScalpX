@@ -187,6 +187,11 @@ class Result:
     skipped: int = 0
     dd_max: float = 0.0
     note: str = ""
+    dd_ts: int = 0                                  # EA 7.6.0 : moment du pire drawdown (GMT), equity de référence et au plus bas
+    dd_peak: float = 0.0
+    dd_eq: float = 0.0
+    stopouts: int = -1                              # stop-out du broker (-1 : EA < 7.6.0, inconnu)
+    params: dict = field(default_factory=dict)      # réglages testés (clé brute de l'EA → valeur)
     days: list = field(default_factory=list)        # [ts, solde, equity] par jour simulé
     slots: dict = field(default_factory=dict)       # créneau → [lancés, atteints]
 
@@ -223,6 +228,10 @@ def summarize(rid: int, d_from: int, d_to: int, fin: dict | None, events: list[d
     r.cycles = int(f.get("cycles", 0) or 0)
     r.dd_max = float(f.get("dd_max", 0) or 0)
     r.note = str(f.get("note", "") or "")
+    r.dd_ts = int(f.get("dd_ts", 0) or 0)
+    r.dd_peak = float(f.get("dd_pic", 0) or 0)
+    r.dd_eq = float(f.get("dd_eq", 0) or 0)
+    r.stopouts = int(f["stopouts"]) if "stopouts" in f else -1
     current = ""
     for e in events:
         t, d = e.get("type", ""), e.get("data") or {}
@@ -275,3 +284,51 @@ def progress_frac(p: dict | None, d_from: int, d_to: int) -> float:
 
 def scenario_table(events: list[dict]) -> dict[str, labo.ScenStat]:
     return labo.compute_scen([e.get("data") or {} for e in events if e.get("type") == "LABO_SERIE"])
+
+
+# ------------------------------------------------------------------ réglages testés (affichés dans le rapport)
+def _h(params: dict, key: str) -> str:
+    from . import presets as ps
+    p = ps.BY_KEY.get(key)
+    raw = params.get(key)
+    if p is None or raw is None:
+        return "?"
+    return ps.human(p, str(raw)).replace("✅ Activé", "activé").replace("❌ Désactivé", "désactivé")
+
+
+FILTER_NAMES = [("f_atr", "ATR"), ("f_ema", "Prix/EMA"), ("f_vol", "Volume"), ("f_lo", "EMA inf."), ("f_hi", "EMA sup."),
+                ("f_can", "Bougie sup."), ("f_time", "Horaire"), ("news_block", "News"), ("f_ext", "Extension"), ("f_fresh", "Signal récent")]
+SHOWN = ["sl_pct", "sl_m00", "sl_m15", "sl_m30", "sl_m45", "ct_on", "ct_m00", "ct_m15", "ct_m30", "ct_m45", "lot", "lotmult", "tbm",
+         "maxpend", "dyngrid", "gridatr", "gridmin", "gridmax", "grid", "atrmult", "tpmin", "tpmax", "emsl", "emslpct", "sesslim",
+         "seuil_arret", "seuil_reprise", "freshbars", "extatr", "exttf", "freshnoise"] + [k for k, _ in FILTER_NAMES]
+
+
+def settings_lines(params: dict) -> list[str]:
+    """Réglages testés, en clair (3 lignes)."""
+    if not params:
+        return ["⚙️ <i>Réglages testés inconnus (backtest d'avant le bot 2.43.0)</i>"]
+    from . import presets as ps, params as cat
+    v = {k: str(x) for k, x in params.items()}
+    slots = ps.slots_input(v) or "?"
+    cuts = ps.slots_input(v, cat.CUT_KEYS) if v.get("ct_on") == "1" else "aucune"
+    grid = (f"grille {_h(v, 'gridatr')} ({_h(v, 'gridmin')} → {_h(v, 'gridmax')})" if v.get("dyngrid") == "1"
+            else f"grille fixe {_h(v, 'grid')}")
+    sl = f"SL d'urgence {_h(v, 'emslpct')}" if v.get("emsl") == "1" else "SL d'urgence désactivé"
+    flt = [n + (f" ({_h(v, 'freshbars')})" if k == "f_fresh" else "") for k, n in FILTER_NAMES if v.get(k) == "1"]
+    return [f"🎯 objectif {_h(v, 'sl_pct')} · créneaux {slots} · coupures {cuts or 'aucune'}",
+            f"🧱 {grid} · {_h(v, 'maxpend')} ordres max · lot {v.get('lot', '?')} × {v.get('lotmult', '?')} tous les {_h(v, 'tbm')} ordres · {sl}",
+            "🛡️ filtres : " + (", ".join(flt) if flt else "aucun")]
+
+
+def settings_diff(old: dict, new: dict) -> list[str]:
+    """Réglages qui diffèrent entre deux backtests (« objectif : 0,30 % → 0,50 % »)."""
+    from . import presets as ps
+    out = []
+    for k in SHOWN:
+        a, b = old.get(k), new.get(k)
+        if a is None or b is None or str(a) == str(b):
+            continue
+        p = ps.BY_KEY.get(k)
+        name = p[1] if p else k
+        out.append(f"{name} : {_h(old, k)} → {_h(new, k)}")
+    return out

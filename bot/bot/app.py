@@ -366,6 +366,14 @@ async def j_flush(context: ContextTypes.DEFAULT_TYPE) -> None:
     await svc(context).notifier.flush()
 
 
+async def j_opt(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """🤖 Optimiseur : lancé chaque nuit à l'heure choisie (vérifié toutes les minutes)."""
+    s = svc(context)
+    o = getattr(s.router, "optim", None)
+    if o is not None and o.due():
+        s.router._bg(o.run())
+
+
 async def j_windows(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Fenêtres MT5 : un terminal dont la fenêtre n'a pas pu être rangée au lancement (VPS chargé), ou rouverte,
     est rangé / réduit (comptes et terminal de backtest)."""
@@ -581,6 +589,7 @@ def build_application(cfg: Config, ctx_factory) -> Application:
     jq.run_repeating(timed(j_presets), interval=300, first=90, job_kwargs=JOB_KW)  # robots conformes au preset ⭐ actif ?
     jq.run_repeating(timed(j_dash), interval=2, first=5, job_kwargs=JOB_KW)        # refresh() : toutes les refresh_s, republication après repost_s
     jq.run_repeating(timed(j_watchdog), interval=t.watchdog_interval_s, first=20, job_kwargs=JOB_KW)
+    jq.run_repeating(timed(j_opt), interval=60, first=120, job_kwargs=JOB_KW)
     if cfg.mt5.minimize and cfg.mt5.minimize_check_s > 0:
         jq.run_repeating(timed(j_windows), interval=cfg.mt5.minimize_check_s, first=180, job_kwargs=JOB_KW)
     jq.run_repeating(timed(j_build), interval=20, first=40, job_kwargs=JOB_KW)

@@ -543,19 +543,30 @@ def bt_progress_text(run, cur: str, now: float | None = None) -> str:
 
 
 def bt_result_text(rid: int, kind: str, source: str, model: str, res, scen: dict, cur: str, duration_s: float = 0,
-                   brief: list | None = None) -> str:
+                   brief: list | None = None, prev: tuple | None = None) -> str:
     """Résultat final d'un backtest : la stratégie réelle, par créneau, et le labo des filtres sur la même période."""
     from core import backtest as bt, labo
     days = max(1, round((res.d_to - res.d_from) / 86400))
     out = [f"✅ <b>Backtest #{rid} terminé</b> · {bt.period_label(days)} ({bt.human_date(res.d_from)} → {bt.human_date(res.d_to)})",
-           f"⚙️ {esc(source)} · {esc(bt.MODELS.get(model, (0, model))[1])}" + (f" · durée {_dur(duration_s)}" if duration_s else ""), ""]
+           f"⚙️ {esc(source)} · {esc(bt.MODELS.get(model, (0, model))[1])}" + (f" · durée {_dur(duration_s)}" if duration_s else "")]
+    out += [esc(l) for l in bt.settings_lines(getattr(res, "params", {}) or {})]
+    if prev is not None and getattr(res, "params", None) and prev[1]:
+        diff = bt.settings_diff(prev[1], res.params)
+        out.append(f"🔁 Changé depuis le backtest #{prev[0]} : " + (esc(" · ".join(diff)) if diff else "rien"))
+    out.append("")
     out.append(f"💼 Dépôt {money(res.deposit, cur)} → solde final <b>{money(res.final, cur)}</b>")
     out.append(f"💸 Retiré {money(res.withdrawn, cur)} ({res.cycles} cycle(s) 500)"
                + (f" · 🔄 {res.reloads} recharge(s) : {money(res.reloaded, cur)}" if res.reloads else " · aucune recharge"))
     out.append(f"📈 <b>Gain net {money(res.net, cur, True)}</b> · drawdown max {res.dd_max:.1f} %")
-    if res.final <= 0.01 or res.dd_max >= 95:
-        out.append(f"💀 <b>Compte perdu</b> : le solde est tombé à {money(res.final, cur)} (stop-out du broker ; le SL d'urgence "
-                   "ne s'est pas déclenché : désactivé ou trop haut ?)")
+    if getattr(res, "dd_ts", 0):
+        out.append(f"📉 Pire drawdown : {res.dd_max:.1f} % le {time.strftime('%d/%m/%Y %H:%M', time.gmtime(res.dd_ts))} (GMT) : "
+                   f"equity {money(res.dd_peak, cur)} → {money(res.dd_eq, cur)} ({money(res.dd_eq - res.dd_peak, cur, True)})")
+    so = getattr(res, "stopouts", -1)
+    if so > 0 or res.final <= 1.0:
+        out.append(f"💀 <b>Compte perdu</b>" + (f" {so} fois (stop-out du broker)" if so > 0 else "") +
+                   f" · solde final {money(res.final, cur)}")
+    elif res.dd_max >= 90:
+        out.append(f"⚠️ <b>Passé tout près de la perte du compte</b> (drawdown {res.dd_max:.0f} %), sans stop-out")
     if brief:
         out += [""] + list(brief) + [""]
     rate = f" ({res.won / res.goals * 100:.0f} %)" if res.goals else ""

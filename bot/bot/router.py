@@ -48,6 +48,9 @@ class Router:
         self.awaiting_bt: str | None = None                 # saisie attendue : login, server_text, password, date
         self._bt_msg: int | None = None                     # message de suivi du backtest en cours
         self._bt_last = (0.0, "")                           # dernière édition du suivi (heure, texte)
+        from .optim import Optimizer
+        self.optim = Optimizer(self)                        # 🤖 optimiseur automatique (nuit)
+        dash.optim = self.optim
 
     def _bg(self, coro) -> None:
         """Lance une action longue sans bloquer la réception des mises à jour Telegram."""
@@ -134,6 +137,10 @@ class Router:
             if len(p) > 2 and p[2].isdigit() and int(p[2]) in self.dash.SST_DAYS:
                 self.dash.sst_days = int(p[2])
             self.dash.goto("sst")
+        elif sub in ("opt", "opton", "opth", "optgo", "optj", "optf", "optg", "opu"):   # 🤖 optimiseur
+            r = await self._opt_cb(sub, p)
+            if r is not None:
+                return r
         elif sub.startswith("bt") or sub.startswith("qt"):  # 🧪 backtest et tests rapides
             r = await self._bt_cb(sub, p)
             if r is not None:
@@ -816,6 +823,8 @@ class Router:
         run = await self.bt.execute(run, params=params, deposit=deposit, currency=currency, leverage=leverage,
                                     comm=comm, slip=slip, notify=self._bt_notify, poll_s=self.ctx.cfg.backtest.poll_s)
         status = "ok" if run.ok else ("arrete" if run.cancelled else "erreur")
+        if run.result is not None:
+            run.result.params = dict(params)                  # réglages testés, affichés dans le rapport
         self.ctx.db.bt_update(rid, status, run.result.to_json() if run.result else "", run.error)
         if run.ok:
             r = self.dash._render_bt_result(rid)
@@ -840,6 +849,55 @@ class Router:
         else:
             self.dash.flash("📈 Pas assez de jours simulés pour une courbe.")
             await self.dash.refresh(force=True)
+
+    async def _opt_cb(self, sub: str, p: list[str]) -> str | None:
+        from .optim import GUIDE
+        from .system import tail
+        o, d = self.optim, self.dash
+        arg = p[2] if len(p) > 2 else ""
+        if sub == "opt":
+            d.goto("opt")
+        elif sub == "opton":
+            o.set_on(not o.on)
+            d.flash("✅ Optimiseur activé." if o.on else "⏸ Optimiseur suspendu : plus aucun réglage changé automatiquement.")
+        elif sub == "opth":
+            d.flash(f"🕐 L'optimiseur se lancera chaque nuit à {o.next_hour():02d}:00.")
+        elif sub == "optgo":
+            if o.running or self.bt.busy():
+                d.flash("⏳ Un backtest ou une optimisation est déjà en cours.")
+            else:
+                self.ctx.db.add_action("", "Optimiseur lancé à la main", True)
+                self._bg(o.run(manual=True))
+                d.flash("🤖 Optimisation lancée : résultat dans 20 à 40 min (📜 Journal pour suivre).")
+        elif sub == "optj":
+            txt = tail(o.path, 60, 3800)
+            await self.sender.send(self.chat_id, "📜 <b>Journal de l'optimiseur</b>\n" + (f"<pre>{esc(txt)}</pre>" if txt else "<i>vide</i>"),
+                                   [[("📎 Fichier complet", "d:optf"), ("✖ Fermer", "d:close")]], True)
+            return ""
+        elif sub == "optf":
+            try:
+                data = o.path.read_bytes()
+            except OSError:
+                data = b""
+            if data:
+                await self.sender.document(self.chat_id, data, "optim.log", "Journal complet de l'optimiseur")
+            else:
+                d.flash("Journal vide.")
+            return ""
+        elif sub == "optg":
+            await self.sender.send(self.chat_id, GUIDE, [[("✖ Fermer", "d:close")]], True)
+            return ""
+        elif sub == "opu" and arg.isdigit():
+            rid = int(arg)
+            return await self._ask("↩️ <b>Annuler ce changement de l'optimiseur ?</b>\nL'ancienne valeur est remise sur tous les comptes lancés "
+                                   "et dans le preset ⭐.", lambda: self._opt_revert(rid), ("opt",), "↩️ Annuler le changement")
+        return None
+
+    async def _opt_revert(self, rid: int) -> None:
+        msg = await self.optim.revert(rid)
+        self.ctx.db.add_action("", f"Optimiseur : changement #{rid} annulé", True)
+        self.dash.flash(msg)
+        await self.dash.refresh(force=True)
 
     async def _labo_reset(self) -> None:
         from core import labo

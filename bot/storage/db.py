@@ -51,6 +51,9 @@ CREATE INDEX IF NOT EXISTS ix_act ON actions(ts);
 CREATE TABLE IF NOT EXISTS labo(
   iid TEXT, ts INTEGER, kind TEXT, sc TEXT, data TEXT);
 CREATE INDEX IF NOT EXISTS ix_labo ON labo(ts);
+CREATE TABLE IF NOT EXISTS opt_runs(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, grp TEXT, status TEXT, summary TEXT, applied TEXT, bt INTEGER,
+  reverted INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS backtests(
   id INTEGER PRIMARY KEY AUTOINCREMENT, created INTEGER, kind TEXT, d_from INTEGER, d_to INTEGER, model TEXT,
   source TEXT, status TEXT, result TEXT, ended INTEGER, error TEXT);
@@ -236,6 +239,24 @@ class Database:
 
     def bt_list(self, limit: int = 8) -> list[sqlite3.Row]:
         return self._all("SELECT * FROM backtests ORDER BY id DESC LIMIT ?", (limit,))
+
+    # ---- optimiseur
+    def opt_add(self, grp: str, status: str, summary: str, applied: str, bt: int) -> int:
+        with self._lock:
+            cur = self._cx.execute("INSERT INTO opt_runs(ts, grp, status, summary, applied, bt, reverted) VALUES(?,?,?,?,?,?,0)",
+                                   (int(time.time()), grp, status, summary, applied, bt))
+            self._cx.commit()
+            return int(cur.lastrowid)
+
+    def opt_list(self, limit: int = 10) -> list[sqlite3.Row]:
+        return self._all("SELECT * FROM opt_runs ORDER BY id DESC LIMIT ?", (limit,))
+
+    def opt_get(self, rid: int) -> sqlite3.Row | None:
+        r = self._all("SELECT * FROM opt_runs WHERE id=?", (rid,))
+        return r[0] if r else None
+
+    def opt_mark_reverted(self, rid: int) -> None:
+        self._exec("UPDATE opt_runs SET reverted=1 WHERE id=?", (rid,))
 
     def bt_interrupted(self) -> int:
         """Démarrage du bot : un backtest « en cours » ne l'est plus (suivi perdu)."""

@@ -53,6 +53,8 @@ struct LbScen
    int      extTf;             // 7.3.0 : extension mesurée sur 0 = comme le compte, 1 = TF du robot, 2 = M15, 3 = H1
    int      fbars;             // 7.4.0 : signal récent, nombre de bougies max (0 = comme le compte)
    double   opct;              // 7.5.0 : objectif en % du solde (0 = comme le compte)
+   double   ga, gn, gx, lm;    // 7.6.0 : valeurs ABSOLUES de l'optimiseur (0 = comme le compte) : multiplicateur ATR de la grille,
+   int      mp;                //         grille min / max (pts), multiplicateur de lot, ordres en attente max
    //--- compte virtuel
    double   bal;
    double   start;
@@ -130,6 +132,7 @@ int      g_lbExtAtr[2]  = { INVALID_HANDLE, INVALID_HANDLE };   // ATR M15, H1
 void LbOptsParse(LbScen &x, string o)
 {
    x.gm = 1.0; x.noise = -1; x.extTf = 0; x.fbars = 0; x.opct = 0;
+   x.ga = 0; x.gn = 0; x.gx = 0; x.lm = 0; x.mp = 0;
    string p[];
    int n = StringSplit(o, ';', p);
    for(int i = 0; i < n; i++)
@@ -141,6 +144,11 @@ void LbOptsParse(LbScen &x, string o)
       else if(kv[0] == "x") x.extTf = (int)MathMax(0, MathMin(3, StringToInteger(kv[1])));
       else if(kv[0] == "b") x.fbars = (int)MathMax(0, MathMin(200, StringToInteger(kv[1])));
       else if(kv[0] == "o") x.opct = MathMax(0.0, MathMin(20.0, StringToDouble(kv[1])));
+      else if(kv[0] == "ga") x.ga = MathMax(0.0, MathMin(10.0, StringToDouble(kv[1])));
+      else if(kv[0] == "gn") x.gn = MathMax(0.0, MathMin(5000.0, StringToDouble(kv[1])));
+      else if(kv[0] == "gx") x.gx = MathMax(0.0, MathMin(10000.0, StringToDouble(kv[1])));
+      else if(kv[0] == "lm") x.lm = MathMax(0.0, MathMin(3.0, StringToDouble(kv[1])));
+      else if(kv[0] == "mp") x.mp = (int)MathMax(0, MathMin(LB_MAXPEND, StringToInteger(kv[1])));
    }
 }
 
@@ -152,6 +160,11 @@ string LbOpts(const LbScen &x)
    if(x.extTf > 0) s += (s != "" ? ";" : "") + "x=" + IntegerToString(x.extTf);
    if(x.fbars > 0) s += (s != "" ? ";" : "") + "b=" + IntegerToString(x.fbars);
    if(x.opct > 0) s += (s != "" ? ";" : "") + "o=" + DoubleToString(x.opct, 2);
+   if(x.ga > 0) s += (s != "" ? ";" : "") + "ga=" + DoubleToString(x.ga, 2);
+   if(x.gn > 0) s += (s != "" ? ";" : "") + "gn=" + DoubleToString(x.gn, 0);
+   if(x.gx > 0) s += (s != "" ? ";" : "") + "gx=" + DoubleToString(x.gx, 0);
+   if(x.lm > 0) s += (s != "" ? ";" : "") + "lm=" + DoubleToString(x.lm, 2);
+   if(x.mp > 0) s += (s != "" ? ";" : "") + "mp=" + IntegerToString(x.mp);
    return s;
 }
 
@@ -224,6 +237,7 @@ void LbCopy(LbScen &d, const LbScen &s)
    d.key = s.key; d.name = s.name;
    for(int i = 0; i < LB_NF; i++) { d.mode[i] = s.mode[i]; d.adj[i] = s.adj[i]; }
    d.gm = s.gm; d.noise = s.noise; d.extTf = s.extTf; d.fbars = s.fbars; d.opct = s.opct;
+   d.ga = s.ga; d.gn = s.gn; d.gx = s.gx; d.lm = s.lm; d.mp = s.mp;
    d.bal = s.bal; d.start = s.start; d.withdrawn = s.withdrawn; d.reloaded = s.reloaded; d.cycles = s.cycles; d.reloads = s.reloads;
    d.active = s.active; d.cutPend = s.cutPend; d.init = s.init; d.target = s.target; d.peak = s.peak; d.maxDD = s.maxDD; d.minML = s.minML;
    d.t0 = s.t0; d.tEntry = s.tEntry; d.slot = s.slot; d.maxPos = s.maxPos; d.nSeries = s.nSeries;
@@ -332,27 +346,37 @@ void LbDefine(LbScen &x, string key, string name, string toks, string opts = "")
    }
 }
 
+string BtFile(string kind);   // [ARCHI] 7.6.0 (SX_Backtest.mqh)
+
 // Recharge la liste : scénarios par défaut + scénarios perso ; l'état des scénarios déjà connus est conservé
 void LaboLoadScenarios()
 {
    int n = 0;
    string allSame = "", allOff = "";
    for(int i = 0; i < LB_NF; i++) { allSame += (i ? "," : "") + "="; allOff += (i ? "," : "") + "off"; }
+   // 7.6.0 : backtest de l'optimiseur : son propre fichier de scénarios ; « auto=0 » = sans les 12 scénarios automatiques
+   string scen = LB_SCEN_FILE, txt0 = "";
+   if(g_bt && FileIsExist(BtFile("scen.txt"), FILE_COMMON)) scen = BtFile("scen.txt");
+   bool autoSc = true;
+   if(AFileRead(scen, txt0) && StringFind(txt0, "auto=0") >= 0) autoSc = false;
    LbDefine(g_lbTmp[n], "miroir", "Réglages actuels", allSame);
    n++;
-   for(int i = 0; i < LB_NF; i++)
+   for(int i = 0; i < LB_NF && autoSc; i++)
    {
       string t = "";
       for(int k = 0; k < LB_NF; k++) t += (k ? "," : "") + (k == i ? "~" : "=");
       LbDefine(g_lbTmp[n], "t" + IntegerToString(i), FbName(i), t);
       n++;
    }
-   LbDefine(g_lbTmp[n], "aucun", "Aucun filtre", allOff);
-   n++;
+   if(autoSc)
+   {
+      LbDefine(g_lbTmp[n], "aucun", "Aucun filtre", allOff);
+      n++;
+   }
 
    string txt, reset = "";
    g_lbWanted = true;
-   if(AFileRead(LB_SCEN_FILE, txt))
+   if(AFileRead(scen, txt))
    {
       StringReplace(txt, "\r", "");
       string lines[];
@@ -381,12 +405,10 @@ void LaboLoadScenarios()
          int md[LB_NF], aj[LB_NF];
          for(int k = 0; k < LB_NF; k++) { md[k] = g_lbTmp[i].mode[k]; aj[k] = g_lbTmp[i].adj[k]; }
          string nm = g_lbTmp[i].name;
-         double gm = g_lbTmp[i].gm;
-         int nz = g_lbTmp[i].noise, xt = g_lbTmp[i].extTf, fb = g_lbTmp[i].fbars;
-         double op = g_lbTmp[i].opct;
+         string os = LbOpts(g_lbTmp[i]);              // options du fichier (gardées ; l'état vient de g_lb)
          LbCopy(g_lbTmp[i], g_lb[j]);
          g_lbTmp[i].name = nm;
-         g_lbTmp[i].gm = gm; g_lbTmp[i].noise = nz; g_lbTmp[i].extTf = xt; g_lbTmp[i].fbars = fb; g_lbTmp[i].opct = op;
+         LbOptsParse(g_lbTmp[i], os);
          for(int k = 0; k < LB_NF; k++) { g_lbTmp[i].mode[k] = md[k]; g_lbTmp[i].adj[k] = aj[k]; }
       }
       else
@@ -612,11 +634,43 @@ void LbCloseMarket(LbScen &x, double bid, double ask)
    LbCloseAt(x, (x.dir > 0) ? bid - slip : ask + slip);
 }
 
+// 7.6.0 : écart de grille et lot d'un scénario (même calcul que CalcGridStep / CalcLot, valeurs absolues de l'optimiseur)
+double LbGridStep(const LbScen &x, int n)
+{
+   double gmul = (x.gm > 0) ? x.gm : 1.0;
+   if(x.ga <= 0 && x.gn <= 0 && x.gx <= 0) return CalcGridStep(n) * gmul;
+   double step = (double)PInt(P_GRID);
+   if(PBool(P_DYNGRID))
+   {
+      double atr = ATRPoints(BarShift());
+      if(atr > 0)
+      {
+         double mn = (x.gn > 0) ? x.gn : (double)PInt(P_GRIDMIN), mx = (x.gx > 0) ? x.gx : (double)PInt(P_GRIDMAX);
+         step = atr * ((x.ga > 0) ? x.ga : PDbl(P_GRIDATR));
+         if(step < mn) step = mn;
+         if(step > mx) step = mx;
+      }
+      long sl = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+      if(step < (double)sl) step = (double)sl;
+   }
+   double gm = PDbl(P_GRIDMULT);
+   int tbm = MathMax(1, PInt(P_TBM));
+   if(gm != 1.0) step *= MathPow(gm, n / tbm);
+   return step * gmul;
+}
+
+double LbLot(const LbScen &x, int n)
+{
+   if(x.lm <= 0) return CalcLot(n);
+   int tbm = MathMax(1, PInt(P_TBM));
+   return NormVolume(PDbl(P_LOT) * MathPow(x.lm, n / tbm));
+}
+
 // Même logique que PlaceGridBatch (ordres limites sous / au-dessus de la série)
 void LbGrid(LbScen &x, double bid, double ask)
 {
    if(x.nPos == 0 || x.dir == 0) return;
-   int maxp = MathMin(PInt(P_MAXPEND), LB_MAXPEND);
+   int maxp = MathMin(x.mp > 0 ? x.mp : PInt(P_MAXPEND), LB_MAXPEND);   // 7.6.0 : ordres max du scénario
    if(x.nPend >= maxp) return;
    bool buy = (x.dir > 0);
    long stops = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
@@ -630,8 +684,8 @@ void LbGrid(LbScen &x, double bid, double ask)
    int n = x.nPos + x.nPend;
    while(x.nPend < maxp && n < LB_MAXPOS)
    {
-      double stepPts = CalcGridStep(n) * (x.gm > 0 ? x.gm : 1.0);   // 7.3.0 : écart de grille du scénario
-      double lot     = CalcLot(n);
+      double stepPts = LbGridStep(x, n);             // 7.3.0 / 7.6.0 : écart de grille du scénario
+      double lot     = LbLot(x, n);
       double price   = buy ? anchor - stepPts * _Point : anchor + stepPts * _Point;
       if(buy)
       {
@@ -676,7 +730,7 @@ void LbOpen(LbScen &x, int dir, double bid, double ask)
    double slip = LbSlipPts() * _Point;
    LbClearSeries(x);
    x.dir = dir;
-   LbAddPos(x, (dir > 0) ? ask + slip : bid - slip, CalcLot(0));
+   LbAddPos(x, (dir > 0) ? ask + slip : bid - slip, LbLot(x, 0));
    if(x.tEntry == 0) x.tEntry = TimeGMT();
    x.nSeries++;
    LbTP(x);
@@ -986,6 +1040,7 @@ void LaboLoadState()
       int s = g_lbN;
       LbClearGoal(g_lb[s]);
       g_lb[s].key = f[0]; g_lb[s].name = f[0]; g_lb[s].gm = 1.0; g_lb[s].noise = -1; g_lb[s].extTf = 0; g_lb[s].fbars = 0; g_lb[s].opct = 0;
+      g_lb[s].ga = 0; g_lb[s].gn = 0; g_lb[s].gx = 0; g_lb[s].lm = 0; g_lb[s].mp = 0;
       for(int i = 0; i < LB_NF; i++) { g_lb[s].mode[i] = LBM_SAME; g_lb[s].adj[i] = 0; }
       g_lb[s].bal = StringToDouble(f[1]); g_lb[s].start = StringToDouble(f[2]); g_lb[s].withdrawn = StringToDouble(f[3]);
       g_lb[s].reloaded = StringToDouble(f[4]); g_lb[s].cycles = (int)StringToInteger(f[5]); g_lb[s].reloads = (int)StringToInteger(f[6]);
