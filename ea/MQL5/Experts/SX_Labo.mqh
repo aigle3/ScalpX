@@ -1,5 +1,10 @@
 ﻿//+------------------------------------------------------------------+
-//| SX_Labo.mqh - ScalpX 7.1.0                                       |
+//| SX_Labo.mqh - ScalpX 7.7.0                                       |
+//| 7.7.0 : séries virtuelles réservées au backtest de l'optimiseur  |
+//|   (en réel : mesure du slippage et de la commission seulement).  |
+//|   Options par scénario : tb, ef/es/ap (EMA, ATR), am/tn/tx (TP), |
+//|   an/ax/vn/vx/ea/cb (seuils des filtres), r=1 (filtres recalculés|
+//|   pour le scénario), sm=<4 masques> (créneaux propres).          |
 //| [ARCHI] LABO DES FILTRES : mesure seulement, AUCUN ordre réel.   |
 //|                                                                  |
 //| 1) Journal des blocages RÉELS : pendant chaque objectif, combien |
@@ -30,7 +35,7 @@
 //| Rien ici ne modifie la logique de trading réelle.                |
 //+------------------------------------------------------------------+
 #define LB_NF        FB_N        // 11 filtres, même numérotation que le tableau des filtres
-#define LB_MAXSC     20
+#define LB_MAXSC     40          // 7.7.0 : 20 → 40 (optimiseur : une catégorie entière par backtest)
 #define LB_MAXPOS    60
 #define LB_MAXPEND   40
 #define LB_SCEN_FILE "labo_scenarios.txt"
@@ -55,6 +60,16 @@ struct LbScen
    double   opct;              // 7.5.0 : objectif en % du solde (0 = comme le compte)
    double   ga, gn, gx, lm;    // 7.6.0 : valeurs ABSOLUES de l'optimiseur (0 = comme le compte) : multiplicateur ATR de la grille,
    int      mp;                //         grille min / max (pts), multiplicateur de lot, ordres en attente max
+   int      tb;                // 7.7.0 : trades avant multiplication (0 = comme le compte)
+   int      ef, es, ap;        // 7.7.0 : périodes EMA rapide / lente et ATR du signal (0 = comme le compte)
+   double   am, tn, tx;        // 7.7.0 : TP dynamique : multiplicateur ATR, minimum, maximum en pts (0 = comme le compte)
+   double   an, ax, vn, vx;    // 7.7.0 : ATR min / max (pts), volume min / max (x moyenne) (0 = comme le compte)
+   double   ea, cb;            // 7.7.0 : extension max (x ATR, 0 = comme le compte), corps de bougie (x ATR, < 0 = comme le compte)
+   bool     raw;               // 7.7.0 : tous les filtres recalculés pour le scénario (sans l'antirebond du compte)
+   bool     hasSm;             // 7.7.0 : créneaux propres au scénario (masques sm, même codage que sl_m00..sl_m45)
+   int      sm[4];
+   long     slotKey;           //         dernier créneau propre consommé
+   int      hF, hS, hA;        //         EMA rapide / lente et ATR propres (INVALID_HANDLE = ceux du robot)
    //--- compte virtuel
    double   bal;
    double   start;
@@ -133,6 +148,9 @@ void LbOptsParse(LbScen &x, string o)
 {
    x.gm = 1.0; x.noise = -1; x.extTf = 0; x.fbars = 0; x.opct = 0;
    x.ga = 0; x.gn = 0; x.gx = 0; x.lm = 0; x.mp = 0;
+   x.tb = 0; x.ef = 0; x.es = 0; x.ap = 0; x.am = 0; x.tn = 0; x.tx = 0;
+   x.an = 0; x.ax = 0; x.vn = 0; x.vx = 0; x.ea = 0; x.cb = -1; x.raw = false; x.hasSm = false;
+   for(int k = 0; k < 4; k++) x.sm[k] = 0;
    string p[];
    int n = StringSplit(o, ';', p);
    for(int i = 0; i < n; i++)
@@ -149,8 +167,35 @@ void LbOptsParse(LbScen &x, string o)
       else if(kv[0] == "gx") x.gx = MathMax(0.0, MathMin(10000.0, StringToDouble(kv[1])));
       else if(kv[0] == "lm") x.lm = MathMax(0.0, MathMin(3.0, StringToDouble(kv[1])));
       else if(kv[0] == "mp") x.mp = (int)MathMax(0, MathMin(LB_MAXPEND, StringToInteger(kv[1])));
+      else if(kv[0] == "tb") x.tb = (int)MathMax(0, MathMin(50, StringToInteger(kv[1])));
+      else if(kv[0] == "ef") x.ef = (int)MathMax(0, MathMin(500, StringToInteger(kv[1])));
+      else if(kv[0] == "es") x.es = (int)MathMax(0, MathMin(1000, StringToInteger(kv[1])));
+      else if(kv[0] == "ap") x.ap = (int)MathMax(0, MathMin(500, StringToInteger(kv[1])));
+      else if(kv[0] == "am") x.am = MathMax(0.0, MathMin(20.0, StringToDouble(kv[1])));
+      else if(kv[0] == "tn") x.tn = MathMax(0.0, MathMin(10000.0, StringToDouble(kv[1])));
+      else if(kv[0] == "tx") x.tx = MathMax(0.0, MathMin(20000.0, StringToDouble(kv[1])));
+      else if(kv[0] == "an") x.an = MathMax(0.0, MathMin(20000.0, StringToDouble(kv[1])));
+      else if(kv[0] == "ax") x.ax = MathMax(0.0, MathMin(50000.0, StringToDouble(kv[1])));
+      else if(kv[0] == "vn") x.vn = MathMax(0.0, MathMin(20.0, StringToDouble(kv[1])));
+      else if(kv[0] == "vx") x.vx = MathMax(0.0, MathMin(50.0, StringToDouble(kv[1])));
+      else if(kv[0] == "ea") x.ea = MathMax(0.0, MathMin(20.0, StringToDouble(kv[1])));
+      else if(kv[0] == "cb") x.cb = MathMax(0.0, MathMin(5.0, StringToDouble(kv[1])));
+      else if(kv[0] == "r") x.raw = (kv[1] != "0");
+      else if(kv[0] == "sm")
+      {
+         string m[];
+         if(StringSplit(kv[1], ',', m) == 4)
+         {
+            x.hasSm = true;
+            for(int k = 0; k < 4; k++) x.sm[k] = (int)MathMax(0, MathMin(16777215, StringToInteger(m[k])));
+         }
+      }
    }
+   // réglages qui changent la lecture du marché ou un seuil : tous les filtres du scénario sont recalculés
+   if(x.ef > 0 || x.es > 0 || x.ap > 0 || x.an > 0 || x.ax > 0 || x.vn > 0 || x.vx > 0 || x.ea > 0 || x.cb >= 0) x.raw = true;
 }
+
+void LbAddOpt(string &s, string kv) { s += (s != "" ? ";" : "") + kv; }
 
 string LbOpts(const LbScen &x)
 {
@@ -165,13 +210,35 @@ string LbOpts(const LbScen &x)
    if(x.gx > 0) s += (s != "" ? ";" : "") + "gx=" + DoubleToString(x.gx, 0);
    if(x.lm > 0) s += (s != "" ? ";" : "") + "lm=" + DoubleToString(x.lm, 2);
    if(x.mp > 0) s += (s != "" ? ";" : "") + "mp=" + IntegerToString(x.mp);
+   if(x.tb > 0) LbAddOpt(s, "tb=" + IntegerToString(x.tb));
+   if(x.ef > 0) LbAddOpt(s, "ef=" + IntegerToString(x.ef));
+   if(x.es > 0) LbAddOpt(s, "es=" + IntegerToString(x.es));
+   if(x.ap > 0) LbAddOpt(s, "ap=" + IntegerToString(x.ap));
+   if(x.am > 0) LbAddOpt(s, "am=" + DoubleToString(x.am, 2));
+   if(x.tn > 0) LbAddOpt(s, "tn=" + DoubleToString(x.tn, 0));
+   if(x.tx > 0) LbAddOpt(s, "tx=" + DoubleToString(x.tx, 0));
+   if(x.an > 0) LbAddOpt(s, "an=" + DoubleToString(x.an, 0));
+   if(x.ax > 0) LbAddOpt(s, "ax=" + DoubleToString(x.ax, 0));
+   if(x.vn > 0) LbAddOpt(s, "vn=" + DoubleToString(x.vn, 2));
+   if(x.vx > 0) LbAddOpt(s, "vx=" + DoubleToString(x.vx, 2));
+   if(x.ea > 0) LbAddOpt(s, "ea=" + DoubleToString(x.ea, 2));
+   if(x.cb >= 0) LbAddOpt(s, "cb=" + DoubleToString(x.cb, 2));
+   if(x.raw) LbAddOpt(s, "r=1");
+   if(x.hasSm) LbAddOpt(s, "sm=" + IntegerToString(x.sm[0]) + "," + IntegerToString(x.sm[1]) + "," + IntegerToString(x.sm[2]) + "," + IntegerToString(x.sm[3]));
    return s;
 }
+
+//--- 7.7.0 : contexte du scénario évalué (valeurs du robot hors scénario à réglages propres)
+int      g_lbCurS   = -1;
+bool     g_lbOwnSig = false;          // EMA ou ATR propres au scénario
+double   g_lbF = 0, g_lbS = 0, g_lbA = 0;   // EMA rapide, EMA lente, ATR (pts)
+int      g_lbHF = INVALID_HANDLE, g_lbHS = INVALID_HANDLE;
+double   g_lbAn = 0, g_lbAx = 0, g_lbVn = 0, g_lbVx = 0, g_lbEa = 0, g_lbCb = -1;
 
 // Extension du scénario : 1 = TF du robot, 2 = M15, 3 = H1 (multiple de l'ATR de ce timeframe)
 double LbExtAtr(int x)
 {
-   if(x == 1) return (mk_atrPts > 0 && mk_slow > 0) ? ((mk_bid - mk_slow) / _Point) / mk_atrPts : 0;
+   if(x == 1) return (g_lbA > 0 && g_lbS > 0) ? ((mk_bid - g_lbS) / _Point) / g_lbA : 0;   // 7.7.0 : EMA / ATR du scénario
    int k = x - 2;
    if(k < 0 || k > 1 || g_lbExtSlow[k] == INVALID_HANDLE || g_lbExtAtr[k] == INVALID_HANDLE) return mk_extAtr;
    double e[1], at[1];
@@ -238,6 +305,10 @@ void LbCopy(LbScen &d, const LbScen &s)
    for(int i = 0; i < LB_NF; i++) { d.mode[i] = s.mode[i]; d.adj[i] = s.adj[i]; }
    d.gm = s.gm; d.noise = s.noise; d.extTf = s.extTf; d.fbars = s.fbars; d.opct = s.opct;
    d.ga = s.ga; d.gn = s.gn; d.gx = s.gx; d.lm = s.lm; d.mp = s.mp;
+   d.tb = s.tb; d.ef = s.ef; d.es = s.es; d.ap = s.ap; d.am = s.am; d.tn = s.tn; d.tx = s.tx;
+   d.an = s.an; d.ax = s.ax; d.vn = s.vn; d.vx = s.vx; d.ea = s.ea; d.cb = s.cb; d.raw = s.raw; d.hasSm = s.hasSm;
+   for(int k = 0; k < 4; k++) d.sm[k] = s.sm[k];
+   d.slotKey = s.slotKey; d.hF = s.hF; d.hS = s.hS; d.hA = s.hA;
    d.bal = s.bal; d.start = s.start; d.withdrawn = s.withdrawn; d.reloaded = s.reloaded; d.cycles = s.cycles; d.reloads = s.reloads;
    d.active = s.active; d.cutPend = s.cutPend; d.init = s.init; d.target = s.target; d.peak = s.peak; d.maxDD = s.maxDD; d.minML = s.minML;
    d.t0 = s.t0; d.tEntry = s.tEntry; d.slot = s.slot; d.maxPos = s.maxPos; d.nSeries = s.nSeries;
@@ -265,6 +336,7 @@ void LbFresh(LbScen &x)
 {
    x.bal = AccountInfoDouble(ACCOUNT_BALANCE);
    x.start = x.bal; x.withdrawn = 0; x.reloaded = 0; x.cycles = 0; x.reloads = 0;
+   x.slotKey = 0;
    LbClearGoal(x);
    x.ok = false; x.why = "";
 }
@@ -346,6 +418,46 @@ void LbDefine(LbScen &x, string key, string name, string toks, string opts = "")
    }
 }
 
+//--- 7.7.0 : indicateurs propres aux scénarios (timeframe du robot), partagés entre scénarios de même période
+#define LB_MAXH 24
+int g_lbHk[LB_MAXH], g_lbHp[LB_MAXH], g_lbHh[LB_MAXH];
+int g_lbHn = 0;
+
+int LbHandle(int kind, int period)          // kind 0 = EMA, 1 = ATR
+{
+   if(period <= 0) return INVALID_HANDLE;
+   for(int i = 0; i < g_lbHn; i++) if(g_lbHk[i] == kind && g_lbHp[i] == period) return g_lbHh[i];
+   if(g_lbHn >= LB_MAXH) return INVALID_HANDLE;
+   int h = (kind == 0) ? iMA(_Symbol, g_sigTF, period, 0, MODE_EMA, PRICE_CLOSE) : iATR(_Symbol, g_sigTF, period);
+   if(h == INVALID_HANDLE) { Log("Labo : indicateur " + (kind == 0 ? "EMA " : "ATR ") + IntegerToString(period) + " impossible"); return INVALID_HANDLE; }
+   g_lbHk[g_lbHn] = kind; g_lbHp[g_lbHn] = period; g_lbHh[g_lbHn] = h; g_lbHn++;
+   return h;
+}
+
+void LbReleaseHandles()
+{
+   for(int i = 0; i < g_lbHn; i++) if(g_lbHh[i] != INVALID_HANDLE) IndicatorRelease(g_lbHh[i]);
+   g_lbHn = 0;
+}
+
+// Indicateurs du scénario : une période égale à celle du compte garde l'indicateur du robot
+void LbPrepare(LbScen &x)
+{
+   x.hF = (x.ef > 0 && x.ef != PInt(P_FAST)) ? LbHandle(0, x.ef) : INVALID_HANDLE;
+   x.hS = (x.es > 0 && x.es != PInt(P_SLOW)) ? LbHandle(0, x.es) : INVALID_HANDLE;
+   x.hA = (x.ap > 0 && x.ap != PInt(P_ATRP)) ? LbHandle(1, x.ap) : INVALID_HANDLE;
+}
+
+double LbAtrH(int h, int sh)
+{
+   double b[1];
+   if(h == INVALID_HANDLE || CopyBuffer(h, 0, sh, 1, b) != 1) return 0.0;
+   return b[0] / _Point;
+}
+
+// ATR (pts) utilisé par la grille et le TP du scénario
+double LbAtr(const LbScen &x) { return (x.hA != INVALID_HANDLE) ? LbAtrH(x.hA, BarShift()) : ATRPoints(BarShift()); }
+
 string BtFile(string kind);   // [ARCHI] 7.6.0 (SX_Backtest.mqh)
 
 // Recharge la liste : scénarios par défaut + scénarios perso ; l'état des scénarios déjà connus est conservé
@@ -416,6 +528,7 @@ void LaboLoadScenarios()
    }
    for(int i = 0; i < n; i++) LbCopy(g_lb[i], g_lbTmp[i]);
    g_lbN = n;
+   for(int i = 0; i < n; i++) LbPrepare(g_lb[i]);                // 7.7.0 : EMA / ATR propres
    if(reset != "") g_lbReset = reset;
    if(doReset) Log("Labo des filtres : comptes virtuels remis à zéro (" + IntegerToString(n) + " scénarios)");
    g_lbDirty = true;
@@ -455,6 +568,56 @@ bool LbTimeBlocked()
    return (h >= s || h < e);
 }
 
+// 7.7.0 : contexte d'évaluation du scénario s (-1 = valeurs du robot)
+void LbSetCtx(int s)
+{
+   g_lbCurS = s;
+   g_lbF = mk_fast; g_lbS = mk_slow; g_lbA = mk_atrPts; g_lbOwnSig = false;
+   g_lbHF = g_hFast; g_lbHS = g_hSlow;
+   g_lbAn = 0; g_lbAx = 0; g_lbVn = 0; g_lbVx = 0; g_lbEa = 0; g_lbCb = -1;
+   if(s < 0) return;
+   g_lbAn = g_lb[s].an; g_lbAx = g_lb[s].ax; g_lbVn = g_lb[s].vn; g_lbVx = g_lb[s].vx; g_lbEa = g_lb[s].ea; g_lbCb = g_lb[s].cb;
+   if(g_lb[s].hF == INVALID_HANDLE && g_lb[s].hS == INVALID_HANDLE && g_lb[s].hA == INVALID_HANDLE) return;
+   g_lbOwnSig = true;
+   int sh = BarShift();
+   if(g_lb[s].hF != INVALID_HANDLE) g_lbHF = g_lb[s].hF;
+   if(g_lb[s].hS != INVALID_HANDLE) g_lbHS = g_lb[s].hS;
+   double f, sl;
+   if(ReadEMAsH(g_lbHF, g_lbHS, sh, f, sl)) { g_lbF = f; g_lbS = sl; }
+   else { g_lbF = 0; g_lbS = 0; }
+   if(g_lb[s].hA != INVALID_HANDLE) g_lbA = LbAtrH(g_lb[s].hA, sh);
+}
+
+// 7.7.0 : même calcul que BarsSinceCrossN, sur les EMA du contexte (scénario à EMA propres)
+int LbBarsSinceCross(int sh, int maxBars, int noise)
+{
+   if(!g_lbOwnSig) return BarsSinceCrossN(sh, maxBars, noise);
+   if(noise < 0) noise = 0;
+   int n = maxBars + noise + 2;
+   double a[], b[];
+   ArraySetAsSeries(a, true);
+   ArraySetAsSeries(b, true);
+   if(CopyBuffer(g_lbHF, 0, sh, n, a) != n || CopyBuffer(g_lbHS, 0, sh, n, b) != n) return -1;
+   int s0 = (a[0] > b[0]) ? 1 : ((a[0] < b[0]) ? -1 : 0);
+   if(s0 == 0) return 0;
+   int k = 1;
+   while(k < n)
+   {
+      int sk = (a[k] > b[k]) ? 1 : ((a[k] < b[k]) ? -1 : 0);
+      if(sk == s0) { k++; continue; }
+      int r = 0;
+      while(k + r < n)
+      {
+         int sr = (a[k + r] > b[k + r]) ? 1 : ((a[k + r] < b[k + r]) ? -1 : 0);
+         if(sr == s0) break;
+         r++;
+      }
+      if(noise > 0 && r <= noise && k + r < n) { k += r; continue; }
+      return (k - 1 > maxBars) ? -1 : k - 1;
+   }
+   return -1;
+}
+
 // Filtre i du scénario (activé) : true = laisse passer. a = ajustement en fraction (+0.2 = assoupli de 20 %)
 bool LbRaw(int i, double a, int dir, string &why)
 {
@@ -463,15 +626,15 @@ bool LbRaw(int i, double a, int dir, string &why)
    {
       case 0:
       {
-         if(mk_atrPts <= 0) return true;
-         double lo = PDbl(P_ATRMIN) * (1.0 - a), hi = PDbl(P_ATRMAX) * (1.0 + a);
-         if(mk_atrPts >= lo && mk_atrPts <= hi) return true;
-         why = "ATR " + F0(mk_atrPts) + " hors " + F0(lo) + "–" + F0(hi);
+         if(g_lbA <= 0) return true;
+         double lo = (g_lbAn > 0 ? g_lbAn : PDbl(P_ATRMIN)) * (1.0 - a), hi = (g_lbAx > 0 ? g_lbAx : PDbl(P_ATRMAX)) * (1.0 + a);
+         if(g_lbA >= lo && g_lbA <= hi) return true;
+         why = "ATR " + F0(g_lbA) + " hors " + F0(lo) + "–" + F0(hi);
          return false;
       }
       case 1:
       {
-         double f = mk_fast, s = mk_slow, p = mk_bid;
+         double f = g_lbF, s = g_lbS, p = mk_bid;
          if(f <= 0 || s <= 0) return true;
          if((f > s && p < f) || (f < s && p > f) || (p > f && p < s) || (p < f && p > s)) { why = "Prix / EMA"; return false; }
          return true;
@@ -480,7 +643,7 @@ bool LbRaw(int i, double a, int dir, string &why)
       {
          double r = LbVolRatio();
          if(r <= 0) return true;
-         double lo = PDbl(P_VOLMIN) * (1.0 - a), hi = PDbl(P_VOLMAX) * (1.0 + a);
+         double lo = (g_lbVn > 0 ? g_lbVn : PDbl(P_VOLMIN)) * (1.0 - a), hi = (g_lbVx > 0 ? g_lbVx : PDbl(P_VOLMAX)) * (1.0 + a);
          if(r >= lo && r <= hi) return true;
          why = "Volume " + F0(r * 100) + " %";
          return false;
@@ -494,7 +657,7 @@ bool LbRaw(int i, double a, int dir, string &why)
          double o = iOpen(_Symbol, g_hiTF, 1), c = iClose(_Symbol, g_hiTF, 1);
          double b[1];
          if(o <= 0 || c <= 0 || g_hATRHi == INVALID_HANDLE || CopyBuffer(g_hATRHi, 0, 1, 1, b) != 1) { why = "Bougie indisponible"; return false; }
-         double body = (c - o) / _Point, mn = PDbl(P_CANBODY) * (1.0 - a) * b[0] / _Point;
+         double body = (c - o) / _Point, mn = (g_lbCb >= 0 ? g_lbCb : PDbl(P_CANBODY)) * (1.0 - a) * b[0] / _Point;
          int cd = (body > mn) ? 1 : ((body < -mn) ? -1 : 0);
          if(cd == 0 || cd == dir) return true;
          why = "Bougie contre le signal";
@@ -526,9 +689,9 @@ bool LbRaw(int i, double a, int dir, string &why)
       }
       case 9:
       {
-         if(dir == 0 || mk_atrPts <= 0) return true;
-         double ex = (g_lbCurExt > 0) ? LbExtAtr(g_lbCurExt) : mk_extAtr;
-         double e = (dir > 0) ? ex : -ex, mx = PDbl(P_EXTATR) * (1.0 + a);
+         if(dir == 0 || g_lbA <= 0) return true;
+         double ex = (g_lbCurExt > 0) ? LbExtAtr(g_lbCurExt) : ((g_lbOwnSig && PInt(P_EXTTF) == 0) ? LbExtAtr(1) : mk_extAtr);
+         double e = (dir > 0) ? ex : -ex, mx = (g_lbEa > 0 ? g_lbEa : PDbl(P_EXTATR)) * (1.0 + a);
          if(e <= mx) return true;
          why = "Extension " + F1(e) + " x ATR";
          return false;
@@ -537,7 +700,7 @@ bool LbRaw(int i, double a, int dir, string &why)
       {
          if(dir == 0) return true;
          int bars = (g_lbCurBars > 0) ? g_lbCurBars : (int)MathMax(1, MathRound(PInt(P_FRESHBARS) * (1.0 + a)));   // 7.4.0 : bougies du scénario
-         int age = BarsSinceCrossN(BarShift(), bars, g_lbCurNoise >= 0 ? g_lbCurNoise : PInt(P_FRESHNOISE));
+         int age = LbBarsSinceCross(BarShift(), bars, g_lbCurNoise >= 0 ? g_lbCurNoise : PInt(P_FRESHNOISE));   // 7.7.0 : EMA du scénario
          if(age >= 0 && age <= bars) return true;
          why = "Croisement trop ancien";
          return false;
@@ -549,7 +712,7 @@ bool LbRaw(int i, double a, int dir, string &why)
 // 1 Hz : verdict des filtres de chaque scénario
 void LbEvalAll()
 {
-   int dir = (mk_fast > 0 && mk_slow > 0) ? ((mk_fast > mk_slow) ? 1 : ((mk_fast < mk_slow) ? -1 : 0)) : 0;
+   int dir0 = (mk_fast > 0 && mk_slow > 0) ? ((mk_fast > mk_slow) ? 1 : ((mk_fast < mk_slow) ? -1 : 0)) : 0;
    bool   raw0[LB_NF], done0[LB_NF];
    string why0[LB_NF];
    for(int i = 0; i < LB_NF; i++) { done0[i] = false; raw0[i] = true; why0[i] = ""; }
@@ -560,13 +723,21 @@ void LbEvalAll()
       g_lbCurNoise = g_lb[s].noise;
       g_lbCurExt = g_lb[s].extTf;
       g_lbCurBars = g_lb[s].fbars;
+      bool own = g_lb[s].raw;                                  // 7.7.0 : tous les filtres recalculés pour le scénario
+      LbSetCtx(own ? s : -1);
+      int dir = own ? ((g_lbF > 0 && g_lbS > 0) ? ((g_lbF > g_lbS) ? 1 : ((g_lbF < g_lbS) ? -1 : 0)) : 0) : dir0;
       for(int i = 0; i < LB_NF; i++)
       {
          int m = g_lb[s].mode[i];
          bool pass;
          string w = "";
          if(m == LBM_OFF) continue;
-         if((i == 9 && g_lb[s].extTf > 0) || (i == 10 && (g_lb[s].noise >= 0 || g_lb[s].fbars > 0)))   // 7.3.0 : option du scénario : calcul propre
+         if(own)
+         {
+            if(!LbOn(g_lb[s], i)) continue;
+            pass = LbRaw(i, (m == LBM_ON ? g_lb[s].adj[i] : 0) / 100.0, dir, w);
+         }
+         else if((i == 9 && g_lb[s].extTf > 0) || (i == 10 && (g_lb[s].noise >= 0 || g_lb[s].fbars > 0)))   // 7.3.0 : option du scénario : calcul propre
          {
             if(!LbOn(g_lb[s], i)) continue;
             pass = LbRaw(i, (m == LBM_ON ? g_lb[s].adj[i] : 0) / 100.0, dir, w);
@@ -593,6 +764,7 @@ void LbEvalAll()
          }
       }
    }
+   LbSetCtx(-1);
    g_lbCurNoise = -1;
    g_lbCurExt = 0;
    g_lbCurBars = 0;
@@ -638,11 +810,11 @@ void LbCloseMarket(LbScen &x, double bid, double ask)
 double LbGridStep(const LbScen &x, int n)
 {
    double gmul = (x.gm > 0) ? x.gm : 1.0;
-   if(x.ga <= 0 && x.gn <= 0 && x.gx <= 0) return CalcGridStep(n) * gmul;
+   if(x.ga <= 0 && x.gn <= 0 && x.gx <= 0 && x.tb <= 0 && x.hA == INVALID_HANDLE) return CalcGridStep(n) * gmul;
    double step = (double)PInt(P_GRID);
    if(PBool(P_DYNGRID))
    {
-      double atr = ATRPoints(BarShift());
+      double atr = LbAtr(x);                         // 7.7.0 : ATR du scénario
       if(atr > 0)
       {
          double mn = (x.gn > 0) ? x.gn : (double)PInt(P_GRIDMIN), mx = (x.gx > 0) ? x.gx : (double)PInt(P_GRIDMAX);
@@ -654,16 +826,30 @@ double LbGridStep(const LbScen &x, int n)
       if(step < (double)sl) step = (double)sl;
    }
    double gm = PDbl(P_GRIDMULT);
-   int tbm = MathMax(1, PInt(P_TBM));
+   int tbm = MathMax(1, x.tb > 0 ? x.tb : PInt(P_TBM));
    if(gm != 1.0) step *= MathPow(gm, n / tbm);
    return step * gmul;
 }
 
 double LbLot(const LbScen &x, int n)
 {
-   if(x.lm <= 0) return CalcLot(n);
-   int tbm = MathMax(1, PInt(P_TBM));
-   return NormVolume(PDbl(P_LOT) * MathPow(x.lm, n / tbm));
+   if(x.lm <= 0 && x.tb <= 0) return CalcLot(n);
+   int tbm = MathMax(1, x.tb > 0 ? x.tb : PInt(P_TBM));    // 7.7.0 : trades avant multiplication du scénario
+   return NormVolume(PDbl(P_LOT) * MathPow(x.lm > 0 ? x.lm : PDbl(P_LOTMULT), n / tbm));
+}
+
+// 7.7.0 : distance du TP du scénario (même calcul que CalcTPDist, avec ses valeurs propres)
+double LbTPDist(const LbScen &x)
+{
+   if(x.am <= 0 && x.tn <= 0 && x.tx <= 0 && x.hA == INVALID_HANDLE) return CalcTPDist();
+   if(!PBool(P_DYNTP)) return PDbl(P_TPFIXED);
+   double atr = LbAtr(x);
+   if(atr <= 0) return CalcTPDist();
+   double d = atr * (x.am > 0 ? x.am : PDbl(P_ATRMULT));
+   double mn = (x.tn > 0) ? x.tn : (double)PInt(P_TPMIN), mx = (x.tx > 0) ? x.tx : (double)PInt(P_TPMAX);
+   if(d < mn) d = mn;
+   if(d > mx) d = mx;
+   return d;
 }
 
 // Même logique que PlaceGridBatch (ordres limites sous / au-dessus de la série)
@@ -720,7 +906,7 @@ void LbTP(LbScen &x)
    }
    double sig = x.nPos * 1000000.0 + x.sumL * 10000.0 + avg;
    if(sig == x.tpSig) return;
-   double dist = CalcTPDist();
+   double dist = LbTPDist(x);                        // 7.7.0
    x.tp = NormalizeDouble((x.dir > 0) ? avg + dist * _Point : avg - dist * _Point, _Digits);
    x.tpSig = sig;
 }
@@ -773,12 +959,10 @@ void LbEnd(LbScen &x, string res)
    g_lbDirty = true;
 }
 
-// Créneau consommé (appelé par SlotTick, mêmes conditions générales que le vrai robot)
-void LaboOnSlot(string slot)
+// Objectif virtuel du scénario s lancé au créneau slot (objectif précédent pas fini : créneau sauté)
+void LbStartGoal(int s, string slot)
 {
-   if(!g_lbOn || !g_lbWanted) return;   // labo en pause : séries virtuelles figées
    double rep = PDbl(P_SEUIL_REPRISE), pct = PDbl(P_SL_PCT);
-   for(int s = 0; s < g_lbN; s++)
    {
       if(g_lb[s].active)
       {
@@ -786,10 +970,10 @@ void LaboOnSlot(string slot)
                  LbJ("spec", LbSpec(g_lb[s]), true) + "," + LbJ("creneau", slot, true) + "," +
                  LbJ("debut", IntegerToString((long)TimeGMT())) + "," + LbJ("fin", IntegerToString((long)TimeGMT())) + "," +
                  LbJ("res", "saute", true) + "," + LbJ("solde", NumS(g_lb[s].bal)) + "}");
-         continue;
+         return;
       }
-      if(g_lb[s].bal + 0.005 < rep) continue;
-      if(PBool(P_SEUIL_ON) && g_lb[s].bal + 0.005 >= PDbl(P_SEUIL_ARRET)) continue;
+      if(g_lb[s].bal + 0.005 < rep) return;
+      if(PBool(P_SEUIL_ON) && g_lb[s].bal + 0.005 >= PDbl(P_SEUIL_ARRET)) return;
       LbClearGoal(g_lb[s]);
       g_lb[s].active = true;
       g_lb[s].init = g_lb[s].bal;
@@ -799,6 +983,40 @@ void LaboOnSlot(string slot)
       g_lb[s].slot = slot;
    }
    g_lbDirty = true;
+}
+
+// Créneau consommé (appelé par SlotTick, mêmes conditions générales que le vrai robot)
+void LaboOnSlot(string slot)
+{
+   if(!g_lbOn || !g_lbWanted) return;   // labo en pause : séries virtuelles figées
+   for(int s = 0; s < g_lbN; s++)
+      if(!g_lb[s].hasSm) LbStartGoal(s, slot);         // 7.7.0 : un scénario à créneaux propres suit les siens
+}
+
+// 7.7.0 : créneaux propres aux scénarios (jours de semaine, fenêtre de lancement du compte, une fois par créneau)
+void LbOwnSlots()
+{
+   if(!PBool(P_SL_ON) || g_state != ST_ACTIF || g_maint) return;
+   MqlDateTime d;
+   TimeToStruct(LocalNow(), d);
+   if(d.day_of_week < 1 || d.day_of_week > 5) return;
+   int now = d.hour * 60 + d.min, win = SlotWindow();
+   for(int s = 0; s < g_lbN; s++)
+   {
+      if(!g_lb[s].hasSm) continue;
+      int sl = -1;
+      for(int mi = 0; mi < 4 && sl < 0; mi++)
+         for(int h = 0; h < 24; h++)
+         {
+            int t = h * 60 + mi * 15;
+            if((g_lb[s].sm[mi] & (1 << h)) != 0 && now >= t && now < t + win) { sl = t; break; }
+         }
+      if(sl < 0) continue;
+      long key = SlotKey(d, sl);
+      if(key == g_lb[s].slotKey) continue;
+      g_lb[s].slotKey = key;
+      LbStartGoal(s, SlotText(sl));
+   }
 }
 
 // Heure de coupure (appelé par CutTick)
@@ -883,14 +1101,25 @@ void LaboTick()
       //--- nouvelle série
       if(!armed || g_lb[s].cutPend || !g_lb[s].ok) continue;
       if(PBool(P_SEUIL_ON) && g_lb[s].bal + 0.005 >= PDbl(P_SEUIL_ARRET)) continue;
-      if(!sigRead)
+      int sg = 0;
+      if(g_lb[s].hF != INVALID_HANDLE || g_lb[s].hS != INVALID_HANDLE)   // 7.7.0 : EMA propres au scénario
       {
          double f, sl;
-         sigRead = true;
-         if(ReadEMAs(BarShift(), f, sl)) sig = (f > sl) ? 1 : ((f < sl) ? -1 : 0);
+         if(ReadEMAsH(g_lb[s].hF != INVALID_HANDLE ? g_lb[s].hF : g_hFast, g_lb[s].hS != INVALID_HANDLE ? g_lb[s].hS : g_hSlow, BarShift(), f, sl))
+            sg = (f > sl) ? 1 : ((f < sl) ? -1 : 0);
       }
-      if(sig == 0) continue;
-      LbOpen(g_lb[s], sig, bid, ask);
+      else
+      {
+         if(!sigRead)
+         {
+            double f, sl;
+            sigRead = true;
+            if(ReadEMAs(BarShift(), f, sl)) sig = (f > sl) ? 1 : ((f < sl) ? -1 : 0);
+         }
+         sg = sig;
+      }
+      if(sg == 0) continue;
+      LbOpen(g_lb[s], sg, bid, ask);
    }
 }
 
@@ -1039,8 +1268,9 @@ void LaboLoadState()
       if(StringSplit(StringSubstr(l, 2), '|', f) < 22) continue;
       int s = g_lbN;
       LbClearGoal(g_lb[s]);
-      g_lb[s].key = f[0]; g_lb[s].name = f[0]; g_lb[s].gm = 1.0; g_lb[s].noise = -1; g_lb[s].extTf = 0; g_lb[s].fbars = 0; g_lb[s].opct = 0;
-      g_lb[s].ga = 0; g_lb[s].gn = 0; g_lb[s].gx = 0; g_lb[s].lm = 0; g_lb[s].mp = 0;
+      g_lb[s].key = f[0]; g_lb[s].name = f[0];
+      LbOptsParse(g_lb[s], "");
+      g_lb[s].slotKey = 0; g_lb[s].hF = INVALID_HANDLE; g_lb[s].hS = INVALID_HANDLE; g_lb[s].hA = INVALID_HANDLE;
       for(int i = 0; i < LB_NF; i++) { g_lb[s].mode[i] = LBM_SAME; g_lb[s].adj[i] = 0; }
       g_lb[s].bal = StringToDouble(f[1]); g_lb[s].start = StringToDouble(f[2]); g_lb[s].withdrawn = StringToDouble(f[3]);
       g_lb[s].reloaded = StringToDouble(f[4]); g_lb[s].cycles = (int)StringToInteger(f[5]); g_lb[s].reloads = (int)StringToInteger(f[6]);
@@ -1077,7 +1307,18 @@ void LaboInit()
    for(int h = 0; h < 25; h++) { g_lbSlip[h] = 0; g_lbSlipN[h] = 0; }
    LrReset();
    g_lbN = 0;
-   if(!g_bt) LaboLoadState();
+   if(!g_bt)
+   {
+      // 7.7.0 : en réel, plus de séries virtuelles ni de journal des blocages : slippage et commission seulement
+      // (mesurés sur les vrais ordres, repris par les backtests de l'optimiseur)
+      LaboLoadState();
+      g_lbN = 0;
+      LrReset();
+      g_lbWanted = false;
+      LbUpdateK();
+      Log("Labo : mesure du slippage et de la commission (séries virtuelles réservées à l'optimiseur)");
+      return;
+   }
    LaboLoadScenarios();
    g_lbExtSlow[0] = iMA(_Symbol, PERIOD_M15, PInt(P_SLOW), 0, MODE_EMA, PRICE_CLOSE);   // 7.3.0 : extension M15 / H1 des scénarios
    g_lbExtAtr[0]  = iATR(_Symbol, PERIOD_M15, PInt(P_ATRP));
@@ -1097,6 +1338,7 @@ void LaboInit()
 void LaboDeinit()
 {
    if(!g_lbOn) return;
+   LbReleaseHandles();
    if(g_bt) LbEtat();                                // backtest : état final des comptes virtuels
    else LaboSave();
 }
@@ -1125,15 +1367,15 @@ void LaboTimer1Hz()
    if(!g_lbOn) return;
    static ulong lastFile = 0, lastSave = 0, lastEtat = 0;
    ulong now = GetTickCount64();
-   if(!g_bt && now - lastFile >= 10000)
+   if(!g_bt)                                         // 7.7.0 : réel = mesures seulement (sauvegarde, état pour le bot)
    {
-      lastFile = now;
-      long md = FileGetInteger(LB_SCEN_FILE, FILE_MODIFY_DATE, true);
-      if(md != g_lbFileMod) { g_lbFileMod = md; LaboLoadScenarios(); }
-      LbUpdateK();
+      if(now - lastFile >= 10000) { lastFile = now; LbUpdateK(); }
+      if(now - lastSave >= 60000 || (g_lbDirty && now - lastSave >= 5000)) { lastSave = now; LaboSave(); }
+      if(lastEtat == 0 || now - lastEtat >= 1800000) { lastEtat = now; LbEtat(); }
+      return;
    }
-   LrTick();
    if(!g_lbWanted) return;
+   LbOwnSlots();                                     // 7.7.0 : créneaux propres aux scénarios
    LbEvalAll();
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID), ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double so = AccountInfoDouble(ACCOUNT_MARGIN_SO_SO);
@@ -1168,8 +1410,5 @@ void LaboTimer1Hz()
          }
       }
    }
-   if(g_bt) return;                                  // backtest : ni sauvegarde ni état périodique
-   if(now - lastSave >= 60000 || (g_lbDirty && now - lastSave >= 5000)) { lastSave = now; LaboSave(); }
-   if(lastEtat == 0 || now - lastEtat >= 1800000) { lastEtat = now; LbEtat(); }
 }
 //+------------------------------------------------------------------+

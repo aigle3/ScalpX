@@ -15,7 +15,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from . import labo
 
 PERIODS = [(1, "1 j"), (2, "2 j"), (7, "1 sem"), (30, "1 mois"), (90, "3 mois"), (182, "6 mois"), (274, "9 mois"), (365, "12 mois")]
 MODELS = {"reel": (4, "Ticks réels (précis, lent)"), "m1": (1, "OHLC M1 (rapide)")}
@@ -265,7 +264,7 @@ def summarize(rid: int, d_from: int, d_to: int, fin: dict | None, events: list[d
 
 
 def labo_rows(events: list[dict]) -> list[tuple[int, str, str, str]]:
-    """(ts, kind, sc, json) des événements LABO_SERIE / LABO_REEL du backtest, pour la table du labo."""
+    """(ts, kind, sc, json) des événements LABO_SERIE / LABO_REEL du backtest (objectifs virtuels de l'optimiseur)."""
     out = []
     for e in events:
         t = e.get("type", "")
@@ -282,11 +281,6 @@ def progress_frac(p: dict | None, d_from: int, d_to: int) -> float:
     return max(0.0, min(1.0, (sim - d_from) / (d_to - d_from)))
 
 
-def scenario_table(events: list[dict]) -> dict[str, labo.ScenStat]:
-    return labo.compute_scen([e.get("data") or {} for e in events if e.get("type") == "LABO_SERIE"])
-
-
-# ------------------------------------------------------------------ réglages testés (affichés dans le rapport)
 def _h(params: dict, key: str) -> str:
     from . import presets as ps
     p = ps.BY_KEY.get(key)

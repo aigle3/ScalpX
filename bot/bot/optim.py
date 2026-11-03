@@ -1,7 +1,8 @@
 """🤖 Optimiseur autonome : backtest nocturne, choix, application automatique aux comptes, message, annulation, journal.
 
 Réglages (gardés en base, modifiables depuis Telegram) : opt_on (1/0), opt_hour (heure locale de lancement),
-opt_grp (prochain groupe), opt_day (dernière nuit faite). Journal détaillé : data\\logs\\optim.log.
+opt_grp (prochaine catégorie), opt_day (dernière nuit faite), opt_scale / opt_idle (portée de recherche et passages
+sans changement par réglage). Journal détaillé : data\\logs\\optim.log.
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ from .render import esc, money
 
 log = logging.getLogger("scalpx.optim")
 HOURS = [20, 21, 22, 23, 0, 1, 2, 3, 4, 5]
+DEFAULT_HOUR = 21                    # départ à 21 h : la nuit entière pour tester une catégorie (pas de limite de durée)
 
 
 def setup_log(data_dir: Path) -> Path:
@@ -47,6 +49,11 @@ class Optimizer:
         self.stage = ""
         self.started = 0.0
         self.path = setup_log(self.ctx.cfg.paths.data)
+        if self.ctx.db.meta_get("opt_v3", "") != "1":          # bot 3.0.0 : départ à 21 h, compteurs de portée remis à zéro
+            self.ctx.db.meta_set("opt_hour", str(DEFAULT_HOUR))
+            self.ctx.db.meta_set("opt_scale", "{}")
+            self.ctx.db.meta_set("opt_idle", "{}")
+            self.ctx.db.meta_set("opt_v3", "1")
 
     # ---- réglages
     @property
@@ -56,9 +63,9 @@ class Optimizer:
     @property
     def hour(self) -> int:
         try:
-            return int(self.ctx.db.meta_get("opt_hour", "23") or 23) % 24
+            return int(self.ctx.db.meta_get("opt_hour", str(DEFAULT_HOUR)) or DEFAULT_HOUR) % 24
         except ValueError:
-            return 23
+            return DEFAULT_HOUR
 
     def group_index(self) -> int:
         try:
@@ -81,13 +88,20 @@ class Optimizer:
         self.ctx.db.meta_set("opt_safety", "1" if (lost and not was_safety and wait == 0) else "0")
         return wait
 
-    def scale(self) -> dict[str, int]:
-        """Portée de recherche par réglage (en crans), élargie quand les nuits ne distinguent rien."""
+    def _counts(self, key: str) -> dict[str, int]:
         try:
-            d = json.loads(self.ctx.db.meta_get("opt_scale", "{}") or "{}")
+            d = json.loads(self.ctx.db.meta_get(key, "{}") or "{}")
             return {k: int(v) for k, v in d.items()}
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, AttributeError):
             return {}
+
+    def scale(self) -> dict[str, int]:
+        """Portée de recherche par réglage (en crans), élargie après 3 passages sans changement."""
+        return self._counts("opt_scale")
+
+    def idle(self) -> dict[str, int]:
+        """Passages consécutifs sans changement, par réglage."""
+        return self._counts("opt_idle")
 
     @property
     def safety_next(self) -> bool:
@@ -98,7 +112,7 @@ class Optimizer:
         log.info("optimiseur %s", "activé" if on else "désactivé")
 
     def next_hour(self) -> int:
-        h = HOURS[(HOURS.index(self.hour) + 1) % len(HOURS)] if self.hour in HOURS else 23
+        h = HOURS[(HOURS.index(self.hour) + 1) % len(HOURS)] if self.hour in HOURS else DEFAULT_HOUR
         self.ctx.db.meta_set("opt_hour", str(h))
         log.info("heure de l'optimiseur : %02d:00", h)
         return h
@@ -148,7 +162,7 @@ class Optimizer:
         self.note("━━━━ nuit d'optimisation" + (" (lancée à la main)" if manual else ""))
         if not self.r.bt.configured():
             self.note("terminal de backtest non configuré : rien à faire")
-            await self._send("⚠️ <b>Optimiseur</b> : configure d'abord le terminal de backtest (📈 Rapports → 🧪 Backtest).")
+            await self._send("⚠️ <b>Optimiseur</b> : configure d'abord le terminal de test (🤖 Optimiseur → 🔑 Terminal de test).")
             return
         if self.ctx.deploy.running:
             self.note("déploiement de l'EA en cours : optimisation reportée à demain")
@@ -167,7 +181,7 @@ class Optimizer:
         vs: list[optim.Variant] = []
         safety = self.safety_next
         if safety:                                             # nuit 🛟 Sécurité (hors rotation : opt_grp inchangé)
-            gkey, gtitle, gparams = optim.SAFETY
+            gkey, gtitle = optim.SAFETY[0], optim.SAFETY[1]
             vs = optim.variants(params, gkey)
             self.note("🛟 nuit de sécurité : la nuit précédente, les réglages actuels perdaient le compte ou frôlaient la perte")
         if not vs:
@@ -179,12 +193,18 @@ class Optimizer:
                 if vs:
                     break
             self.ctx.db.meta_set("opt_grp", str((gi + 1) % len(optim.GROUPS)))
-            gkey, gtitle, gparams = optim.GROUPS[gi]
+            gkey, gtitle = optim.GROUPS[gi][0], optim.GROUPS[gi][1]
         if not vs:
             self.note("aucun réglage à tester")
             return
-        self.note(f"groupe {gtitle} : {len(vs)} variante(s) — " + " · ".join(v.name for v in vs))
-        cur = "; ".join(optim.label_of(p, params[p]) for p in (gparams or list(optim.FILTERS.values())) if p in params)
+        nv = len(optim.tested(vs))
+        self.note(f"catégorie {gtitle} : {nv} variante(s) — " + " · ".join(v.name for v in optim.tested(vs)))
+        shown = [p for p in optim.group_params(gkey) if optim.applies(params, p)]
+        if gkey == "filtres":
+            shown += [k for k in optim.FILTERS.values() if k in params]
+        cur = "; ".join(optim.label_of(p, params[p]) for p in shown if p in params)
+        if gkey == "objectif":
+            cur += "; créneaux : " + optim.slots_label(optim._masks(params, optim.SLOT_KEYS))
         self.note(f"valeurs actuelles : {cur}")
         d_from, d_to = bt.date_range(optim.SAFETY_DAYS)
         inputs = await self.r._bt_inputs(ref.id)
@@ -193,6 +213,7 @@ class Optimizer:
             return
         bparams, label, deposit, currency, leverage, comm, slip = inputs
         rid = self.ctx.db.bt_create("opt", d_from, d_to, "reel", f"🤖 optimiseur {gtitle} · {label}")
+        self.note(f"démarrage {self._now().strftime('%H:%M')} : pas de limite de durée, le test va jusqu'au bout")
         scen = Path(self.ctx.cfg.paths.common()) / f"bt_{rid}_scen.txt"
         atomic_write(scen, optim.scenario_file(vs))
         from mt5.backtester import Run
@@ -228,15 +249,25 @@ class Optimizer:
             return
         rows = labo.rows_of(self.ctx.db.labo_since(0, f"bt_{rid}"), "SERIE")
         self.note(f"backtest #{rid} terminé en {int((time.time() - self.started) / 60)} min : {len(rows)} objectifs virtuels")
-        dec = optim.decide(rows, vs, d_to)
-        if not safety and gparams:                             # portée de recherche du groupe pour son prochain tour
+        if optim.ea_too_old(rows, vs):
+            self.note("EA du testeur trop ancien (< 7.7.0) : options des variantes ignorées, nuit annulée")
+            self.ctx.db.opt_add(gkey, "erreur", "EA du testeur < 7.7.0", "", rid)
+            await self._send(f"❌ <b>Optimiseur · {esc(gtitle)}</b> : l'EA du testeur est trop ancien (7.7.0 ou plus requis). "
+                             "Installe la mise à jour de l'EA ; aucun réglage changé.")
+            return
+        dec = optim.decide(rows, vs, d_to, params)
+        wider: list[str] = []
+        if not safety:                                         # portée de recherche des réglages testés pour le prochain tour
+            keys = sorted({k for v in vs for k in v.changes if k in optim.NUM})
+            changed = set(dec.change.changes) if dec.change is not None else set()
             before = self.scale()
-            after = optim.next_scale(before, gparams, dec)
-            self.ctx.db.meta_set("opt_scale", json.dumps(after))
-            wider = [k for k in gparams if after.get(k, 1) > before.get(k, 1)]
+            sc, idl = optim.next_scale(before, self.idle(), keys, changed)
+            self.ctx.db.meta_set("opt_scale", json.dumps(sc))
+            self.ctx.db.meta_set("opt_idle", json.dumps(idl))
+            wider = [k for k in keys if sc.get(k, 1) > before.get(k, 1)]
             if wider:
-                self.note("résultats identiques à 3 % près : au prochain tour, recherche plus loin (" +
-                          ", ".join(f"{k} ±{after[k]} crans" for k in wider) + ")")
+                self.note(f"{optim.IDLE_PASSES} passages sans changement : au prochain tour, recherche plus loin (" +
+                          ", ".join(f"{k} ±{sc[k]} crans" for k in wider) + ")")
         # après une nuit normale où les réglages actuels sont dangereux : la nuit suivante est une nuit 🛟 Sécurité
         # (après une nuit de sécurité, on revient à la rotation, qui revérifiera)
         lost = bool(dec.table) and dec.table[0].lost60 > 0
@@ -248,7 +279,8 @@ class Optimizer:
                      r.lost60, r.dd60, r.net60, "sûr" if r.safe else "NON SÛR")
         applied: dict = {}
         lines = [f"🤖 <b>Optimiseur · {esc(gtitle)}</b> · nuit du {self._now().strftime('%d/%m')}",
-                 f"<i>{len(vs)} variantes testées · choix sur {optim.CHOOSE_DAYS} j, sécurité sur {optim.SAFETY_DAYS} j · backtest #{rid}</i>", ""]
+                 f"<i>{nv} variantes testées · choix sur {optim.CHOOSE_DAYS} j, sécurité sur {optim.SAFETY_DAYS} j · "
+                 f"backtest #{rid} ({int((time.time() - self.started) / 60)} min)</i>", ""]
         if dec.change is not None:
             v = dec.change
             oks = []
@@ -265,21 +297,42 @@ class Optimizer:
         else:
             lines.append(f"⏸ <b>Aucun changement</b> : {esc(dec.note)}")
             self.note(f"aucun changement : {dec.note}")
+        sp = dec.slots
+        if sp is not None:                                     # 🕐 créneaux : retraits / ajouts
+            if sp.changes:
+                n_ok = []
+                for key, (old, new) in sp.changes.items():
+                    n_ok.append(await self._apply(running, key, new))
+                    applied[key] = [old, new]
+                cur_m = optim._masks(params, optim.SLOT_KEYS)
+                new_m = [int(sp.changes.get(k, (str(m), str(m)))[1]) for k, m in zip(optim.SLOT_KEYS, cur_m)]
+                lines.append(f"🕐 <b>Créneaux</b> : {esc(optim.slots_label(cur_m))} → <b>{esc(optim.slots_label(new_m))}</b> "
+                             f"(appliqué à {min(n_ok)}/{len(running)} compte(s))")
+                self.note("CRÉNEAUX " + optim.slots_label(cur_m) + " → " + optim.slots_label(new_m))
+            else:
+                lines.append(f"🕐 <b>Créneaux</b> : inchangés (aucun au-dessus de {optim.SLOT_DD:.0f} % de drawdown, "
+                             "aucune heure libre sûre et gagnante)")
+                self.note("créneaux inchangés")
+            for ln in sp.lines:
+                lines.append(f"   {esc(ln)}")
+                self.note("  " + ln)
         ref_row = dec.table[0] if dec.table else None
         if ref_row is not None:
             lines.append(f"\n📊 Réglages actuels : 30 j ✅ {ref_row.won30}/{ref_row.n30} · {money(ref_row.net30, currency, True)} · "
                          f"60 j 💀 {ref_row.lost60} · DD {ref_row.dd60:.0f} %")
-        top = sorted([r for r in dec.table[1:] if r.n30], key=lambda r: (not r.safe, -r.net30))[:6]
+        top = sorted([r for r in dec.table[1:] if r.n30 and not r.name.startswith("Réglages actuels")],
+                     key=lambda r: (not r.safe, -r.net30))[:6]
         for r in top:
             lines.append(f"{'🟢' if r.safe else '💀'} {esc(r.name)} : ✅ {r.won30}/{r.n30} · {money(r.net30, currency, True)} · "
                          f"DD {r.dd60:.0f} %" + (f" · 💀 {r.lost60}" if r.lost60 else ""))
         nxt = optim.SAFETY[1] if self.safety_next else optim.GROUPS[self.group_index()][1]
-        if not safety and gparams and optim.is_flat(dec):
+        if wider:
             sc = self.scale()
-            lines.append("🔭 Résultats identiques à 3 % près : au prochain tour de ce groupe, je cherche plus loin ("
-                         + ", ".join(f"{esc(optim.NUM[k][0])} ±{sc.get(k, 1)} crans" for k in gparams if k in optim.NUM) + ").")
+            lines.append(f"🔭 {optim.IDLE_PASSES} passages sans changement : au prochain tour, je cherche plus loin ("
+                         + ", ".join(f"{esc(optim.NUM[k][0])} ±{sc.get(k, 1)} crans" for k in wider) + ").")
         lines.append(f"\n<i>Prochaine nuit ({self.hour:02d}:00) : {esc(nxt)}</i>")
         oid = self.ctx.db.opt_add(gkey, "change" if applied else "inchange", "\n".join(lines), json.dumps(applied), rid)
+        self.note(f"nuit terminée à {self._now().strftime('%H:%M')}")
         kb = ([[("↩️ Annuler ce changement", f"d:opu:{oid}")]] if applied else []) + [[("🤖 Optimiseur", "d:opt"), ("✖ Fermer", "d:close")]]
         await self._send("\n".join(lines), kb, silent=True)
 
@@ -322,8 +375,12 @@ class Optimizer:
 
     def status_text(self) -> str:
         lines = ["🤖 <b>Optimiseur automatique</b>",
-                 f"État : {'✅ activé' if self.on else '⏸ désactivé'} · chaque nuit à <b>{self.hour:02d}:00</b>",
-                 f"Prochain groupe : {esc(optim.SAFETY[1] if self.safety_next else optim.GROUPS[self.group_index()][1])}"]
+                 f"État : {'✅ activé' if self.on else '⏸ désactivé'} · chaque nuit à <b>{self.hour:02d}:00</b> (sans limite de durée)",
+                 f"Prochaine catégorie : {esc(optim.SAFETY[1] if self.safety_next else optim.GROUPS[self.group_index()][1])}",
+                 "Cycle : " + " → ".join(t for _, t, _ in optim.GROUPS)]
+        acc = self.r.bt.account() if getattr(self.r, "bt", None) is not None else None
+        lines.append(f"🔑 Terminal de test : compte {acc['login']} · {esc(acc.get('server', ''))}" if acc
+                     else "🔑 Terminal de test : <b>à configurer</b> (bouton 🔑 ci-dessous)")
         if self.running:
             lines.append(f"⏳ En cours depuis {int((time.time() - self.started) / 60)} min : {esc(self.stage)}")
         sc = {k: v for k, v in self.scale().items() if v > 1}
@@ -344,7 +401,7 @@ class Optimizer:
                     what += " (annulé)" if r["reverted"] else ""
                 else:
                     what = "aucun changement" if r["status"] == "inchange" else f"échec : {r['summary'][:60]}"
-                lines.append(f"• {when} · {esc(r['grp'])} : {esc(what)}")
+                lines.append(f"• {when} · {esc(optim.group_title(r['grp']))} : {esc(what)}")
         else:
             lines += ["", "<i>Aucune nuit d'optimisation pour l'instant.</i>"]
         return "\n".join(lines)
@@ -352,22 +409,29 @@ class Optimizer:
 
 GUIDE = """❓ <b>L'optimiseur, en bref</b>
 
-<b>Ce qu'il fait</b> : chaque nuit, à l'heure choisie, il rejoue les <b>60 derniers jours</b> dans le testeur avec tes réglages actuels et une dizaine de variantes (des robots fictifs du labo). Il ne touche qu'à un <b>groupe</b> de réglages par nuit, à tour de rôle :
-🧱 Grille (multiplicateur ATR, minimum, maximum) → 📦 Lots (ordres en attente, multiplicateur de lot) → 🎯 Objectif et bougies du signal récent → 🛡️ Filtres (chacun activé ou désactivé).
+<b>Ce qu'il fait</b> : chaque nuit à <b>21 h</b> (réglable), il rejoue les <b>60 derniers jours</b> dans le testeur avec tes réglages actuels et jusqu'à 38 variantes (des robots fictifs joués en parallèle sur les mêmes prix). Pas de limite de durée : le test va jusqu'au bout, même après 2 h. Une <b>catégorie</b> par nuit, 4 nuits à la suite :
+🧱 <b>Grille et lots</b> (ATR de la grille, minimum, maximum · ordres en attente, multiplicateur de lot, trades avant multiplication)
+📐 <b>Signal et TP</b> (EMA rapide, EMA lente, période ATR · multiplicateur ATR du TP, TP minimum, TP maximum)
+🛡️ <b>Filtres</b> (chacun activé ou désactivé · ATR min/max, volume min/max, extension max, corps de bougie, bougies du signal récent)
+🎯 <b>Objectif et créneaux</b> (% de l'objectif · créneaux)
 
 <b>Comment il choisit</b>
 • Il ne garde qu'une variante qui <b>ne perd jamais le compte</b> sur 60 jours et 30 jours, avec un drawdown sous 90 %.
-• Si tes réglages actuels sont sûrs, la variante doit <b>gagner nettement plus sur les 30 derniers jours</b> (marché récent) sans faire moins bien sur 60 jours.
-• Si tes réglages actuels <b>perdent vraiment le compte</b> (💀) sur 60 jours, la nuit suivante est une nuit 🛟 <b>Sécurité</b> (au plus une par tour de 4 nuits) : il teste une échelle de prudence (lot moins multiplié, moins d'ordres, grille plus large, et des combinaisons légères) et prend la variante sûre la <b>plus rentable sur 60 jours, pertes de compte comprises</b>, à condition qu'elle garde au moins <b>80 % de ton gain</b> sur 30 jours. Sinon il ne change rien (pas de « trop prudent »). Ensuite la rotation reprend ; les nuits normales retestent des réglages moins prudents, donc il remonte tout seul quand le marché se calme.
-• Chaque variante bouge les réglages d'<b>un seul cran</b> : seule, ou à deux réglages <b>combinés et testés ensemble</b> (ex. ATR + minimum de grille). Il applique la meilleure variante sûre telle quelle. Les nuits suivantes, il reteste autour des nouvelles valeurs : il s'affine tout seul et suit le marché.
-• Si une nuit ne montre <b>aucune différence nette</b> (toutes les variantes à 3 % près), il cherche <b>deux fois plus loin</b> au tour suivant de ce groupe (2 puis 4 crans). Si même à 4 crans rien ne se distingue, il revient à 1 cran et recommence. Dès qu'il trouve mieux, il revient à 1 cran pour affiner. Tant qu'il ne trouve rien, tes réglages ne bougent pas.
+• Si tes réglages actuels sont sûrs, la variante doit <b>gagner nettement plus sur les 30 derniers jours</b> sans faire moins bien sur 60 jours.
+• À résultat presque égal, il préfère la valeur <b>entourée de bons résultats</b> (ses voisines gagnent aussi) : plus robuste quand le marché change.
+• Si tes réglages actuels <b>perdent vraiment le compte</b> (💀) sur 60 jours, la nuit suivante est une nuit 🛟 <b>Sécurité</b> (au plus une par tour) : lot moins multiplié, moins d'ordres, grille plus large ; il prend la variante sûre la plus rentable si elle garde au moins <b>80 % de ton gain</b>.
+
+<b>Les crans</b> : un cran est le pas d'un réglage (ex. 0,1 pour l'ATR de la grille). Chaque variante bouge un réglage d'<b>un cran</b>, seul ou combiné à un autre réglage de la même famille. La meilleure variante sûre est appliquée ; les nuits suivantes, il reteste autour de la nouvelle valeur. Après <b>3 passages sans changement</b> d'un réglage, il cherche <b>deux fois plus loin</b> (2 puis 4 crans), puis revient à 1 cran.
+
+<b>Les créneaux</b> (nuit 🎯) : un créneau est <b>retiré</b> s'il dépasse <b>80 % de drawdown</b> sur 60 jours ; chaque <b>heure pile libre</b> est testée seule et <b>ajoutée</b> si elle reste sous 80 %, ne perd jamais le compte et gagne de l'argent. Il ne retire jamais le dernier créneau. Les coupures ne sont jamais touchées.
 
 <b>Ce que tu reçois</b> : un message par nuit avec l'ancienne valeur, la nouvelle, la raison, les meilleures variantes et un bouton <b>↩️ Annuler ce changement</b>. Le réglage est appliqué à tous les comptes lancés et au preset ⭐ actif.
 
 <b>Les boutons</b>
 • ✅/⏸ : activer ou suspendre l'optimiseur.
-• 🕐 : changer l'heure de lancement (le test dure ~20-40 min, finis-le avant tes créneaux).
+• 🕐 : changer l'heure de lancement.
 • ▶️ Lancer maintenant : une nuit tout de suite.
+• 🔑 Terminal de test : le compte du broker utilisé par le testeur (démo ou réel, aucun ordre passé).
 • 📜 Journal : tout ce qu'il a fait, ligne par ligne ; 📎 le fichier complet à me transmettre en cas de problème.
 
-<b>Limites</b> : le passé ne garantit pas l'avenir ; un backtest ne connaît pas ton slippage exact. Le SL d'urgence n'est jamais touché."""
+<b>Limites</b> : le passé ne garantit pas l'avenir ; un backtest ne connaît pas ton slippage exact (il reprend celui mesuré sur tes vrais ordres). Le SL d'urgence et les coupures ne sont jamais touchés."""

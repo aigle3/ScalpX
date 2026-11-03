@@ -441,75 +441,12 @@ def _dur(sec: float) -> str:
     return f"{s // 3600} h {(s % 3600) // 60:02d}"
 
 
-def labo_text(real, scen: dict, days: int, scope: str, cur: str, reset_ts: int = 0, active: bool = True,
-              max_len: int = 3900, notes: list | None = None, brief: list | None = None) -> str:
-    """🧪 Labo des filtres : qui bloque les objectifs réels, et ce qu'auraient donné les scénarios virtuels."""
-    from core import labo
-    head = [f"🧪 <b>Labo des filtres</b> · {days} j · {esc(scope)}"]
-    if reset_ts:
-        head.append(f"<i>Depuis la remise à zéro du {time.strftime('%d/%m %H:%M', time.localtime(reset_ts))}</i>")
-    if not active:
-        head.append("⏸ <b>Labo en pause</b> : séries virtuelles figées (le journal des blocages réels continue).")
-    head.append("<i>Séries virtuelles sur les vrais prix (spread, slippage et commission mesurés). Aucun ordre réel.</i>")
-    head += list(notes or [])
-    if brief:
-        head += [""] + list(brief)
-    out = head + [""]
-    if real.goals:
-        out.append(f"<b>Réel</b> : {real.goals} objectif(s) · ✅ {real.won} · ⌛ {real.no_entry} sans série"
-                   + (f" (dont {real.no_entry_filters} bloqué(s) par les filtres)" if real.no_entry else "")
-                   + f" · {money(real.net, cur, True)}")
-        if real.signal_s:
-            out.append(f"Signal présent sans série : {_dur(real.signal_s)}, dont <b>{_dur(real.blocked_s)}</b> bloqué(s) par les filtres")
-        blk = sorted((b for b in real.filters.values() if b.seconds > 0), key=lambda b: -b.seconds)
-        if blk:
-            out += ["", "<b>⏱ Qui bloque ?</b> <i>(signal présent, aucune série)</i>"]
-            for b in blk[:8]:
-                i = labo.CODES.index(b.code)
-                out.append(f"• {labo.LABELS[i]} : {_dur(b.seconds)} (seul : {_dur(b.sole)})"
-                           + (f" · <b>{b.goals_missed} objectif(s) raté(s)</b>" if b.goals_missed else ""))
-    else:
-        out.append("<i>Aucun objectif réel terminé sur la période (le journal se remplit à chaque objectif).</i>")
-
-    ref = scen.get("miroir")
-    rows = [s for s in scen.values() if s.launched or s.skipped]
-    if not rows:
-        out += ["", "<i>Aucun objectif virtuel terminé pour l'instant.</i>"]
-        return "\n".join(out)
-    order = {"miroir": 0, "aucun": 2}
-    rows.sort(key=lambda s: (order.get(s.key, 3 if s.key.startswith("p") else 1),
-                             -(s.net - (ref.net if ref else 0))))
-    out += ["", "<b>🧬 Scénarios virtuels</b> <i>(✅ atteints · 💀 SL / stop-out · net · drawdown max)</i>"]
-    for s in rows:
-        v = labo.verdict(s, ref)
-        name = s.name or s.key                         # scénarios perso : leur nom (ex. « 🛡 Prudent » ou la liste des réglages)
-        rate = f" ({s.rate * 100:.0f} %)" if s.rate is not None else ""
-        d_won = f" ({s.won - ref.won:+d})" if ref is not None and s is not ref else ""
-        d_net = f" ({s.net - ref.net:+.2f})" if ref is not None and s is not ref else ""
-        line = (f"{v.icon + ' ' if v.icon else ''}<b>{esc(name)}</b> : {s.launched} obj · ✅ {s.won}{rate}{d_won}"
-                f" · 💀 {s.lost} · {money(s.net, cur, True)}{d_net} · DD {s.dd_max:.1f} %")
-        if v.text:
-            line += f"\n   ↳ {v.text}"
-        out.append(line)
-    out += ["", "<i>🟢 trop restrictif / meilleur · ⚖️ plus de gain, plus de risque · 🛡️ évite des pertes · 🔴 moins bon · ⚪ équivalent · "
-                f"⏳ moins de {labo.MIN_GOALS} objectifs. Juger sur 2 semaines au moins.</i>"]
-    text = "\n".join(out)
-    if len(text) > max_len:                         # trop long pour Telegram : verdicts en abrégé (icônes), puis lignes en moins
-        out = [l.split("\n   ↳")[0] for l in out]
-        while len("\n".join(out)) > max_len and len(out) > 3:
-            out.pop(-2)
-        text = "\n".join(out)
-    return text
-
-
-# ------------------------------------------------------------------ backtest (EA 7.2.0)
 def bt_progress_text(run, cur: str, now: float | None = None) -> str:
-    """Message de suivi d'un backtest (édité en place toutes les quelques secondes)."""
+    """Message de suivi du terminal de test (configuration du compte ; édité en place toutes les quelques secondes)."""
     from core import backtest as bt
     now = now if now is not None else time.time()
     days = max(1, round((run.d_to - run.d_from) / 86400))
-    head = "⚙️ Configuration du terminal de backtest" if run.kind == "setup" else (
-        f"🧪 <b>Backtest #{run.rid}</b>" + (" · complément du labo" if run.kind == "labo" else ""))
+    head = "⚙️ Configuration du terminal de test" if run.kind == "setup" else f"🧪 <b>Backtest #{run.rid}</b>"
     out = [head, f"📅 {bt.human_date(run.d_from)} → {bt.human_date(run.d_to)} ({bt.period_label(days)}) · {esc(bt.MODELS[run.model][1])}"]
     if run.kind != "setup":
         out.append(f"⚙️ Réglages : {esc(run.source)}")
@@ -540,74 +477,3 @@ def bt_progress_text(run, cur: str, now: float | None = None) -> str:
     if run.done:
         out += ["", ("✅ Terminé." if run.ok else f"❌ {esc(run.error or 'Échec.')}")]
     return "\n".join(out)
-
-
-def bt_result_text(rid: int, kind: str, source: str, model: str, res, scen: dict, cur: str, duration_s: float = 0,
-                   brief: list | None = None, prev: tuple | None = None) -> str:
-    """Résultat final d'un backtest : la stratégie réelle, par créneau, et le labo des filtres sur la même période."""
-    from core import backtest as bt, labo
-    days = max(1, round((res.d_to - res.d_from) / 86400))
-    out = [f"✅ <b>Backtest #{rid} terminé</b> · {bt.period_label(days)} ({bt.human_date(res.d_from)} → {bt.human_date(res.d_to)})",
-           f"⚙️ {esc(source)} · {esc(bt.MODELS.get(model, (0, model))[1])}" + (f" · durée {_dur(duration_s)}" if duration_s else "")]
-    out += [esc(l) for l in bt.settings_lines(getattr(res, "params", {}) or {})]
-    if prev is not None and getattr(res, "params", None) and prev[1]:
-        diff = bt.settings_diff(prev[1], res.params)
-        out.append(f"🔁 Changé depuis le backtest #{prev[0]} : " + (esc(" · ".join(diff)) if diff else "rien"))
-    out.append("")
-    out.append(f"💼 Dépôt {money(res.deposit, cur)} → solde final <b>{money(res.final, cur)}</b>")
-    out.append(f"💸 Retiré {money(res.withdrawn, cur)} ({res.cycles} cycle(s) 500)"
-               + (f" · 🔄 {res.reloads} recharge(s) : {money(res.reloaded, cur)}" if res.reloads else " · aucune recharge"))
-    out.append(f"📈 <b>Gain net {money(res.net, cur, True)}</b> · drawdown max {res.dd_max:.1f} %")
-    if getattr(res, "dd_ts", 0):
-        out.append(f"📉 Pire drawdown : {res.dd_max:.1f} % le {time.strftime('%d/%m/%Y %H:%M', time.gmtime(res.dd_ts))} (GMT) : "
-                   f"equity {money(res.dd_peak, cur)} → {money(res.dd_eq, cur)} ({money(res.dd_eq - res.dd_peak, cur, True)})")
-    so = getattr(res, "stopouts", -1)
-    if so > 0 or res.final <= 1.0:
-        out.append(f"💀 <b>Compte perdu</b>" + (f" {so} fois (stop-out du broker)" if so > 0 else "") +
-                   f" · solde final {money(res.final, cur)}")
-    elif res.dd_max >= 90:
-        out.append(f"⚠️ <b>Passé tout près de la perte du compte</b> (drawdown {res.dd_max:.0f} %), sans stop-out")
-    if brief:
-        out += [""] + list(brief) + [""]
-    rate = f" ({res.won / res.goals * 100:.0f} %)" if res.goals else ""
-    out.append(f"🎯 Objectifs : {res.goals} lancés · ✅ {res.won}{rate} · ⌛ {res.missed} manqués "
-               f"(sans série {res.cancelled}, coupés {res.cut}) · 🚨 {res.sl} SL" + (f" · ⏭ {res.skipped} sautés" if res.skipped else ""))
-    if res.slots:
-        parts = [f"{s} {w}/{n}" for s, (n, w) in sorted(res.slots.items(), key=lambda kv: kv[0].zfill(5))]
-        out.append("🕐 Par créneau (✅/lancés) : " + " · ".join(parts))
-    if res.note:
-        out.append(f"ℹ️ {esc(res.note)}")
-    ref = scen.get("miroir")
-    rows = [s for s in scen.values() if s.launched]
-    if rows and ref is not None:
-        rows.sort(key=lambda s: -(s.net - ref.net))
-        out += ["", "<b>🧬 Labo des filtres sur cette période</b> <i>(comparé aux réglages actuels)</i>"]
-        customs = [s for s in rows if s.key.startswith("p")]                  # scénarios du test : tous affichés
-        others = [s for s in rows if s is not ref and not s.key.startswith("p")]
-        shown = [ref] + customs + others[:max(3, 8 - len(customs))]
-        out[-1] += f" · {len(rows)} scénarios testés, ici les principaux (liste complète : 🧬)"
-        for s in shown:
-            v = labo.verdict(s, ref)
-            d = f" ({s.net - ref.net:+.2f})" if s is not ref else ""
-            out.append(f"{v.icon + ' ' if v.icon else ''}{esc(s.name or s.key)} : ✅ {s.won}/{s.launched} · 💀 {s.lost} · "
-                       f"{money(s.net, cur, True)}{d} · DD {s.dd_max:.0f} %")
-    out.append("<i>Commission et slippage du labo : mesurés sur tes vrais ordres. Spread : ticks réels du broker.</i>")
-    return "\n".join(out)
-
-
-def bt_all_scen_text(rid: int, scen: dict, cur: str) -> str:
-    """🧬 Tous les scénarios d'un backtest, du meilleur au moins bon (écart avec les réglages actuels)."""
-    from core import labo
-    ref = scen.get("miroir")
-    rows = [s for s in scen.values() if s.launched]
-    if ref is None or not rows:
-        return f"🧬 <b>Backtest #{rid}</b> : aucun scénario du labo."
-    rows.sort(key=lambda s: (s is not ref, -(s.net - ref.net)))
-    out = [f"🧬 <b>Backtest #{rid} : les {len(rows)} scénarios</b> <i>(✅ atteints · 💀 comptes perdus · net · écart · DD)</i>", ""]
-    for s in rows:
-        v = labo.verdict(s, ref)
-        d = f" ({s.net - ref.net:+.2f})" if s is not ref else ""
-        out.append(f"{v.icon + ' ' if v.icon else ''}<b>{esc(s.name or s.key)}</b> : ✅ {s.won}/{s.launched} · 💀 {s.lost} · "
-                   f"{money(s.net, cur, True)}{d} · DD {s.dd_max:.0f} %")
-    text = "\n".join(out)
-    return text if len(text) <= 3900 else text[:3890].rsplit("\n", 1)[0]

@@ -45,7 +45,7 @@ class Router:
         from mt5.backtester import BacktestManager
         self.bt = BacktestManager(ctx.cfg, ctx.db, ctx.mgr.procs)      # 🧪 terminal de backtest à part
         dash.bt = self.bt
-        self.awaiting_bt: str | None = None                 # saisie attendue : login, server_text, password, date
+        self.awaiting_bt: str | None = None                 # saisie attendue : login, server_text, password
         self._bt_msg: int | None = None                     # message de suivi du backtest en cours
         self._bt_last = (0.0, "")                           # dernière édition du suivi (heure, texte)
         from .optim import Optimizer
@@ -141,12 +141,8 @@ class Router:
             r = await self._opt_cb(sub, p)
             if r is not None:
                 return r
-        elif sub.startswith("bt") or sub.startswith("qt"):  # 🧪 backtest et tests rapides
+        elif sub in ("btc", "btsv", "btq", "btx"):         # 🔑 terminal de test de l'optimiseur
             r = await self._bt_cb(sub, p)
-            if r is not None:
-                return r
-        elif sub.startswith("lab"):                         # 🧪 labo des filtres
-            r = await self._labo_cb(sub, p)
             if r is not None:
                 return r
         elif sub in ("lst", "act", "rpt", "logs", "gterm", "wdr"):
@@ -482,110 +478,7 @@ class Router:
         self.dash.flash(msg)
         await self.dash.refresh(force=True)
 
-    async def _labo_cb(self, sub: str, p: list[str]) -> str | None:
-        """🧪 Labo des filtres : période, compte, scénarios perso, pause, remise à zéro. None = rafraîchir l'écran."""
-        from core import labo
-        common = self.ctx.cfg.paths.common()
-        arg = p[2] if len(p) > 2 else ""
-        if sub == "lab":
-            if arg.isdigit() and int(arg) in self.dash.LAB_DAYS:
-                self.dash.lab_days = int(arg)
-            self.dash.goto("lab")
-        elif sub == "laba":                                 # compte suivant ("" = tous)
-            ids = [""] + [i.id for i in self.ctx.db.list()]
-            cur = self.dash.lab_acc if self.dash.lab_acc in ids else ""
-            self.dash.lab_acc = ids[(ids.index(cur) + 1) % len(ids)]
-            self.dash.goto("lab")
-        elif sub == "labs":
-            self.dash.lab_edit = None
-            self.dash.goto("labs")
-        elif sub == "labn":
-            cfg = labo.load_config(common)
-            if len(cfg.customs) >= labo.MAX_CUSTOM:
-                self.dash.flash(f"Maximum {labo.MAX_CUSTOM} scénarios perso.")
-                self.dash.goto("labs")
-            else:
-                self.dash.lab_edit = [cfg.next_key(), ["="] * len(labo.CODES), {}]
-                self.dash.goto("labe")
-        elif sub == "labe":
-            c = next((c for c in labo.load_config(common).customs if c.key == arg), None)
-            if c is None:
-                self.dash.goto("labs")
-            else:
-                self.dash.lab_edit = [c.key, list(c.toks), dict(c.opts)]
-                self.dash.goto("labe")
-        elif sub == "labt" and self.dash.lab_edit and arg.isdigit() and int(arg) < len(labo.CODES):
-            i = int(arg)
-            self.dash.lab_edit[1][i] = labo.next_tok(i, self.dash.lab_edit[1][i])
-        elif sub == "labo" and self.dash.lab_edit and arg in labo.OPT_CYCLES:
-            opts = self.dash.lab_edit[2]
-            opts[arg] = labo.next_opt(arg, opts.get(arg, ""))
-        elif sub == "labth":                                # 📦 thème installé dans le labo (sans backtest)
-            if arg in labo.THEMES and labo.THEMES[arg][2]:
-                cfg = labo.load_config(common)
-                names = labo.apply_theme(cfg, arg)
-                labo.save_config(common, cfg)
-                self.ctx.db.add_action("", f"Labo : thème « {labo.THEMES[arg][0]} » installé ({len(names)} scénarios)", True)
-                self.dash.flash(f"📦 {labo.THEMES[arg][0]} : {len(names)} scénario(s) installé(s), joués par les EA sous 10 s.")
-                self.dash.goto("labs")
-            else:
-                self.dash.goto("labth")
-        elif sub == "labk":                                 # ⭐ scénarios conseillés
-            if arg == "all" or arg.isdigit():
-                cfg = labo.load_config(common)
-                picks = labo.PACK if arg == "all" else [labo.PACK[int(arg)]] if int(arg) < len(labo.PACK) else []
-                if arg == "all":
-                    cfg.customs = []
-                names = {c.name for c in cfg.customs}
-                added = []
-                for name, toks, opts, _ in picks:
-                    if name in names or len(cfg.customs) >= labo.MAX_CUSTOM:
-                        continue
-                    cfg.customs.append(labo.Custom(cfg.next_key(), name, list(toks), dict(opts)))
-                    added.append(name)
-                if added:
-                    labo.save_config(common, cfg)
-                    self.ctx.db.add_action("", "Labo : scénarios conseillés ajoutés (" + ", ".join(added) + ")", True)
-                    self.dash.flash(f"⭐ {len(added)} scénario(s) ajouté(s) : les EA les jouent sous 10 s.")
-                else:
-                    self.dash.flash(f"Aucune place libre ({labo.MAX_CUSTOM} scénarios perso au maximum) : supprimes-en un d'abord.")
-            self.dash.goto("labk")
-        elif sub == "labv" and self.dash.lab_edit:
-            key, toks, opts = self.dash.lab_edit
-            if all(t == "=" for t in toks) and not labo.opts_str(opts):
-                self.dash.flash("Ce scénario est identique aux réglages actuels : change au moins un filtre.")
-                return None
-            cfg = labo.load_config(common)
-            old = next((c for c in cfg.customs if c.key == key), None)
-            name = old.name if old is not None and old.toks == list(toks) and old.opts == opts else labo.auto_name(toks, opts)
-            cfg.customs = [c for c in cfg.customs if c.key != key] + [labo.Custom(key, name, list(toks), dict(opts))]
-            cfg.customs.sort(key=lambda c: int(c.key[1:]) if c.key[1:].isdigit() else 99)
-            labo.save_config(common, cfg)
-            self.ctx.db.add_action("", f"Labo : scénario {key} enregistré ({name})", True)
-            self.dash.lab_edit = None
-            self.dash.flash("💾 Scénario enregistré : les EA le prennent en compte sous 10 s.")
-            self.dash.goto("labs")
-        elif sub == "labd" and arg:
-            cfg = labo.load_config(common)
-            cfg.customs = [c for c in cfg.customs if c.key != arg]
-            labo.save_config(common, cfg)
-            self.ctx.db.add_action("", f"Labo : scénario {arg} supprimé", True)
-            self.dash.flash(f"🗑 Scénario {arg} supprimé.")
-            self.dash.goto("labs")
-        elif sub == "labp":
-            cfg = labo.load_config(common)
-            cfg.active = not cfg.active
-            labo.save_config(common, cfg)
-            self.ctx.db.add_action("", "Labo des filtres " + ("repris" if cfg.active else "mis en pause"), True)
-            self.dash.flash("▶ Labo repris." if cfg.active else "⏸ Labo en pause : les séries virtuelles en cours sont figées.")
-            self.dash.goto("lab")
-        elif sub == "labr":
-            return await self._ask("♻️ <b>Remettre le labo à zéro ?</b>\nTous les comptes virtuels repartent du solde réel actuel ; "
-                                   "les rapports ne comptent plus que ce qui suit. Le trading réel n'est pas touché.",
-                                   self._labo_reset, ("lab",), "♻️ Remettre à zéro")
-        return None
-
-    # ------------------------------------------------------------------ 🧪 backtest
+    # ------------------------------------------------------------------ 🔑 terminal de test (optimiseur)
     def _bt_servers(self) -> list[str]:
         seen: list[str] = []
         for s in list(self.ctx.cfg.mt5.servers) + [i.server for i in self.ctx.db.list()]:
@@ -594,83 +487,13 @@ class Router:
         return seen
 
     async def _bt_cb(self, sub: str, p: list[str]) -> str | None:
-        from core import backtest as bt
-        from . import backtest_ui as bui
         arg = p[2] if len(p) > 2 else ""
         d = self.dash
-        if sub == "bt":
-            if arg.isdigit() and any(int(arg) == x for x, _ in bt.PERIODS):
-                d.bt_days = int(arg)
-            self.awaiting_bt = None
-            d.goto("bt")
-        elif sub == "btm":
-            d.bt_model = "m1" if d.bt_model == "reel" else "reel"
-        elif sub == "bts":
-            srcs = bui.sources(d)
-            cur = d.bt_src if d.bt_src in srcs else (srcs[0] if srcs else "base")
-            d.bt_src = srcs[(srcs.index(cur) + 1) % len(srcs)] if srcs else "base"
-        elif sub == "btd":
-            self.awaiting_bt = "date"
-            d.flash("📅 Envoie la date de début (JJ/MM/AAAA), entre hier et il y a un an.", 120)
-        elif sub == "btl":
-            d.goto("btl")
-        elif sub == "btr" and arg.isdigit():
-            d.goto("btr", arg)
-        elif sub == "btra" and arg.isdigit():
-            d.goto("btra", arg)
-        elif sub == "btg" and arg.isdigit():
-            await self._bt_chart(int(arg))
-            return ""
-        elif sub == "btx":
-            d.flash("⏹ Arrêt du backtest demandé…" if self.bt.cancel() else "Aucun backtest en cours.")
-        elif sub == "btgo":
-            if self.bt.busy():
-                d.flash("⏳ Un backtest est déjà en cours.")
-            else:
-                d_from, d_to = bt.date_range(d.bt_days)
-                self._bg(self.start_backtest("bt", d_from, d_to, d.bt_model, d.bt_src))
-                return "Backtest lancé"
-        elif sub == "btlab" and arg.isdigit():                # labo : compléter la période par un backtest
-            if self.bt.busy():
-                d.flash("⏳ Un backtest est déjà en cours.")
-            elif not self.bt.configured():
-                d.goto("bt")
-                d.flash("⚙️ Configure d'abord le terminal de backtest.")
-            else:
-                d_from = bt.date_range(d.lab_days)[0]
-                d_to = int(arg)
-                if d_to - d_from < 86400:
-                    d.flash("La période manquante fait moins d'un jour.")
-                else:
-                    self._bg(self.start_backtest("labo", d_from, d_to, "reel", d.lab_acc or ""))
-                    return "Backtest lancé"
-        elif sub == "qt":
-            d.goto("qt")
-        elif sub == "qtd" and arg.isdigit():
-            d.qt_days = int(arg)
-            d.goto("qt")
-        elif sub == "qtgo" and arg:                         # thème : scénarios installés + backtest lancé
-            from core import labo
-            if arg not in labo.THEMES:
-                d.goto("qt")
-            elif self.bt.busy():
-                d.flash("⏳ Un backtest est déjà en cours.")
-            elif not self.bt.configured():
-                d.goto("bt")
-                d.flash("⚙️ Configure d'abord le terminal de backtest.")
-            else:
-                common = self.ctx.cfg.paths.common()
-                cfg = labo.load_config(common)
-                names = labo.apply_theme(cfg, arg)
-                labo.save_config(common, cfg)
-                title = labo.THEMES[arg][0]
-                self.ctx.db.add_action("", f"Test rapide « {title} » : {len(names)} scénario(s) installé(s)", True)
-                d_from, d_to = bt.date_range(d.qt_days)
-                self._bg(self.start_backtest("bt", d_from, d_to, d.bt_model, d.bt_src, title))
-                return "Test lancé"
+        if sub == "btx":
+            d.flash("⏹ Arrêt du test demandé…" if self.bt.cancel() else "Aucun test en cours.")
         elif sub == "btc":                                  # configuration du compte du testeur
-            if self.bt.busy():
-                d.flash("⏳ Attends la fin du backtest en cours.")
+            if self.bt.busy() or self.optim.running:
+                d.flash("⏳ Attends la fin du test en cours.")
             else:
                 self.awaiting_bt = "login"
                 d.bt_wiz = ("login", {})
@@ -688,23 +511,14 @@ class Router:
         elif sub == "btq":
             self.awaiting_bt = None
             d.bt_wiz = ("login", {})
-            d.goto("bt")
+            d.goto("opt")
         return None
 
     async def _bt_text(self, text: str) -> None:
-        from core import backtest as bt
         from core.ids import valid_login, valid_server
         step, self.awaiting_bt = self.awaiting_bt, None
         d = self.dash
-        if step == "date":
-            days = bt.parse_date(text)
-            if days is None:
-                d.flash("❌ Date non reconnue (JJ/MM/AAAA, entre hier et il y a un an).")
-            else:
-                d.bt_days = days
-                d.flash(f"📅 Début du backtest : {text.strip()} ({days} j).")
-            d.goto("bt")
-        elif step == "login":
+        if step == "login":
             v = text.strip()
             if not valid_login(v):
                 self.awaiting_bt = "login"
@@ -729,7 +543,7 @@ class Router:
         elif step == "password":
             data = d.bt_wiz[1]
             d.bt_wiz = ("login", {})
-            d.goto("bt")
+            d.goto("opt")
             if text and "login" in data and "server" in data:
                 self._bg(self._bt_setup(int(data["login"]), data["server"], text))
         await d.refresh(force=True)
@@ -754,23 +568,22 @@ class Router:
 
     async def _bt_setup(self, login: int, server: str, password: str) -> None:
         self._bt_msg, self._bt_last = None, (0.0, "")
-        self.ctx.db.add_action("", f"Backtest : configuration du compte {login} ({server})", True)
+        self.ctx.db.add_action("", f"Terminal de test : configuration du compte {login} ({server})", True)
         run = await self.bt.setup(login, server, password, currency=self.ctx.cfg.alerts.expected_currency or "EUR",
                                   notify=self._bt_notify, poll_s=self.ctx.cfg.backtest.poll_s)
         del password
         if run.ok:
-            await self.sender.send(self.chat_id, f"✅ <b>Terminal de backtest prêt</b> : compte {login} · {esc(server)}.\n"
-                                                 "Le mot de passe est mémorisé par MT5. Tu peux lancer un backtest (📈 Rapports → 🧪 Backtest).",
-                                   [[("🧪 Backtest", "d:bt"), ("✖ Fermer", "d:close")]], False)
+            await self.sender.send(self.chat_id, f"✅ <b>Terminal de test prêt</b> : compte {login} · {esc(server)}.\n"
+                                                 "Le mot de passe est mémorisé par MT5. L'optimiseur l'utilisera chaque nuit.",
+                                   [[("🤖 Optimiseur", "d:opt"), ("✖ Fermer", "d:close")]], False)
         else:
-            await self.sender.send(self.chat_id, f"❌ <b>Configuration du terminal de backtest impossible</b>\n{esc(run.error)}",
+            await self.sender.send(self.chat_id, f"❌ <b>Configuration du terminal de test impossible</b>\n{esc(run.error)}",
                                    [[("🔑 Réessayer", "d:btc"), ("✖ Fermer", "d:close")]], False)
         await self.dash.refresh(force=True)
 
     async def _bt_inputs(self, src: str) -> tuple[dict[str, str], str, float, str, int, float, float] | str:
         """Réglages et paramètres du testeur depuis la source choisie. Texte d'erreur si impossible."""
         import json as _json
-        from . import backtest_ui as bui
         insts = self.ctx.db.list()
         params: dict[str, str] = {}
         ref = None
@@ -800,55 +613,9 @@ class Router:
             if e:
                 comm, slip = float(e.get("comm", 0) or 0), float(e.get("slip", 0) or 0)
                 break
-        return params, bui.source_label(self.dash, src), deposit, currency, leverage, comm, slip
-
-    async def start_backtest(self, kind: str, d_from: int, d_to: int, model: str, src: str, title: str = "") -> None:
-        from core import backtest as bt
-        from mt5.backtester import Run
-        inputs = await self._bt_inputs(src)
-        if isinstance(inputs, str):
-            self.dash.flash("❌ " + inputs)
-            await self.dash.refresh(force=True)
-            return
-        params, label, deposit, currency, leverage, comm, slip = inputs
-        if title:
-            label = f"{title} · {label}"
-        rid = self.ctx.db.bt_create(kind, d_from, d_to, model, label)
-        run = Run(rid, kind, d_from, d_to, model, label)
-        run.note(f"📋 Réglages : {label} · dépôt {deposit:.2f} {currency} · levier 1:{leverage}")
-        self.ctx.db.add_action("", f"Backtest #{rid} lancé ({bt.human_date(d_from)} → {bt.human_date(d_to)}, {bt.MODELS[model][1]})", True)
-        self._bt_msg, self._bt_last = None, (0.0, "")
-        self.dash.flash(f"🧪 Backtest #{rid} lancé : suivi dans le message ci-dessous.")
-        await self.dash.refresh(force=True)
-        run = await self.bt.execute(run, params=params, deposit=deposit, currency=currency, leverage=leverage,
-                                    comm=comm, slip=slip, notify=self._bt_notify, poll_s=self.ctx.cfg.backtest.poll_s)
-        status = "ok" if run.ok else ("arrete" if run.cancelled else "erreur")
-        if run.result is not None:
-            run.result.params = dict(params)                  # réglages testés, affichés dans le rapport
-        self.ctx.db.bt_update(rid, status, run.result.to_json() if run.result else "", run.error)
-        if run.ok:
-            r = self.dash._render_bt_result(rid)
-            kb = [[("📈 Courbe du solde", f"d:btg:{rid}"), ("🧬 Tous les scénarios", f"d:btra:{rid}")],
-                  [("🧪 Labo", "d:lab"), ("✖ Fermer", "d:close")]]
-            await self.sender.send(self.chat_id, r[0] if r else f"✅ Backtest #{rid} terminé.", kb, False)
-            await self._bt_chart(rid)
-        else:
-            await self.sender.send(self.chat_id, f"❌ <b>Backtest #{rid}</b> : {esc(run.error or 'échec')}",
-                                   [[("🧪 Backtest", "d:bt"), ("✖ Fermer", "d:close")]], False)
-        await self.dash.refresh(force=True)
-
-    async def _bt_chart(self, rid: int) -> None:
-        from core import backtest as bt
-        row = self.ctx.db.bt_get(rid)
-        res = bt.Result.from_json(row["result"]) if row is not None and row["result"] else None
-        rows = [{"ts": t, "balance": b, "equity": e} for t, b, e in (res.days if res else [])]
-        st = next((v.st for v in self.ctx.views() if v.st), None)
-        png = balance_chart(rows, f"Backtest #{rid}", st.seuil_arret if st else 500.0, st.seuil_reprise if st else 125.0) if rows else None
-        if png:
-            await self.sender.photo(self.chat_id, png, f"Backtest #{rid} : solde par jour simulé", True)
-        else:
-            self.dash.flash("📈 Pas assez de jours simulés pour une courbe.")
-            await self.dash.refresh(force=True)
+        label = (f"preset {src[7:]}" if src.startswith("preset:") else "réglages de BASE (.set)" if ref is None
+                 else f"compte {ref.label} (réglages actuels)")
+        return params, label, deposit, currency, leverage, comm, slip
 
     async def _opt_cb(self, sub: str, p: list[str]) -> str | None:
         from .optim import GUIDE
@@ -864,11 +631,11 @@ class Router:
             d.flash(f"🕐 L'optimiseur se lancera chaque nuit à {o.next_hour():02d}:00.")
         elif sub == "optgo":
             if o.running or self.bt.busy():
-                d.flash("⏳ Un backtest ou une optimisation est déjà en cours.")
+                d.flash("⏳ Un test ou une optimisation est déjà en cours.")
             else:
                 self.ctx.db.add_action("", "Optimiseur lancé à la main", True)
                 self._bg(o.run(manual=True))
-                d.flash("🤖 Optimisation lancée : résultat dans 20 à 40 min (📜 Journal pour suivre).")
+                d.flash("🤖 Optimisation lancée : résultat dans 1 à 3 h (📜 Journal pour suivre).")
         elif sub == "optj":
             txt = tail(o.path, 60, 3800)
             await self.sender.send(self.chat_id, "📜 <b>Journal de l'optimiseur</b>\n" + (f"<pre>{esc(txt)}</pre>" if txt else "<i>vide</i>"),
@@ -897,16 +664,6 @@ class Router:
         msg = await self.optim.revert(rid)
         self.ctx.db.add_action("", f"Optimiseur : changement #{rid} annulé", True)
         self.dash.flash(msg)
-        await self.dash.refresh(force=True)
-
-    async def _labo_reset(self) -> None:
-        from core import labo
-        common = self.ctx.cfg.paths.common()
-        cfg = labo.load_config(common)
-        cfg.reset = labo.new_reset_token()
-        labo.save_config(common, cfg)
-        self.ctx.db.add_action("", "Labo des filtres remis à zéro", True)
-        self.dash.flash("♻️ Labo remis à zéro : les EA repartent de comptes virtuels neufs sous 10 s.")
         await self.dash.refresh(force=True)
 
     async def _ask(self, text: str, run, back: tuple, yes: str = "✅ Confirmer") -> str:

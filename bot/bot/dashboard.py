@@ -50,12 +50,8 @@ class Dashboard:
         self._last_edit = 0.0
         self._retry_until = 0.0
         self._covered_at: float | None = None               # depuis quand un autre message est sous le tableau de bord
-        self.lab_days, self.lab_acc = 7, ""                 # 🧪 labo des filtres : période, compte ("" = tous)
-        self.lab_edit: list | None = None                   # scénario perso en cours d'édition : [clé, jetons]
         self.bt = None                                      # mt5.backtester.BacktestManager (branché par le routeur)
-        self.bt_days, self.bt_model, self.bt_src = 30, "reel", ""   # 🧪 backtest : période, modèle, réglages ("" = 1er compte)
         self.bt_wiz: tuple[str, dict] = ("login", {})       # configuration du compte du testeur (étape, données)
-        self.qt_days = 30                                   # 🧪 tests rapides : période
         self.optim = None                                   # bot.optim.Optimizer (branché par le routeur)
         self._load_state()
 
@@ -173,54 +169,18 @@ class Dashboard:
             kb: Keyboard = [
                 [("⏸ Suspendre" if o.on else "✅ Activer", "d:opton"), (f"🕐 {o.hour:02d}:00 ▸", "d:opth")],
                 [("▶️ Lancer maintenant", "d:optgo"), ("📜 Journal", "d:optj")],
+                [("🔑 Terminal de test", "d:btc")],
                 [("❓ Guide", "d:optg"), ("⬅ Rapports", "d:rpt"), ("🏠 Accueil", "d:home")],
             ]
+            if self.bt is not None and self.bt.busy():
+                kb.insert(2, [("⏹ Arrêter le test en cours", "d:btx")])
             last = next((r for r in self.ctx.db.opt_list(5) if r["status"] == "change" and not r["reverted"]), None)
             if last is not None:
                 kb.insert(2, [(f"↩️ Annuler le dernier changement", f"d:opu:{last['id']}")])
             return self._with_flash(o.status_text()), kb
-        if kind == "btra":
-            from core import labo
-            rid = int(self.screen[1])
-            scen = labo.compute_scen(labo.rows_of(self.ctx.db.labo_since(0, f"bt_{rid}"), "SERIE"))
-            views = self.ctx.views()
-            cur = next((v.st.devise for v in views if v.st and v.st.devise), "")
-            return (self._with_flash(render.bt_all_scen_text(rid, scen, cur)),
-                    [[("⬅ Résultat", f"d:btr:{rid}"), ("🧪 Backtest", "d:bt"), ("🏠 Accueil", "d:home")]])
-        if kind in ("bt", "btl", "btw", "btr", "qt"):
+        if kind == "btw":                                   # 🔑 compte du terminal de test (optimiseur)
             from . import backtest_ui as bui
-            if kind == "qt":
-                return bui.render_quick(self, now)
-            if kind == "bt":
-                return bui.render_main(self, now)
-            if kind == "btl":
-                return bui.render_list(self)
-            if kind == "btw":
-                return bui.render_wizard(self)
-            r = self._render_bt_result(int(self.screen[1]))
-            if r:
-                return r
-            return bui.render_list(self)
-        if kind == "lab":
-            return self._render_labo(now)
-        if kind == "labs":
-            return self._render_labo_list()
-        if kind == "labe" and self.lab_edit:
-            return self._render_labo_edit()
-        if kind == "labk":
-            return self._render_labo_pack()
-        if kind == "labth":
-            from core import labo
-            lines = ["📦 <b>Remplacer mes scénarios perso par un thème</b>",
-                     "Les 7 scénarios perso actuels sont remplacés ; le labo en direct les joue aussitôt (sans backtest).", ""]
-            kb = []
-            for key, (title, desc, items) in labo.THEMES.items():
-                if not items:
-                    continue
-                lines.append(f"<b>{render.esc(title)}</b> : " + render.esc(" · ".join(n for n, _, _ in items)))
-                kb.append([(f"📦 {title}", f"d:labth:{key}")])
-            kb.append([("⬅ Scénarios", "d:labs"), ("🏠 Accueil", "d:home")])
-            return self._with_flash("\n".join(lines)), kb
+            return bui.render_wizard(self)
         if kind == "wdr":
             return self._render_withdrawals(now)
         if kind == "gterm":
@@ -327,185 +287,12 @@ class Dashboard:
                         [("⬅ Rapports", "d:rpt"), ("🏠 Accueil", "d:home")]]
         return self._with_flash(text), kb
 
-    LAB_DAYS = (1, 7, 14, 30, 90)
-
-    def _labo_status(self, now: float, insts) -> str:
-        """📡 État du labo en direct (dernier LABO_ETAT de chaque compte)."""
-        import json as _json
-        n_acc = n_sc = n_open = n_act = 0
-        oldest = None
-        slip = comm = None
-        for i in insts:
-            try:
-                e = _json.loads(self.ctx.db.meta_get(f"labo_etat_{i.id}", "") or "{}")
-            except ValueError:
-                continue
-            if not e:
-                continue
-            n_acc += 1
-            sc = e.get("sc") or []
-            n_sc = max(n_sc, len(sc))
-            n_open += sum(1 for x in sc if int(x.get("pos", 0) or 0) > 0)
-            n_act += sum(1 for x in sc if x.get("actif"))
-            ts = int(e.get("ts", 0) or 0)
-            oldest = ts if oldest is None else min(oldest, ts)
-            if slip is None:
-                slip, comm = float(e.get("slip", 0) or 0), float(e.get("comm", 0) or 0)
-        if not n_acc:
-            return "📡 <i>Labo en direct : aucun état reçu (EA 7.1.0+ requis ; premier état 1 min après le démarrage).</i>"
-        return (f"📡 Labo en direct : {n_acc}/{len(insts)} compte(s) · {n_sc} scénarios · {n_act} objectif(s) virtuel(s) en cours · "
-                f"{n_open} série(s) ouverte(s) · mis à jour il y a {render.ago(now - (oldest or now))}\n"
-                f"   slippage mesuré {slip:+.1f} pts · commission {comm:.2f}/lot/côté")
-
-    def _render_labo(self, now: float) -> tuple[str, Keyboard]:
-        from core import backtest as bt, labo
-        db = self.ctx.db
-        cfg = labo.load_config(self.ctx.cfg.paths.common())
-        reset_ts = int(cfg.reset) if cfg.reset.isdigit() else 0
-        since = int(now) - self.lab_days * 86400
-        shown_reset = reset_ts if reset_ts > since else 0
-        acc = self.lab_acc or None
-        live_all = [r for r in db.labo_since(reset_ts, acc) if not str(r["iid"]).startswith("bt_")]
-        cov = min((int(r["ts"]) for r in live_all), default=int(now))      # début des mesures en direct
-        rows = [r for r in live_all if int(r["ts"]) >= since]
-        notes: list[str] = []
-        used_bt = None
-        missing = max(0, cov - since)
-        if missing >= 86400:
-            # après une remise à zéro : seuls les backtests lancés depuis comptent (mêmes scénarios que le labo actuel)
-            run = next((r for r in db.bt_list(30) if r["status"] == "ok" and r["d_to"] >= since and r["d_from"] < cov
-                        and r["created"] >= reset_ts and r["kind"] != "opt"), None)     # pas les backtests de l'optimiseur
-            if run is not None:
-                used_bt = run
-                extra = [r for r in db.labo_since(since, f"bt_{run['id']}") if int(r["ts"]) < cov]
-                rows = extra + rows
-                start = max(since, int(run["d_from"]))
-                notes.append(f"📅 {bt.human_date(start)} → {bt.human_date(cov)} : <b>backtest #{run['id']}</b> (1 compte simulé) · "
-                             f"ensuite : mesures en direct")
-                missing = max(0, start - since)
-            else:
-                notes.append(f"📅 Mesures en direct depuis le {bt.human_date(cov)} seulement")
-        real = labo.compute_real(labo.rows_of(rows, "REEL"))
-        series = labo.rows_of(rows, "SERIE")
-        scen = labo.compute_scen(series)
-        short_brief = labo.brief(series, labo.real_slots(labo.rows_of(rows, "REEL")))
-        views = self.ctx.views()
-        cur = next((v.st.devise for v in views if v.st and v.st.devise), "")
-        inst = db.get(self.lab_acc) if self.lab_acc else None
-        if inst is None:
-            self.lab_acc = ""
-        scope = inst.label if inst is not None else f"tous les comptes ({len(views)})"
-        notes.append(self._labo_status(now, [inst] if inst is not None else db.list()))
-        if self.bt is not None and self.bt.busy():
-            r = self.bt.run
-            notes.append(f"⏳ Backtest #{r.rid} en cours : {bt.progress_frac(r.progress, r.d_from, r.d_to) * 100:.0f} % ({render.esc(r.stage)})")
-        text = render.labo_text(real, scen, self.lab_days, scope, cur, shown_reset, cfg.active, notes=notes, brief=short_brief)
-        kb: Keyboard = [
-            [(("• " if d == self.lab_days else "") + f"{d} j", f"d:lab:{d}") for d in self.LAB_DAYS],
-            [("👤 " + _cut(scope, 22) + " ▸", "d:laba")],
-        ]
-        if missing >= 86400 and not (self.bt is not None and self.bt.busy()):
-            day = (cov // 86400) * 86400
-            kb.append([(f"🧪 Compléter par backtest ({round(missing / 86400)} j)", f"d:btlab:{day}")])
-        elif used_bt is not None and not (self.bt is not None and self.bt.busy()):
-            day = (cov // 86400) * 86400                    # période déjà rejouée : la rejouer avec les réglages d'aujourd'hui
-            kb.append([(f"🔁 Rejouer avec mes réglages actuels ({round((cov - since) / 86400)} j)", f"d:btlab:{day}")])
-        kb += [
-            [("🧪 Tests rapides (1 bouton = 1 backtest)", "d:qt")],
-            [(f"🧬 Scénarios perso ({len(cfg.customs)})", "d:labs"), ("⏸ Pause" if cfg.active else "▶ Reprendre", "d:labp")],
-            [("♻️ Remise à zéro", "d:labr"), ("🔃 Actualiser", "d:lab")],
-            [("⬅ Rapports", "d:rpt"), ("🏠 Accueil", "d:home")],
-        ]
-        return self._with_flash(text), kb
-
-    def _render_bt_result(self, rid: int) -> tuple[str, Keyboard] | None:
-        from core import backtest as bt, labo
-        row = self.ctx.db.bt_get(rid)
-        res = bt.Result.from_json(row["result"]) if row is not None and row["result"] else None
-        if res is None:
-            return None
-        series = labo.rows_of(self.ctx.db.labo_since(0, f"bt_{rid}"), "SERIE")
-        scen = labo.compute_scen(series)
-        views = self.ctx.views()
-        cur = next((v.st.devise for v in views if v.st and v.st.devise), "")
-        prev = None
-        for r in self.ctx.db.bt_list(40):                    # backtest précédent (pour « ce qui a changé »)
-            if r["id"] < rid and r["status"] == "ok" and r["kind"] != "opt" and r["result"]:
-                pr = bt.Result.from_json(r["result"])
-                if pr is not None and pr.params:
-                    prev = (r["id"], pr.params)
-                    break
-        text = render.bt_result_text(rid, row["kind"], row["source"], row["model"], res, scen, cur,
-                                     max(0, (row["ended"] or 0) - row["created"]), brief=labo.brief(series, res.slots), prev=prev)
-        kb: Keyboard = [[("📈 Courbe du solde", f"d:btg:{rid}"), (f"🧬 Tous les scénarios ({len(scen)})", f"d:btra:{rid}")],
-                        [("🗂 Liste", "d:btl"), ("⬅ Backtest", "d:bt"), ("🏠 Accueil", "d:home")]]
-        return self._with_flash(text), kb
-
-    def _render_labo_list(self) -> tuple[str, Keyboard]:
-        from core import labo
-        cfg = labo.load_config(self.ctx.cfg.paths.common())
-        lines = ["🧬 <b>Scénarios perso du labo</b>",
-                 "Chaque scénario joue des séries virtuelles avec ses propres réglages de filtres, sur tous les comptes, "
-                 "en plus des 13 scénarios automatiques (réglages actuels, chaque filtre inversé, aucun filtre).",
-                 "<i>Un scénario créé ou modifié repart d'un compte virtuel neuf (solde réel du moment).</i>", ""]
-        kb: Keyboard = []
-        for c in cfg.customs:
-            detail = labo.auto_name(c.toks, c.opts)
-            lines.append(f"• <b>{render.esc(c.name)}</b>" + (f" : {render.esc(detail)}" if detail != c.name else ""))
-            kb.append([("✏️ " + _cut(c.name, 30), f"d:labe:{c.key}"), ("🗑", f"d:labd:{c.key}")])
-        if not cfg.customs:
-            lines.append("<i>Aucun scénario perso.</i>")
-        lines.append(f"\n<i>{len(cfg.customs)}/{labo.MAX_CUSTOM} scénarios perso.</i>")
-        kb.append([("📦 Remplacer par un thème (objectif, bougies, grille…)", "d:labth")])
-        row = [("⭐ Scénarios conseillés", "d:labk")]
-        if len(cfg.customs) < labo.MAX_CUSTOM:
-            row.append(("➕ Nouveau", "d:labn"))
-        kb.append(row)
-        kb.append([("⬅ Labo", "d:lab"), ("🏠 Accueil", "d:home")])
-        return self._with_flash("\n".join(lines)), kb
-
-    def _render_labo_pack(self) -> tuple[str, Keyboard]:
-        from core import labo
-        cfg = labo.load_config(self.ctx.cfg.paths.common())
-        names = {c.name for c in cfg.customs}
-        lines = ["⭐ <b>Scénarios conseillés</b>",
-                 "Mes meilleures hypothèses après le 02/11 (achat au sommet d'un rebond, grille trop serrée). "
-                 "Ce ne sont pas des certitudes : le labo et le backtest diront lesquels gagnent vraiment.", ""]
-        kb: Keyboard = []
-        for i, (name, toks, opts, why) in enumerate(labo.PACK):
-            have = name in names
-            lines.append(f"{'✅' if have else '▫️'} <b>{render.esc(name)}</b> : {render.esc(why)}")
-            if not have:
-                kb.append([(f"➕ {name}", f"d:labk:{i}")])
-        free = labo.MAX_CUSTOM - len(cfg.customs)
-        lines.append(f"\n<i>Places libres : {free}/{labo.MAX_CUSTOM}. Un scénario ajouté démarre d'un compte virtuel neuf ; "
-                     "pour juger tout de suite, lance un backtest (il joue aussi ces scénarios).</i>")
-        if any(n not in names for n, *_ in labo.PACK):
-            kb.append([("➕ Tout ajouter (remplace mes scénarios perso)", "d:labk:all")])
-        kb.append([("⬅ Scénarios", "d:labs"), ("🧪 Backtest", "d:bt")])
-        return self._with_flash("\n".join(lines)), kb
-
-    def _render_labo_edit(self) -> tuple[str, Keyboard]:
-        from core import labo
-        key, toks, opts = self.lab_edit
-        text = (f"🧬 <b>Scénario {key}</b>\n{render.esc(labo.auto_name(toks, opts))}\n\n"
-                "Touche un filtre pour changer son réglage dans ce scénario :\n"
-                "comme le compte → désactivé → activé → assoupli 10 / 20 / 30 / 50 % → durci 10 / 20 / 30 %\n"
-                "<i>Assoupli = plage ATR / volume plus large, corps de bougie plus petit, fenêtre de news plus courte, "
-                "spread / extension / ancienneté du signal plus grands. Durci = l'inverse.</i>")
-        kb: Keyboard = [[(f"{labo.LABELS[i]} : {labo.tok_text(t)}", f"d:labt:{i}")] for i, t in enumerate(toks)]
-        for k in ("g", "n", "x", "b", "o"):
-            kb.append([("⚙️ " + labo.opt_text(k, opts.get(k, "")), f"d:labo:{k}")])
-        kb.append([("💾 Enregistrer", "d:labv"), ("✖ Annuler", "d:labs")])
-        return self._with_flash(text), kb
-
     def _render_reports(self) -> tuple[str, Keyboard]:
         text = "📈 <b>Rapports</b>\n\nLe rapport quotidien arrive aussi tout seul chaque soir."
         kb: Keyboard = [
             [("📝 Rapport des 24 h", "d:rep"), ("📈 Courbe des soldes", "d:chart")],
             [("🕐 Stats par créneau", "d:sst"), ("📤 Export CSV", "d:exp")],
             [("🤖 Optimiseur automatique", "d:opt")],
-            [("🧪 Labo des filtres", "d:lab"), ("🧪 Backtest", "d:bt")],
             [("⬅ Accueil", "d:home")],
         ]
         return self._with_flash(text), kb
@@ -709,7 +496,7 @@ class Dashboard:
         if not force and self._covered_at is not None:
             if now - self._covered_at >= cfg.repost_s:                      # recouvert depuis 5 min : republié en bas
                 # republié en bas en revenant à l'accueil : un rapport (labo, backtest…) laissé ouvert n'est pas renvoyé tout seul
-                await self.bring_down(home=self.screen[0] in ("lab", "labs", "labk", "labth", "bt", "btl", "btr", "btra", "qt", "sst", "wdr", "opt"))
+                await self.bring_down(home=self.screen[0] in ("sst", "wdr", "opt"))
                 return "recreated"
             return "skip"                                                   # recouvert : plus d'éditions automatiques
         if not force and now - self._last_edit < cfg.refresh_s:

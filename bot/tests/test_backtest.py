@@ -1,15 +1,13 @@
-"""Backtest piloté depuis Telegram (EA 7.2.0) : fichiers du testeur, suivi, résultats, écrans et rapport quotidien."""
+"""Terminal de test de l'optimiseur (EA 7.2.0+) : fichiers du testeur, suivi, résultats, compte du testeur, rapport quotidien."""
 import json
 import time
 from pathlib import Path
 
 import pytest
 
-from bot import render
 from bot.reports import build_report
-from core import backtest as bt, labo
+from core import backtest as bt
 from mt5.backtester import BacktestManager, Run
-from storage.db import DEMARRE, Instance
 from tests.conftest import FakeProcs
 from tests.test_bot import _until, svc, write_statut  # noqa: F401  (fixture)
 
@@ -68,8 +66,6 @@ def test_resume_des_evenements_et_journal_mt5(tmp_path):
     log.mkdir(parents=True)
     (log / "20261102.log").write_bytes(b"\xff\xfe" + "KN\t0\t17:42:01.123\tTester\tXAUUSD,M5: history synchronization started\r\n".encode("utf-16-le"))
     assert bt.tail_log(tmp_path) == "Tester : XAUUSD,M5: history synchronization started"
-    txt = render.bt_result_text(5, "bt", "compte Alpha", "reel", r, bt.scenario_table(EVENTS), "EUR", 600)
-    assert "Gain net +430.00" in txt and "02:00 1/2" in txt and "Réglages actuels" in txt
 
 
 # ------------------------------------------------------------------ terminal de backtest (testeur simulé)
@@ -156,7 +152,7 @@ async def test_identifiants_refuses_et_test_sans_resultat(stack):
 
 # ------------------------------------------------------------------ écrans Telegram
 @pytest.mark.asyncio
-async def test_ecran_backtest_configuration_lancement_et_labo_complete(svc):  # noqa: F811
+async def test_terminal_de_test_configure_depuis_l_optimiseur(svc):  # noqa: F811
     ctx, sender, dash, router, notifier, ea, conf = svc
     tp = TesterProcs(ctx.cfg.paths.common())
     router.bt.procs = tp
@@ -165,8 +161,11 @@ async def test_ecran_backtest_configuration_lancement_et_labo_complete(svc):  # 
     folder.mkdir(parents=True, exist_ok=True)
     (folder / ctx.cfg.mt5.terminal_exe).write_bytes(b"MZ")
     await router.on_callback("d:rpt")
-    await router.on_callback("d:bt")
-    assert "à configurer" in dash.render()[0]
+    text, kb = dash.render()
+    assert not any(d in ("d:lab", "d:bt") for row in kb for _, d in row)          # plus de labo ni de backtest manuel
+    await router.on_callback("d:opt")
+    text, kb = dash.render()
+    assert "à configurer" in text and any(d == "d:btc" for row in kb for _, d in row)
     # assistant : login → serveur (bouton) → mot de passe (texte effacé par l'app)
     ctx.cfg.mt5.servers = ["Broker-Demo"]
     await router.on_callback("d:btc")
@@ -178,40 +177,12 @@ async def test_ecran_backtest_configuration_lancement_et_labo_complete(svc):  # 
     assert "mot de passe" in dash.render()[0]
     await router.on_text("pw")
     assert await _until(lambda: router.bt.configured(), 200)
-    assert any("Terminal de backtest prêt" in s[1] for s in sender.sent)
-    # réglages : période, date libre, modèle, source = preset
-    await router.on_callback("d:bt:182")
-    await router.on_callback("d:btd")
-    await router.on_text("32/13/2026")
-    assert dash.bt_days == 182
-    await router.on_callback("d:btm")
-    assert dash.bt_model == "m1"
-    dash.store.put("conseille", {"f_vol": "0", "lot": "0.01"})
-    while not dash.bt_src.startswith("preset:"):
-        await router.on_callback("d:bts")
-    assert "preset conseille" in dash.render()[0]
-    await router.on_callback("d:btgo")
-    assert await _until(lambda: any("Backtest #" in s[1] and "terminé" in s[1] for s in sender.sent), 200)
-    row = ctx.db.bt_list(1)[0]
-    assert row["status"] == "ok" and row["source"] == "preset conseille" and row["model"] == "m1"
-    assert bt.bt_files(ctx.cfg.paths.common(), row["id"])["params"].exists() is False
-    await router.on_callback("d:btl")
-    assert f"#{row['id']}" in dash.render()[0]
-    await router.on_callback(f"d:btr:{row['id']}")
-    assert "Gain net" in dash.render()[0]
-    # labo sur 30 j : complété par le backtest (période antérieure aux mesures en direct)
-    ctx.db.add_instance(Instance("7_b", 7, "b", "Bravo", str(ctx.cfg.paths.instances / "7_b"), 1, "7.2.0", DEMARRE))
-    now = int(time.time())
-    ctx.db.bt_update(row["id"], "ok", ctx.db.bt_get(row["id"])["result"])
-    with ctx.db._lock:
-        ctx.db._cx.execute("UPDATE backtests SET d_from=?, d_to=? WHERE id=?", (now - 30 * 86400, now - 86400, row["id"]))
-        ctx.db._cx.execute("UPDATE labo SET ts=? WHERE iid=?", (now - 10 * 86400, f"bt_{row['id']}"))
-        ctx.db._cx.commit()
-    ctx.db.add_labo("7_b", now - 3600, "SERIE", "miroir", json.dumps({"sc": "miroir", "res": "atteint", "profit": 1.0}))
-    await router.on_callback("d:lab:30")
-    text, kb = dash.render()
-    assert f"backtest #{row['id']}" in text and "2 obj" in text            # 1 objectif virtuel en direct + 1 du backtest
-    assert "Labo en direct" in text
+    assert any("Terminal de test prêt" in s[1] for s in sender.sent)
+    assert dash.screen[0] == "opt" and "compte 123456" in dash.render()[0]
+    # anciens boutons (messages déjà envoyés) : sans effet
+    for old in ("d:lab", "d:bt", "d:qt", "d:btgo", "d:labr"):
+        await router.on_callback(old)
+    assert ctx.db.bt_list(1) == [] or ctx.db.bt_list(1)[0]["kind"] == "setup"
 
 
 # ------------------------------------------------------------------ rapport quotidien
@@ -229,71 +200,6 @@ def test_rapport_quotidien_essentiel(svc):  # noqa: F811
     rep = build_report(ctx, now - 86400, title="📝 Rapport quotidien")
     assert "Capital : 140.00 EUR" in rep and "1 atteints sur 2" in rep and "1 manqués" in rep
     assert "Par compte" in rep and "🎯 1/2" in rep and "Performance par compte" not in rep
-
-
-@pytest.mark.asyncio
-async def test_tests_rapides_un_bouton_scenarios_et_backtest(svc):  # noqa: F811
-    ctx, sender, dash, router, notifier, ea, conf = svc
-    tp = TesterProcs(ctx.cfg.paths.common())
-    router.bt.procs = tp
-    ctx.cfg.backtest.poll_s = 0.01
-    folder = router.bt.folder
-    folder.mkdir(parents=True, exist_ok=True)
-    (folder / ctx.cfg.mt5.terminal_exe).write_bytes(b"MZ")
-    await router.on_callback("d:qt")
-    assert "configure" in dash.render()[0].lower()
-    ctx.db.meta_set("bt_account", json.dumps({"login": 1, "server": "S"}))
-    await router.on_callback("d:qtd:7")
-    text, kb = dash.render()
-    assert "Bougies après le croisement" in text and any(d == "d:qtgo:bougies" for row in kb for _, d in row)
-    dash.bt_src = "base"
-    await router.on_callback("d:qtgo:bougies")
-    cfg = labo.load_config(ctx.cfg.paths.common())
-    assert [c.opts.get("b") for c in cfg.customs] == ["6", "12", "24", "6", "12", "24", "36"]
-    assert all(c.toks[labo.CODES.index("fresh")] == "on" for c in cfg.customs)
-    line = (ctx.cfg.paths.common() / labo.SCEN_FILE).read_text(encoding="utf-8")
-    assert "b=6;" not in line and "|n=3;b=6" in line or "|b=6" in line
-    assert await _until(lambda: any("Backtest #" in s[1] and "terminé" in s[1] for s in sender.sent), 200)
-    row = ctx.db.bt_list(1)[0]
-    assert row["source"].startswith("⏱ Bougies après le croisement") and row["d_to"] - row["d_from"] == 7 * 86400
-    await router.on_callback("d:qtgo:filtres")                       # thème sans scénario perso : seulement les 13 automatiques
-    assert labo.load_config(ctx.cfg.paths.common()).customs == []
-
-
-@pytest.mark.asyncio
-async def test_labo_complete_par_backtest_meme_apres_remise_a_zero(svc):  # noqa: F811
-    ctx, sender, dash, router, notifier, ea, conf = svc
-    now = int(time.time())
-    cfg = labo.load_config(ctx.cfg.paths.common())
-    cfg.reset = str(now - 3600)
-    labo.save_config(ctx.cfg.paths.common(), cfg)
-    old = ctx.db.bt_create("bt", now - 30 * 86400, now - 86400, "reel", "avant")       # lancé AVANT la remise à zéro
-    ctx.db.bt_update(old, "ok", "")
-    with ctx.db._lock:
-        ctx.db._cx.execute("UPDATE backtests SET created=? WHERE id=?", (now - 7200, old))
-        ctx.db._cx.commit()
-    ctx.db.add_labo(f"bt_{old}", now - 5 * 86400, "SERIE", "miroir", json.dumps({"sc": "miroir", "res": "atteint", "profit": 1}))
-    await router.on_callback("d:lab:30")
-    text, kb = dash.render()
-    assert any(d.startswith("d:btlab:") for row in kb for _, d in row)      # bouton toujours là
-    assert f"backtest #{old}" not in text                                    # ancien backtest ignoré
-    new = ctx.db.bt_create("bt", now - 30 * 86400, now - 86400, "reel", "après")
-    ctx.db.bt_update(new, "ok", "")
-    ctx.db.add_labo(f"bt_{new}", now - 5 * 86400, "SERIE", "miroir", json.dumps({"sc": "miroir", "res": "atteint", "profit": 1}))
-    await router.on_callback("d:lab:30")
-    assert f"backtest #{new}" in dash.render()[0]
-
-
-@pytest.mark.asyncio
-async def test_labo_rejouer_la_periode_avec_les_reglages_actuels(svc):  # noqa: F811
-    ctx, sender, dash, router, notifier, ea, conf = svc
-    now = int(time.time())
-    rid = ctx.db.bt_create("bt", now - 30 * 86400, now, "reel", "anciens réglages")
-    ctx.db.bt_update(rid, "ok", "")
-    ctx.db.add_labo(f"bt_{rid}", now - 5 * 86400, "SERIE", "miroir", json.dumps({"sc": "miroir", "res": "atteint", "profit": 1}))
-    await router.on_callback("d:lab:30")
-    kb = dash.render()[1]
-    assert any("Rejouer avec mes réglages actuels" in t and d.startswith("d:btlab:") for row in kb for t, d in row)
 
 
 @pytest.mark.asyncio
