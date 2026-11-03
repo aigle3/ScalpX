@@ -454,9 +454,11 @@ def brief(rows: list[dict], slots: dict | None = None) -> list[str]:
         hv = [verdict(h[s.key], h["miroir"]).icon if s.key in h and "miroir" in h else "⏳" for h in halves]
         stable = v.icon in SURE and all(i == v.icon for i in hv)
         gain = f"{s.net - ref.net:+.2f}"
-        if s.lost < ref.lost and s.net >= ref.net:            # évite des comptes perdus : passe avant tout (événements rares)
+        if s.lost == 0 < ref.lost and s.net >= ref.net:       # aucun compte perdu là où les réglages actuels en perdent
             saves.append((ref.lost - s.lost, s.net - ref.net,
                           f"{_action(s)} (💀 {s.lost} au lieu de {ref.lost}, {gain}, DD {s.dd_max:.0f} %)"))
+        elif s.lost > 0 and s.lost < ref.lost:                 # moins de pertes, mais en perd encore : pas une solution
+            unsure.append(f"{s.name or s.key} (💀 {s.lost} au lieu de {ref.lost} : perd encore le compte)")
         elif v.icon == "🟢" and stable and s.lost == 0:
             sure_change.append((s.net - ref.net, f"{_action(s)} ({gain}, ✅ {s.won - ref.won:+d}, DD {s.dd_max:.0f} %)"))
         elif v.icon == "🛡️":                                 # pertes / drawdown : événements rares, pas de test des moitiés

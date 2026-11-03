@@ -241,7 +241,7 @@ def test_en_bref_les_comptes_perdus_passent_avant_tout():
     b = "\n".join(labo.brief(rows))
     assert "perdent le compte 3 fois" in b
     assert "Évitent les pertes" in b and "🧱 Grille large (💀 0 au lieu de 3" in b
-    assert "désactiver Signal récent" in b and "Changements fiables" not in b      # 💀 2 < 3 : évite 1 perte, pas « fiable »
+    assert "Sans Signal récent (💀 2 au lieu de 3 : perd encore le compte)" in b and "Changements fiables" not in b
 
 
 @pytest.mark.asyncio
@@ -255,3 +255,15 @@ async def test_labo_laisse_ouvert_pas_renvoye_tout_seul(svc):  # noqa: F811
     dash._covered_at = time.time() - 1
     assert await dash.refresh() == "recreated"
     assert dash.screen == ("dash",) and "Labo des filtres" not in sender.sent[-1][1]
+
+
+def test_en_bref_un_scenario_qui_perd_encore_le_compte_n_est_pas_une_solution():
+    rows = []
+    for k in range(20):
+        t = 1_760_000_000 + k * 3600
+        rows.append({"sc": "miroir", "nom": "Réglages actuels", "res": "liquide" if k in (3, 12) else "atteint",
+                     "profit": -150 if k in (3, 12) else 0.6, "dd": 100, "fin": t, "entree_s": 10})
+        rows.append({"sc": "aucun", "nom": "Aucun filtre", "res": "liquide" if k == 3 else "atteint",
+                     "profit": -150 if k == 3 else 5, "dd": 101, "fin": t, "entree_s": 10})
+    b = "\n".join(labo.brief(rows))
+    assert "Évitent les pertes" not in b and "Aucun filtre (💀 1 au lieu de 2 : perd encore le compte)" in b
