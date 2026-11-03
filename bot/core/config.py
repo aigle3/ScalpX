@@ -111,6 +111,7 @@ class Backtest(BaseModel):
     stall_min: int = 30                    # aucun progrès (journal MT5 ni avancement) pendant N min : test arrêté
     setup_stall_min: int = 5               # configuration du compte : abandon plus rapide
     poll_s: float = 4.0                    # lecture de l'avancement du testeur (le message Telegram est édité au plus toutes les 5 s)
+    low_priority: bool = True              # testeur en priorité basse : les terminaux réels passent toujours avant
 
 
 class Config(BaseModel):

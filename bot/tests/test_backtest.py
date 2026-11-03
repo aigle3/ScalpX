@@ -294,3 +294,15 @@ async def test_labo_rejouer_la_periode_avec_les_reglages_actuels(svc):  # noqa: 
     await router.on_callback("d:lab:30")
     kb = dash.render()[1]
     assert any("Rejouer avec mes réglages actuels" in t and d.startswith("d:btlab:") for row in kb for t, d in row)
+
+
+@pytest.mark.asyncio
+async def test_testeur_en_priorite_basse(stack):
+    cfg, db, *_ = stack
+    tp = TesterProcs(cfg.paths.common())
+    lowered = []
+    tp.lower_priority = lambda exe: lowered.append(Path(exe).name) or 1
+    m = _mgr(cfg, db, tp)
+    db.meta_set("bt_account", json.dumps({"login": 1, "server": "S"}))
+    run = await m.execute(Run(11, "bt", 0, 86400, "m1", "x"), params={}, deposit=125, currency="EUR", leverage=100, poll_s=0.01)
+    assert run.ok and "metatester64.exe" in lowered and any("priorité basse" in t for _, t in run.log)

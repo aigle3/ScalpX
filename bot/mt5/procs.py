@@ -75,6 +75,20 @@ class PsutilProcesses:
     def _invalidate(self) -> None:
         self._running_at = 0.0
 
+    def lower_priority(self, exe: Path) -> int:
+        """Priorité « basse » (inactivité) pour les processus de cet exécutable : le testeur ne prend que le processeur
+        laissé libre par les terminaux réels. Renvoie le nombre de processus abaissés."""
+        cls = getattr(psutil, "IDLE_PRIORITY_CLASS", 19)
+        n = 0
+        for p in self.find(exe):
+            try:
+                if p.nice() != cls:
+                    p.nice(cls)
+                    n += 1
+            except (psutil.Error, OSError):
+                continue
+        return n
+
     def find(self, exe: Path) -> list[psutil.Process]:
         target = norm_path(exe)
         names = {Path(exe).name.lower()}
