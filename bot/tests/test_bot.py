@@ -1543,3 +1543,20 @@ async def test_coupures_par_boutons_sur_un_compte(svc):
         assert "existe déjà" in dash.render()[0]
     finally:
         await ea.stop()
+
+
+@pytest.mark.asyncio
+async def test_deployer_base_pas_encore_compilee(svc):
+    """Sources de BASE (v7.4.1) plus récentes que le .ex5 : pas de « Tous les comptes sont à jour », bouton 🔨 Compiler."""
+    import os
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    seed(ctx_stack(svc), 71, "Demo-Server 1", running=False)
+    ex = ctx.cfg.paths.base / "MQL5" / "Experts"
+    (ex / ctx.cfg.mt5.ea_file).write_text("7.4.0")
+    old = time.time() - 600
+    os.utime(ex / ctx.cfg.mt5.ea_file, (old, old))
+    (ex / "SX_Core.mqh").write_text('#define SX_VERSION   "7.4.1"\n')
+    await router.cmd_deployer()
+    text, kb = sender.sent[-1][1], sender.sent[-1][2]
+    assert "pas encore compilée en v7.4.1" in text and "Tous les comptes sont à jour" not in text
+    assert "d:bld" in [d for row in kb for _, d in row]

@@ -1309,6 +1309,14 @@ class Router:
             lines.append(f"{'⬆' if v.inst.id in plan.targets else '✅'} {esc(v.inst.label)} : v{esc(cur or '?')}")
         if plan.inputs_note:
             lines.append("\n" + esc(plan.inputs_note))
+        from mt5 import build as buildmod
+        if buildmod.sources_newer_than_ex5(self.ctx.cfg):   # sources de BASE plus récentes que le .ex5 : pas encore compilé
+            lines.append(f"\n⚠️ <b>BASE n'est pas encore compilée en v{esc(plan.base_version or '?')}</b> : les comptes ont déjà "
+                         "le dernier .ex5 de BASE, mais c'est l'ancienne version."
+                         + ("\n⏳ Compilation en cours…" if self.building else "\nLance la compilation, puis le déploiement sera proposé."))
+            kb0: Keyboard = [] if self.building else [[("🔨 Compiler l'EA maintenant", "d:bld")]]
+            await self.sender.send(self.chat_id, "\n".join(lines), kb0 + [[("✖ Fermer", "dep:close")]], False)
+            return
         if not plan.targets:
             lines.append("\nTous les comptes sont à jour.")
             await self.sender.send(self.chat_id, "\n".join(lines), None, True)
