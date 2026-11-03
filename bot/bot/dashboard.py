@@ -462,7 +462,7 @@ class Dashboard:
                 "<i>Assoupli = plage ATR / volume plus large, corps de bougie plus petit, fenêtre de news plus courte, "
                 "spread / extension / ancienneté du signal plus grands. Durci = l'inverse.</i>")
         kb: Keyboard = [[(f"{labo.LABELS[i]} : {labo.tok_text(t)}", f"d:labt:{i}")] for i, t in enumerate(toks)]
-        for k in ("g", "n", "x"):
+        for k in ("g", "n", "x", "b", "o"):
             kb.append([("⚙️ " + labo.opt_text(k, opts.get(k, "")), f"d:labo:{k}")])
         kb.append([("💾 Enregistrer", "d:labv"), ("✖ Annuler", "d:labs")])
         return self._with_flash(text), kb
