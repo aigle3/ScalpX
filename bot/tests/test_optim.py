@@ -137,3 +137,27 @@ def test_heure_de_lancement(svc):  # noqa: F811
     o.set_on(False)
     ctx.db.meta_set("opt_day", "")
     assert not o.due()
+
+
+def test_securite_echelle_plancher_et_pertes_comprises():
+    vs = optim.variants(P, "securite")
+    names = [v.name for v in vs]
+    assert names[0] == "Multiplicateur de lot 1,15 ×" and "Ordres en attente max 5" in names
+    assert any(v.changes.keys() == {"lotmult", "maxpend"} for v in vs) and len(vs) <= 19
+    assert all(float(v.changes["lotmult"][1]) >= 1.0 for v in vs if "lotmult" in v.changes)
+    d_to = 1_765_000_000
+    # compte perdu il y a 50 jours (hors des 30 derniers) : réglages dangereux, gain positif sur 30 j
+    old_loss = [{"sc": "miroir", "nom": "miroir", "res": "liquide", "profit": -100, "dd": 99, "fin": d_to - 50 * 86400, "entree_s": 5}]
+    # p1 sûre mais ne garde que 60 % du gain → refusée ; p2 sûre et 90 % → prise
+    d = optim.decide(_rows(d_to, {"miroir": 1.0, "p1": 0.6, "p2": 0.9}) + old_loss, vs, d_to)
+    assert d.change is not None and d.change.key == "p2" and "90 % du gain gardé" in d.reason and "pertes comprises" in d.reason
+    d = optim.decide(_rows(d_to, {"miroir": 1.0, "p1": 0.6}) + old_loss, vs, d_to)
+    assert d.change is None and "trop prudent" in d.note
+
+
+@pytest.mark.asyncio
+async def test_nuit_de_securite_apres_une_nuit_dangereuse(svc):  # noqa: F811
+    ctx, sender, dash, router, *_ = svc
+    o = router.optim
+    ctx.db.meta_set("opt_safety", "1")
+    assert o.safety_next and "Sécurité" in o.status_text()

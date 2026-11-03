@@ -20,6 +20,7 @@ DD_LIMIT = 90.0                     # drawdown (%) au-delà duquel une variante 
 CHOOSE_DAYS = 30                    # période de choix (marché récent)
 SAFETY_DAYS = 60                    # période de sécurité (aucun compte perdu)
 MIN_GOALS = 10                      # objectifs minimum sur 30 j pour décider
+PROFIT_FLOOR = 0.8                  # réglages dangereux : une variante sûre doit garder au moins 80 % du gain sur 30 j
 
 # clé de l'EA → (libellé, pas, minimum, maximum, option du labo, unité affichée)
 NUM: dict[str, tuple[str, float, float, float, str, str]] = {
@@ -40,6 +41,12 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ("objectif", "🎯 Objectif et signal récent", ["sl_pct", "freshbars"]),
     ("filtres", "🛡️ Filtres", []),
 ]
+# nuit 🛟 Sécurité : hors rotation, lancée après une nuit où les réglages actuels perdent le compte (ou frôlent la perte)
+SAFETY = ("securite", "🛟 Sécurité", ["lotmult", "maxpend", "gridatr"])
+
+
+def group_title(key: str) -> str:
+    return SAFETY[1] if key == SAFETY[0] else next((t for k, t, _ in GROUPS if k == key), key)
 
 
 def fnum(v: float) -> str:
@@ -110,6 +117,8 @@ def _raw(key: str, v: float) -> str:
 def variants(params: dict[str, str], group: str) -> list[Variant]:
     """Variantes de la nuit. Réglages numériques : chacun à −1 et +1 cran, PUIS les combinaisons de deux réglages
     (±1 cran chacun), testées ensemble dans le même backtest ; filtres : chacun inversé."""
+    if group == SAFETY[0]:
+        return safety_variants(params)
     g = next((x for x in GROUPS if x[0] == group), None)
     if g is None:
         return []
@@ -175,6 +184,48 @@ def variants(params: dict[str, str], group: str) -> list[Variant]:
     return out[:19]
 
 
+def safety_variants(params: dict[str, str]) -> list[Variant]:
+    """Échelle de prudence (du plus léger au plus fort) : lot moins multiplié, moins d'ordres, grille plus large,
+    et leurs combinaisons légères. L'optimiseur prendra la plus RENTABLE des variantes sûres."""
+    vals: dict[str, list[str]] = {}
+    try:
+        lm = float(params.get("lotmult", ""))
+        vals["lotmult"] = [_raw("lotmult", round(v, 2)) for v in (lm - 0.05, lm - 0.1, lm - 0.15) if v >= 1.0 - 1e-9]
+    except ValueError:
+        pass
+    try:
+        mp = int(float(params.get("maxpend", "")))
+        vals["maxpend"] = [str(v) for v in (mp - 1, mp - 2, mp - 3) if v >= NUM["maxpend"][2]]
+    except ValueError:
+        pass
+    if params.get("dyngrid", "1") == "1":
+        try:
+            ga = float(params.get("gridatr", ""))
+            vals["gridatr"] = [_raw("gridatr", v) for v in sorted({round(min(NUM["gridatr"][3], ga * f), 1) for f in (1.25, 1.5)}) if v > ga]
+        except ValueError:
+            pass
+    vals = {k: v for k, v in vals.items() if v}
+    out: list[Variant] = []
+
+    def add(ch: dict[str, str]) -> None:
+        name = " + ".join(f"{SHORT[k]} {fnum(float(r))}{NUM[k][5]}" for k, r in ch.items()) if len(ch) > 1 else \
+            f"{NUM[next(iter(ch))][0]} {fnum(float(next(iter(ch.values()))))}{NUM[next(iter(ch))][5]}"
+        out.append(Variant("", name, {k: (params[k], r) for k, r in ch.items()}, ["="] * len(labo.CODES),
+                           {NUM[k][4]: r for k, r in ch.items()}))
+    for k, lst in vals.items():
+        for r in lst:
+            add({k: r})
+    keys = list(vals)
+    for i, k1 in enumerate(keys):                          # combinaisons légères : premier cran de chaque
+        for k2 in keys[i + 1:]:
+            add({k1: vals[k1][0], k2: vals[k2][0]})
+    if len(keys) >= 2 and len(vals[keys[0]]) > 1 and len(vals[keys[1]]) > 1:
+        add({keys[0]: vals[keys[0]][1], keys[1]: vals[keys[1]][1]})
+    for n, v in enumerate(out[:19], 1):
+        v.key = f"p{n}"
+    return out[:19]
+
+
 def scenario_file(vs: list[Variant]) -> str:
     """Fichier de scénarios du backtest de l'optimiseur : réglages actuels + variantes, sans les scénarios automatiques."""
     return "# ScalpX : scénarios de l'optimiseur (backtest)\nauto=0\nactif=1\n" + "".join(v.line() + "\n" for v in vs)
@@ -235,26 +286,46 @@ def decide(rows: list[dict], vs: list[Variant], d_to: int) -> Decision:
     dec.table.append(ref)
     dec.ref_unsafe = not ref.safe
     sig = max(2.0, 0.05 * abs(ref.net30))
+    floor = PROFIT_FLOOR * ref.net30 if ref.net30 > 0 else ref.net30 - sig
     best: tuple[float, Variant, Row] | None = None
+    safe_but_poor = 0
     for v in vs:
         r = row(v.name, s30.get(v.key), s60.get(v.key))
         dec.table.append(r)
         if not r.safe or r.n30 == 0:
             continue
-        if not dec.ref_unsafe and not (r.net30 >= ref.net30 + sig and r.net60 >= ref.net60 - sig):
-            continue
-        if best is None or r.net30 > best[0]:
-            best = (r.net30, v, r)
+        if dec.ref_unsafe:
+            # réglages dangereux : la plus rentable des variantes SÛRES, sur 60 j (pertes de compte comprises dans le net),
+            # à condition de garder au moins 80 % du gain sur 30 j (pas de « trop prudent »)
+            if r.net30 < floor:
+                safe_but_poor += 1
+                continue
+            score = r.net60
+        else:
+            if not (r.net30 >= ref.net30 + sig and r.net60 >= ref.net60 - sig):
+                continue
+            score = r.net30
+        if best is None or score > best[0]:
+            best = (score, v, r)
     if best is None:
-        dec.note = ("⚠️ tes réglages actuels perdent le compte ou frôlent la perte sur 60 jours, et aucune variante testée "
-                    "cette nuit n'est sûre" if dec.ref_unsafe else "aucune variante nettement meilleure et sûre : rien n'est changé")
+        if dec.ref_unsafe and safe_but_poor:
+            dec.note = (f"⚠️ tes réglages actuels perdent le compte ou frôlent la perte sur {SAFETY_DAYS} jours ; {safe_but_poor} "
+                        f"variante(s) sûre(s) trouvée(s), mais elles gagnent moins de {PROFIT_FLOOR * 100:.0f} % de ton gain sur {CHOOSE_DAYS} jours : "
+                        "rien n'est changé (trop prudent)")
+        elif dec.ref_unsafe:
+            dec.note = (f"⚠️ tes réglages actuels perdent le compte ou frôlent la perte sur {SAFETY_DAYS} jours, et aucune variante "
+                        "testée cette nuit n'est sûre")
+        else:
+            dec.note = "aucune variante nettement meilleure et sûre : rien n'est changé"
         return dec
     _, v, r = best
     dec.change = v
-    why = (f"{r.net30 - ref.net30:+.2f} € sur {CHOOSE_DAYS} j (✅ {r.won30 - ref.won30:+d} objectifs), "
-           f"aucun compte perdu sur {SAFETY_DAYS} j, drawdown max {r.dd60:.0f} %")
     if dec.ref_unsafe:
-        why = (f"tes réglages actuels {'perdent le compte' if ref.lost60 else 'frôlent la perte du compte'} sur {SAFETY_DAYS} j "
-               f"(💀 {ref.lost60}, DD {ref.dd60:.0f} %) ; cette variante est sûre : " + why)
-    dec.reason = why
+        keep = f"{r.net30 / ref.net30 * 100:.0f} % du gain gardé sur {CHOOSE_DAYS} j" if ref.net30 > 0 else f"{r.net30 - ref.net30:+.2f} € sur {CHOOSE_DAYS} j"
+        dec.reason = (f"tes réglages actuels {'perdent le compte' if ref.lost60 else 'frôlent la perte du compte'} sur {SAFETY_DAYS} j "
+                      f"(💀 {ref.lost60}, DD {ref.dd60:.0f} %) ; cette variante ne le perd jamais (DD {r.dd60:.0f} %), "
+                      f"{keep}, {r.net60 - ref.net60:+.2f} € sur {SAFETY_DAYS} j pertes comprises")
+    else:
+        dec.reason = (f"{r.net30 - ref.net30:+.2f} € sur {CHOOSE_DAYS} j (✅ {r.won30 - ref.won30:+d} objectifs), "
+                      f"aucun compte perdu sur {SAFETY_DAYS} j, drawdown max {r.dd60:.0f} %")
     return dec
