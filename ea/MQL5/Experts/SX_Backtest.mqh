@@ -96,7 +96,12 @@ void BtLiveTick()
    if(!g_archiOn) return;
    static ulong last = 0;
    ulong now = SxRealMs();
-   if(last != 0 && now - last < 3600000) return;
+   if(last == 0)                                     // 7.4.1 : premier contrôle 5 à 60 min après le démarrage, décalé par compte
+   {                                                 // (après une mise à jour, les EA ne lisent pas tous le calendrier en même temps)
+      last = now - 3600000 + 300000 + (ulong)(AccountInfoInteger(ACCOUNT_LOGIN) % 55) * 60000;
+      return;
+   }
+   if(now - last < 3600000) return;
    last = now;
    long mod = FileGetInteger(BtCalFile(), FILE_MODIFY_DATE, true);
    if(mod > 0 && TimeLocal() - (datetime)mod < 20 * 3600) return;

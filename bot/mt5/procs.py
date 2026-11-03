@@ -75,6 +75,20 @@ class PsutilProcesses:
     def _invalidate(self) -> None:
         self._running_at = 0.0
 
+    def lower_priority(self, exe: Path) -> int:
+        """Priorité « basse » (inactivité) pour les processus de cet exécutable : le testeur ne prend que le processeur
+        laissé libre par les terminaux réels. Renvoie le nombre de processus abaissés."""
+        cls = getattr(psutil, "IDLE_PRIORITY_CLASS", 19)
+        n = 0
+        for p in self.find(exe):
+            try:
+                if p.nice() != cls:
+                    p.nice(cls)
+                    n += 1
+            except (psutil.Error, OSError):
+                continue
+        return n
+
     def find(self, exe: Path) -> list[psutil.Process]:
         target = norm_path(exe)
         names = {Path(exe).name.lower()}
@@ -116,6 +130,13 @@ class PsutilProcesses:
         opts = self.window_opts if settle else replace(self.window_opts, settle_s=0, timeout_s=5)
         pids = lambda: {p.pid for p in self.find(exe)} | ({extra_pid} if extra_pid else set())   # noqa: E731
         arrange_in_background(self.win_api, pids, opts, Path(exe).parent.name)
+
+    def ensure_minimized(self, exe: Path) -> str:
+        """Contrôle périodique de la fenêtre de ce terminal (voir window.ensure_arranged)."""
+        if self.window_opts is None or self.win_api is None:
+            return ""
+        from .window import ensure_arranged
+        return ensure_arranged(self.win_api, lambda: {p.pid for p in self.find(exe)}, self.window_opts, Path(exe).parent.name)
 
     def kill(self, exe: Path) -> int:
         """Termine tous les processus de CET exécutable ; renvoie le nombre tué."""

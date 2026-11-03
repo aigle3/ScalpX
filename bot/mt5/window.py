@@ -26,7 +26,7 @@ class WindowOptions:
     hide_panels: bool = True
     maximize_chart: bool = True
     settle_s: float = 10.0                            # attente après l'apparition de la fenêtre (graphique et EA chargés)
-    timeout_s: float = 120.0
+    timeout_s: float = 300.0                          # VPS chargé : MT5 peut mettre plusieurs minutes à ouvrir sa fenêtre
 
 
 class WinAPI(Protocol):
@@ -67,6 +67,27 @@ def arrange(api: WinAPI, pids: Callable[[], set[int]], opts: WindowOptions,
         api.minimize(hwnd)
         done["minimized"] = True
     return done
+
+
+def ensure_arranged(api: WinAPI, pids: Callable[[], set[int]], opts: WindowOptions, name: str) -> str:
+    """Contrôle périodique : fenêtre jamais rangée (introuvable au lancement) → rangement complet ; fenêtre ouverte
+    (restaurée ou jamais réduite) → réduite. Renvoie "arrange", "minimize" ou ""."""
+    if not opts.minimize or api is None:
+        return ""
+    hwnd = api.main_window(pids())
+    if hwnd is None:
+        return ""
+    last = LAST.get(name)
+    if last is None or not last[1].get("window"):
+        res = arrange(api, pids, opts, wait_window=False)
+        LAST[name] = (time.time(), res)
+        log.info("fenêtre %s : rangée au contrôle périodique %s", name, res)
+        return "arrange"
+    if hasattr(api, "is_minimized") and not api.is_minimized(hwnd):
+        api.minimize(hwnd)
+        log.info("fenêtre %s : réduite (elle était ouverte)", name)
+        return "minimize"
+    return ""
 
 
 def arrange_in_background(api: WinAPI | None, pids: Callable[[], set[int]], opts: WindowOptions, name: str) -> None:
@@ -124,6 +145,7 @@ class Win32(WinAPI):
         u.GetMenuState.argtypes = [w.HMENU, w.UINT, w.UINT]
         u.GetMenuState.restype = w.UINT
         u.GetMenuStringW.argtypes = [w.HMENU, w.UINT, w.LPWSTR, ctypes.c_int, w.UINT]
+        u.IsIconic.argtypes = [w.HWND]
 
     def main_window(self, pids: set[int]) -> int | None:
         best: list = [None, 0]
@@ -264,6 +286,9 @@ class Win32(WinAPI):
 
     def minimize(self, hwnd: int) -> None:
         self.u.ShowWindow(hwnd, self.SW_SHOWMINNOACTIVE)
+
+    def is_minimized(self, hwnd: int) -> bool:
+        return bool(self.u.IsIconic(hwnd))
 
 
 def default_api() -> WinAPI | None:

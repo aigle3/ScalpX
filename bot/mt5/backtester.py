@@ -215,6 +215,16 @@ class BacktestManager:
                 return
             running = self.is_running()
             seen_proc = seen_proc or running
+            if running and self.cfg.backtest.low_priority and hasattr(self.procs, "lower_priority"):
+                n = 0
+                for name in (self.cfg.mt5.terminal_exe, "metatester64.exe"):
+                    try:
+                        n += await asyncio.to_thread(self.procs.lower_priority, self.folder / name)
+                    except Exception:
+                        log.exception("backtest : priorité de %s", name)
+                if n and not getattr(run, "_low_noted", False):
+                    run._low_noted = True
+                    run.note("🐢 Testeur en priorité basse : les comptes réels gardent la main sur le processeur")
             p = bt.read_json(files["progress"])
             line = await asyncio.to_thread(bt.tail_log, self.folder)
             if p is not None:

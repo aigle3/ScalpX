@@ -34,6 +34,7 @@ class MT5(BaseModel):
     period: str = "M5"
     profile: str = "Default"               # profil de graphiques MT5 que le bot VIDE dans chaque terminal avant le lancement (évite EURUSD, GBPUSD…)
     minimize: bool = True                  # fenêtre MT5 réduite après chaque ouverture (moins de CPU/RAM)
+    minimize_check_s: int = 300            # contrôle périodique : fenêtres ouvertes de nouveau réduites (0 = jamais)
     hide_panels: bool = True               # boîte à outils, navigateur et observation du marché masqués
     maximize_chart: bool = True            # graphique agrandi dans la fenêtre MT5
     default_server: str = ""
@@ -111,6 +112,7 @@ class Backtest(BaseModel):
     stall_min: int = 30                    # aucun progrès (journal MT5 ni avancement) pendant N min : test arrêté
     setup_stall_min: int = 5               # configuration du compte : abandon plus rapide
     poll_s: float = 4.0                    # lecture de l'avancement du testeur (le message Telegram est édité au plus toutes les 5 s)
+    low_priority: bool = True              # testeur en priorité basse : les terminaux réels passent toujours avant
 
 
 class Config(BaseModel):
