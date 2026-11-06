@@ -54,7 +54,10 @@ def test_statut_json_tolerant_champs_inconnus(tmp_path: Path):
 
 def test_progress_et_retrait():
     s = Statut(solde=300, solde_plus_flottant_ea=400, seuil_arret=500, seuil_reprise=125, etat="ACTIF")
-    assert abs(s.progress500() - 0.8) < 1e-9 and s.to_retire() == 0
+    assert abs(s.progress500() - (400 - 125) / (500 - 125)) < 1e-9 and s.to_retire() == 0
+    s3 = Statut(solde_plus_flottant_ea=206.19, seuil_arret=500, seuil_reprise=200)
+    assert abs(s3.progress500() - 6.19 / 300) < 1e-9          # 200 = 0 %, 500 = 100 %
+    assert Statut(solde_plus_flottant_ea=150, seuil_arret=500, seuil_reprise=200).progress500() == 0.0
     s2 = Statut(solde=503.2, etat="ARRET_500", seuil_reprise=125)
     assert abs(s2.to_retire() - 378.2) < 1e-9
 

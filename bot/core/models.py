@@ -101,10 +101,13 @@ class Statut(BaseModel):
         return self.pl_jour - (self.equity - self.solde)
 
     def progress500(self) -> float:
-        """Progression vers le seuil d'arrêt sur solde + flottant EA (0..1+)."""
-        if self.seuil_arret <= 0:
+        """Progression du seuil de reprise (minimum de trading = 0 %) au seuil d'arrêt (= 100 %),
+        sur solde + flottant EA (0..1+)."""
+        lo = self.seuil_reprise if 0 < self.seuil_reprise < self.seuil_arret else 0.0
+        span = self.seuil_arret - lo
+        if span <= 0:
             return 0.0
-        return max(0.0, self.solde_plus_flottant_ea / self.seuil_arret)
+        return max(0.0, (self.solde_plus_flottant_ea - lo) / span)
 
     def to_retire(self) -> float:
         """Montant à retirer en ARRET_500 : solde − seuil de reprise (0 sinon)."""

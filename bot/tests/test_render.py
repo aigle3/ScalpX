@@ -75,7 +75,7 @@ def test_objectif_en_cours_et_barres_des_comptes():
     txt = render.home_text([a, b], totals([a, b]), {}, "EUR", "2", "6", False, 1.0, time.time())
     assert "🎯 <b>Objectif 1/2 comptes</b> : +6.00 / +10.00 EUR ▰▰▰▱▱ 60 %" in txt
     assert "▰▰▰▱▱  60% 🎯" in txt                                                   # compte en objectif : barre de l'objectif
-    assert "250.00 ▰▰▱▱▱  50%" in txt                                               # sans objectif : vers 500
+    assert "250.00 ▰▰▱▱▱  33%" in txt                                               # sans objectif : de 125 (reprise) à 500
     assert "🎯 <b>Objectif</b> : +1.00 / +2.00 EUR" in render.goal_line(
         [view(1, objectif_depart=100.0, objectif_cible=102.0, objectif_progression=50)], None, time.time())
     c = view(1, objectif_actif=False, ea_demarre=False, solde=100.0, solde_plus_flottant_ea=100.0, seuil_arret=500,
