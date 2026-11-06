@@ -189,3 +189,14 @@ def test_coupure_accueil_stats_et_preset():
     out = cps.overlay_set(data, {"ct_on": "0", "ct_m00": str(1 << 20), "ct_m15": "0", "ct_m30": "0", "ct_m45": "0"})
     t = out[2:].decode("utf-16-le")
     assert "ObjectifCoupureHeures=20\r\n" in t and "ObjectifCoupureActive=false" in t
+
+
+def test_mode_continu_accueil_et_titre():
+    """EA 7.8.0 : sans objectif, le titre et la ligne de progression parlent du mode continu, pas des créneaux."""
+    v = view(1, objectif_actif=False, mode_continu=True, prochain_creneau="2026.11.09 09:00")
+    txt = render.home_text([v], totals([v]), {}, "EUR", "3", "7.8.0", False, 1.0, time.time())
+    assert "🔁 <b>Mode continu</b> : attend que tous les filtres soient OK" in txt
+    assert "prochain créneau" not in txt and "· mode continu" in txt
+    a = view(1, objectif_actif=False, mode_continu=True, continu_arme=True)
+    txt = render.home_text([a], totals([a]), {}, "EUR", "3", "7.8.0", False, 1.0, time.time())
+    assert "⏳ <b>Mode continu</b> : filtres OK, lancement à la clôture M5" in txt

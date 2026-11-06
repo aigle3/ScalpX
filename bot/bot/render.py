@@ -87,12 +87,21 @@ def trading_ref(views: list[AccountView], now: float):
     return max(fresh, key=lambda s: s.ts) if fresh else None
 
 
+def next_launch(st) -> str:
+    """« · prochain créneau 09:00 » / « · mode continu » (EA 7.8.0) / « » : quand le prochain objectif sera lancé."""
+    if st is None:
+        return ""
+    if st.mode_continu:
+        return " · mode continu" + (" : filtres OK, lancement à la clôture M5" if st.continu_arme else "")
+    return f" · prochain créneau {_hhmm(st.prochain_creneau)}" if st.prochain_creneau else ""
+
+
 def goal_line(views: list[AccountView], st, now: float) -> str:
     """🎯 Objectif en cours : gagné / à gagner (total des comptes en objectif) + barre ; le détail est sur chaque ligne de compte."""
     fresh = [v for v in views if v.st is not None and v.st.age_s(now) < 120]
     on = [v for v in fresh if v.st.objectif_actif]
     if not on:
-        return "🎯 Aucun objectif en cours" + (f" · prochain créneau {_hhmm(st.prochain_creneau)}" if st and st.prochain_creneau else "")
+        return "🎯 Aucun objectif en cours" + next_launch(st)
     cur = on[0].st.devise
     want = sum(max(0.0, v.st.objectif_cible - v.st.objectif_depart) for v in on)
     got = sum(max(0.0, v.st.objectif_cible - v.st.objectif_depart) * max(0.0, min(v.st.objectif_progression, 100.0)) / 100 for v in on)
@@ -111,6 +120,9 @@ def _head(st, npos: int) -> tuple[str, bool]:
     if st.etat == "PAUSE" or (st.objectif_actif and not st.ea_demarre):
         return "⏸ <b>En pause</b>" + (f" jusqu'à {_hhmm(st.pause_jusqua)}" if st.pause_jusqua else ""), True
     if not st.objectif_actif:
+        if st.mode_continu:                                  # EA 7.8.0
+            return ("⏳ <b>Mode continu</b> : filtres OK, lancement à la clôture M5" if st.continu_arme
+                    else "🔁 <b>Mode continu</b> : attend que tous les filtres soient OK"), True
         return "⚪ <b>À l'arrêt</b> : attend un objectif", True
     return ("🟢 <b>En train de trader</b>" if npos else "🟡 <b>En attente</b> : aucune position"), False
 
@@ -337,7 +349,7 @@ def home_text(views: list[AccountView], t: Totals, vps: dict[str, float], cur: s
         lines.append(goal_line(views, ref, now))
     else:
         lim = f"{ref.seuil_arret:.0f}" if ref is not None and ref.seuil_arret > 0 else "500"
-        nxt = f" · prochain créneau {_hhmm(ref.prochain_creneau)}" if ref is not None and ref.prochain_creneau else ""
+        nxt = next_launch(ref)
         lines.append(f"🏁 <b>Progression vers {lim}</b>{nxt}")
     shown = sorted(views, key=_home_order)[:max_lines]
     lines.append("<pre>" + "\n".join(esc(home_line(v)) for v in shown) + "</pre>")
@@ -393,6 +405,9 @@ def account_card(v: AccountView, withdrawn: float, closures: int, now: float | N
         lines.append(f"💸 <b>À retirer : {money(st.to_retire(), cur)}</b> (laisser {st.seuil_reprise:.0f})")
     if st.objectif_actif:
         lines.append(f"🎯 Objectif {st.objectif_progression:.0f}% ({money(st.objectif_depart, cur)} → {money(st.objectif_cible, cur)})")
+    elif st.mode_continu:
+        lines.append("🔁 Mode continu : " + ("filtres OK, lancement à la clôture M5" if st.continu_arme
+                                             else "objectif lancé dès que tous les filtres sont OK à la clôture M5"))
     elif st.prochain_creneau:
         lines.append(f"🕐 Prochain créneau : {esc(st.prochain_creneau)}")
     if st.raison_blocage:

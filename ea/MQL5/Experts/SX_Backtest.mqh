@@ -302,6 +302,7 @@ void BtSecond()
    BtNewsTick();
    LaboTimer1Hz();
    SlotTick();
+   ContTick();                        // 7.8.0 : mode continu
    SlotEntryTick();
    CutTick();
    BtCash();

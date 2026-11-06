@@ -3,7 +3,7 @@
 //| Noyau : variables globales, registre de paramètres (tous les     |
 //| réglages sont modifiables à chaud), persistance, presets.        |
 //+------------------------------------------------------------------+
-#define SX_VERSION   "7.7.0"
+#define SX_VERSION   "7.8.0"
 #define SX_PREFIX    "SX4_"
 #define SX_MAXQ      40
 
@@ -88,6 +88,7 @@ enum ENUM_PID
    P_F_EXT, P_EXTATR, P_F_FRESH, P_FRESHBARS, P_SL_ENTRY,
    P_CT_ON, P_CT_M00, P_CT_M15, P_CT_M30, P_CT_M45,           // 7.0.0 : coupure de l'objectif (4 masques consécutifs, comme les créneaux)
    P_FRESHNOISE, P_EXTTF,                                     // 7.3.0 : recroisements ignorés (signal récent), timeframe de l'extension
+   P_SL_CONT,                                                 // 7.8.0 : objectif en mode continu (sans créneaux)
    // [ARCHI] fin
    P_COUNT
 };
@@ -592,6 +593,8 @@ void InitParams()
    Reg(P_EXTTF, "exttf", "Extension : timeframe", G_FILTERS, PT_ENUM, MathMax(0, MathMin(6, ExtensionTimeframe)), 0, 6, 1, "",
        "Timeframe de l'EMA lente et de l'ATR du filtre d'extension. Un timeframe supérieur (M15, H1) voit qu'un mouvement est déjà très étendu même quand l'EMA du robot a rattrapé le prix.",
        "TF du robot|M1|M5|M15|M30|H1|H4", PF_INDI);
+   Reg(P_SL_CONT, "sl_cont", "Objectif continu (filtres OK + clôture M5)", G_GOAL, PT_BOOL, ObjectifContinu ? 1 : 0, 0, 1, 1, "",
+       "Activé : plus de créneaux. Dès que tous les filtres activés sont OK, le robot attend la clôture de la bougie M5 en cours ; si tous les filtres sont encore OK à ce moment, l'objectif (gain de l'objectif auto) est lancé. Les coupures restent appliquées si elles sont activées.");
    // [ARCHI] fin
 }
 

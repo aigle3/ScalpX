@@ -292,7 +292,7 @@ def _h(params: dict, key: str) -> str:
 
 FILTER_NAMES = [("f_atr", "ATR"), ("f_ema", "Prix/EMA"), ("f_vol", "Volume"), ("f_lo", "EMA inf."), ("f_hi", "EMA sup."),
                 ("f_can", "Bougie sup."), ("f_time", "Horaire"), ("news_block", "News"), ("f_ext", "Extension"), ("f_fresh", "Signal récent")]
-SHOWN = ["sl_pct", "sl_m00", "sl_m15", "sl_m30", "sl_m45", "ct_on", "ct_m00", "ct_m15", "ct_m30", "ct_m45", "lot", "lotmult", "tbm",
+SHOWN = ["sl_cont", "sl_pct", "sl_m00", "sl_m15", "sl_m30", "sl_m45", "ct_on", "ct_m00", "ct_m15", "ct_m30", "ct_m45", "lot", "lotmult", "tbm",
          "maxpend", "dyngrid", "gridatr", "gridmin", "gridmax", "grid", "atrmult", "tpmin", "tpmax", "emsl", "emslpct", "sesslim",
          "seuil_arret", "seuil_reprise", "freshbars", "extatr", "exttf", "freshnoise"] + [k for k, _ in FILTER_NAMES]
 
@@ -309,7 +309,8 @@ def settings_lines(params: dict) -> list[str]:
             else f"grille fixe {_h(v, 'grid')}")
     sl = f"SL d'urgence {_h(v, 'emslpct')}" if v.get("emsl") == "1" else "SL d'urgence désactivé"
     flt = [n + (f" ({_h(v, 'freshbars')})" if k == "f_fresh" else "") for k, n in FILTER_NAMES if v.get(k) == "1"]
-    return [f"🎯 objectif {_h(v, 'sl_pct')} · créneaux {slots} · coupures {cuts or 'aucune'}",
+    when = "mode continu (filtres OK + clôture M5)" if v.get("sl_cont") == "1" else f"créneaux {slots}"
+    return [f"🎯 objectif {_h(v, 'sl_pct')} · {when} · coupures {cuts or 'aucune'}",
             f"🧱 {grid} · {_h(v, 'maxpend')} ordres max · lot {v.get('lot', '?')} × {v.get('lotmult', '?')} tous les {_h(v, 'tbm')} ordres · {sl}",
             "🛡️ filtres : " + (", ".join(flt) if flt else "aucun")]
 

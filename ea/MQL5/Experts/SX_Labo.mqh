@@ -1,5 +1,6 @@
 ﻿//+------------------------------------------------------------------+
-//| SX_Labo.mqh - ScalpX 7.7.0                                       |
+//| SX_Labo.mqh - ScalpX 7.8.0                                       |
+//| 7.8.0 : option ct=1 / ct=0 : mode continu / créneaux du scénario |
 //| 7.7.0 : séries virtuelles réservées au backtest de l'optimiseur  |
 //|   (en réel : mesure du slippage et de la commission seulement).  |
 //|   Options par scénario : tb, ef/es/ap (EMA, ATR), am/tn/tx (TP), |
@@ -69,6 +70,8 @@ struct LbScen
    bool     hasSm;             // 7.7.0 : créneaux propres au scénario (masques sm, même codage que sl_m00..sl_m45)
    int      sm[4];
    long     slotKey;           //         dernier créneau propre consommé
+   int      ct;                // 7.8.0 : mode continu du scénario (-1 = comme le compte, 0 = créneaux, 1 = continu)
+   datetime contArm;           //         bougie M5 pendant laquelle les filtres du scénario étaient OK (0 = pas armé)
    int      hF, hS, hA;        //         EMA rapide / lente et ATR propres (INVALID_HANDLE = ceux du robot)
    //--- compte virtuel
    double   bal;
@@ -150,6 +153,7 @@ void LbOptsParse(LbScen &x, string o)
    x.ga = 0; x.gn = 0; x.gx = 0; x.lm = 0; x.mp = 0;
    x.tb = 0; x.ef = 0; x.es = 0; x.ap = 0; x.am = 0; x.tn = 0; x.tx = 0;
    x.an = 0; x.ax = 0; x.vn = 0; x.vx = 0; x.ea = 0; x.cb = -1; x.raw = false; x.hasSm = false;
+   x.ct = -1; x.contArm = 0;
    for(int k = 0; k < 4; k++) x.sm[k] = 0;
    string p[];
    int n = StringSplit(o, ';', p);
@@ -181,6 +185,7 @@ void LbOptsParse(LbScen &x, string o)
       else if(kv[0] == "ea") x.ea = MathMax(0.0, MathMin(20.0, StringToDouble(kv[1])));
       else if(kv[0] == "cb") x.cb = MathMax(0.0, MathMin(5.0, StringToDouble(kv[1])));
       else if(kv[0] == "r") x.raw = (kv[1] != "0");
+      else if(kv[0] == "ct") x.ct = (StringToInteger(kv[1]) != 0) ? 1 : 0;
       else if(kv[0] == "sm")
       {
          string m[];
@@ -224,6 +229,7 @@ string LbOpts(const LbScen &x)
    if(x.ea > 0) LbAddOpt(s, "ea=" + DoubleToString(x.ea, 2));
    if(x.cb >= 0) LbAddOpt(s, "cb=" + DoubleToString(x.cb, 2));
    if(x.raw) LbAddOpt(s, "r=1");
+   if(x.ct >= 0) LbAddOpt(s, "ct=" + IntegerToString(x.ct));
    if(x.hasSm) LbAddOpt(s, "sm=" + IntegerToString(x.sm[0]) + "," + IntegerToString(x.sm[1]) + "," + IntegerToString(x.sm[2]) + "," + IntegerToString(x.sm[3]));
    return s;
 }
@@ -309,6 +315,7 @@ void LbCopy(LbScen &d, const LbScen &s)
    d.an = s.an; d.ax = s.ax; d.vn = s.vn; d.vx = s.vx; d.ea = s.ea; d.cb = s.cb; d.raw = s.raw; d.hasSm = s.hasSm;
    for(int k = 0; k < 4; k++) d.sm[k] = s.sm[k];
    d.slotKey = s.slotKey; d.hF = s.hF; d.hS = s.hS; d.hA = s.hA;
+   d.ct = s.ct; d.contArm = s.contArm;
    d.bal = s.bal; d.start = s.start; d.withdrawn = s.withdrawn; d.reloaded = s.reloaded; d.cycles = s.cycles; d.reloads = s.reloads;
    d.active = s.active; d.cutPend = s.cutPend; d.init = s.init; d.target = s.target; d.peak = s.peak; d.maxDD = s.maxDD; d.minML = s.minML;
    d.t0 = s.t0; d.tEntry = s.tEntry; d.slot = s.slot; d.maxPos = s.maxPos; d.nSeries = s.nSeries;
@@ -337,6 +344,7 @@ void LbFresh(LbScen &x)
    x.bal = AccountInfoDouble(ACCOUNT_BALANCE);
    x.start = x.bal; x.withdrawn = 0; x.reloaded = 0; x.cycles = 0; x.reloads = 0;
    x.slotKey = 0;
+   x.contArm = 0;
    LbClearGoal(x);
    x.ok = false; x.why = "";
 }
@@ -985,32 +993,59 @@ void LbStartGoal(int s, string slot)
    g_lbDirty = true;
 }
 
+// 7.8.0 : le scénario est-il en mode continu (option ct, sinon comme le compte) ?
+bool LbCont(const LbScen &x) { return x.ct >= 0 ? (x.ct == 1) : PBool(P_SL_CONT); }
+
 // Créneau consommé (appelé par SlotTick, mêmes conditions générales que le vrai robot)
 void LaboOnSlot(string slot)
 {
    if(!g_lbOn || !g_lbWanted) return;   // labo en pause : séries virtuelles figées
    for(int s = 0; s < g_lbN; s++)
-      if(!g_lb[s].hasSm) LbStartGoal(s, slot);         // 7.7.0 : un scénario à créneaux propres suit les siens
+      if(!g_lb[s].hasSm && !LbCont(g_lb[s])) LbStartGoal(s, slot);   // 7.7.0 : un scénario à créneaux propres suit les siens
+}
+
+// 7.8.0 : mode continu des scénarios (comme ContTick) : filtres du scénario OK pendant une bougie M5, encore OK à sa
+// clôture → objectif virtuel lancé
+void LbContTick()
+{
+   if(g_state != ST_ACTIF || g_maint) return;        // mêmes conditions générales que LbOwnSlots
+   datetime bar = iTime(_Symbol, PERIOD_M5, 0);
+   if(bar <= 0) return;
+   string w;
+   bool env = f_marketOpen && TradeEnvOK(w);
+   for(int s = 0; s < g_lbN; s++)
+   {
+      if(!LbCont(g_lb[s]) || g_lb[s].active) { g_lb[s].contArm = 0; continue; }
+      bool ok = env && g_lb[s].ok;
+      if(g_lb[s].contArm == 0) { if(ok) g_lb[s].contArm = bar; continue; }
+      if(bar == g_lb[s].contArm) continue;
+      g_lb[s].contArm = 0;
+      if(ok) LbStartGoal(s, "continu");
+   }
 }
 
 // 7.7.0 : créneaux propres aux scénarios (jours de semaine, fenêtre de lancement du compte, une fois par créneau)
 void LbOwnSlots()
 {
-   if(!PBool(P_SL_ON) || g_state != ST_ACTIF || g_maint) return;
+   bool accCont = PBool(P_SL_CONT);                  // 7.8.0 : compte en mode continu : les scénarios « ct=0 » suivent les créneaux du compte
+   if((!PBool(P_SL_ON) && !accCont) || g_state != ST_ACTIF || g_maint) return;
    MqlDateTime d;
    TimeToStruct(LocalNow(), d);
    if(d.day_of_week < 1 || d.day_of_week > 5) return;
    int now = d.hour * 60 + d.min, win = SlotWindow();
    for(int s = 0; s < g_lbN; s++)
    {
-      if(!g_lb[s].hasSm) continue;
+      if(LbCont(g_lb[s]) || (!g_lb[s].hasSm && !accCont)) continue;
       int sl = -1;
       for(int mi = 0; mi < 4 && sl < 0; mi++)
+      {
+         int mk = g_lb[s].hasSm ? g_lb[s].sm[mi] : PInt(P_SL_M00 + mi);
          for(int h = 0; h < 24; h++)
          {
             int t = h * 60 + mi * 15;
-            if((g_lb[s].sm[mi] & (1 << h)) != 0 && now >= t && now < t + win) { sl = t; break; }
+            if((mk & (1 << h)) != 0 && now >= t && now < t + win) { sl = t; break; }
          }
+      }
       if(sl < 0) continue;
       long key = SlotKey(d, sl);
       if(key == g_lb[s].slotKey) continue;
@@ -1377,6 +1412,7 @@ void LaboTimer1Hz()
    if(!g_lbWanted) return;
    LbOwnSlots();                                     // 7.7.0 : créneaux propres aux scénarios
    LbEvalAll();
+   LbContTick();                                     // 7.8.0 : scénarios en mode continu
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID), ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double so = AccountInfoDouble(ACCOUNT_MARGIN_SO_SO);
    bool soPct = (AccountInfoInteger(ACCOUNT_MARGIN_SO_MODE) == ACCOUNT_STOPOUT_MODE_PERCENT);

@@ -82,6 +82,7 @@ PARAMS = [
     ("goalmax", "Plafond d'objectif (montant)", 7, "dbl", 1.0, 100000.0, 5.0, "", []),
     ("profnotif", "Alerte profit cumulé", 7, "dbl", 0.0, 10000.0, 1.0, "", []),
     ("sl_on", "Objectif auto aux créneaux", 7, "bool", 0.0, 1.0, 1.0, "", []),
+    ("sl_cont", "Objectif continu (filtres OK + clôture M5)", 7, "bool", 0.0, 1.0, 1.0, "", []),   # EA 7.8.0
     ("sl_pct", "Objectif auto : gain", 7, "dbl", 0.1, 20.0, 0.1, " %", []),
     ("sl_win", "Fenêtre de lancement", 7, "int", 5.0, 15.0, 5.0, " min", []),
     ("sl_entry", "Fenêtre d'entrée après le créneau", 7, "int", 0.0, 240.0, 5.0, " min", []),   # EA 6.6.0 (0 = désactivé)
@@ -128,7 +129,7 @@ SLOTS_PER_PAGE = 40                    # boutons ✖ par page (Telegram : 100 bo
 SLOT_GROUP = 7                         # 🏆 Objectifs
 # Valeurs par défaut de l'EA (inputs) des réglages ajoutés en 6.2.0 : point de départ quand un preset plus ancien
 # ne les contient pas encore (rien n'est enregistré tant qu'on ne les modifie pas)
-DEFAULTS = {"sl_on": "1", "sl_pct": "1.0", "sl_win": "10", "sl_m00": "1184328", "sl_m15": "0", "sl_m30": "0", "sl_m45": "0",
+DEFAULTS = {"sl_on": "1", "sl_cont": "0", "sl_pct": "1.0", "sl_win": "10", "sl_m00": "1184328", "sl_m15": "0", "sl_m30": "0", "sl_m45": "0",
             "seuil_on": "1", "seuil_arret": "500", "seuil_reprise": "125",
             "ct_on": "1", "ct_m00": str(1 << 21), "ct_m15": "0", "ct_m30": "0", "ct_m45": str(1 << 13)}   # EA 7.0.0 : 13:45, 21:00
 

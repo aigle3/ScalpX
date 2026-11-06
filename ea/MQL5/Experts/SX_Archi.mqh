@@ -503,6 +503,7 @@ datetime NextSlot()
 
 string NextSlotText()
 {
+   if(PBool(P_SL_CONT)) return "mode continu (filtres OK + clôture M5)";   // [ARCHI] 7.8.0
    datetime t = NextSlot();
    if(t == 0) return "—";
    return TimeToString(t, TIME_DATE | TIME_MINUTES);
@@ -532,7 +533,7 @@ void SlotEntryTick()
    SlotEntrySet(0);
    if(st_pendCount > 0) CancelPendingFast();
    GoalCancel();
-   EvTyped("OBJECTIF_ANNULE", 1, "⌛ " + (slot != "" ? "Créneau " + slot + " : objectif" : "Objectif du créneau") + " annulé : aucune série ouverte en " +
+   EvTyped("OBJECTIF_ANNULE", 1, "⌛ " + (slot == "continu" ? "Mode continu : objectif" : slot != "" ? "Créneau " + slot + " : objectif" : "Objectif du créneau") + " annulé : aucune série ouverte en " +
            IntegerToString(lim) + " min" + (why != "" ? " (" + why + ")" : "") + ".\n🕐 Prochain créneau : " + NextSlotText(),
            "{\"creneau\":\"" + slot + "\",\"minutes\":" + IntegerToString(lim) + ",\"raison\":\"" + JsonEsc(why) + "\"}");
 }
@@ -620,6 +621,7 @@ void LaboOnCut(string name);
 
 void SlotTick()
 {
+   if(PBool(P_SL_CONT)) return;                            // [ARCHI] 7.8.0 : mode continu, pas de créneaux
    if(!PBool(P_SL_ON) || g_slotsN == 0) return;
    if(g_state != ST_ACTIF || g_maint || g_phase500) return;
    MqlDateTime d;
@@ -671,6 +673,58 @@ void SlotTick()
    EvTyped("OBJECTIF_AUTO", 1, "🎯 Créneau " + slot + " : objectif +" + DoubleToString(PDbl(P_SL_PCT), 2) + " % lancé.\n" + msg,
            "{\"creneau\":\"" + slot + "\",\"cible\":" + NumS(g_goalTarget) + ",\"depart\":" + NumS(g_goalInit) + "}");
 }
+
+// [ARCHI] début : 7.8.0 mode continu : sans créneaux, objectif lancé dès que tous les filtres activés sont OK
+// à la clôture d'une bougie M5. Filtres OK pendant la bougie → armé ; nouvelle bougie M5 : filtres encore OK → lancement,
+// sinon on attend qu'ils redeviennent OK (puis la clôture suivante).
+bool FiltersAllOK();                // défini dans SX_FilterBoard.mqh
+datetime g_contArm   = 0;           // ouverture (serveur) de la bougie M5 pendant laquelle les filtres étaient OK (0 = pas armé)
+datetime g_contErrAt = 0;           // dernier message d'objectif refusé (au plus un par heure)
+
+bool ContArmed() { return PBool(P_SL_CONT) && g_contArm > 0; }
+
+void ContTick()
+{
+   if(!PBool(P_SL_CONT)) { g_contArm = 0; return; }
+   if(g_state != ST_ACTIF || g_maint || g_phase500 || g_goalActive || g_stoppedManually || g_vacation || !g_configOK)
+   {
+      g_contArm = 0;
+      return;
+   }
+   double bal = AccountInfoDouble(ACCOUNT_BALANCE);
+   if(bal + 0.005 < PDbl(P_SEUIL_REPRISE) || (PBool(P_SEUIL_ON) && bal + 0.005 >= PDbl(P_SEUIL_ARRET))) { g_contArm = 0; return; }
+   datetime bar = iTime(_Symbol, PERIOD_M5, 0);
+   if(bar <= 0) return;
+   string w;
+   bool ok = f_marketOpen && FiltersAllOK() && TradeEnvOK(w);
+   if(g_contArm == 0) { if(ok) g_contArm = bar; return; }
+   if(bar == g_contArm) return;                            // bougie M5 en cours : on attend sa clôture
+   g_contArm = 0;
+   if(!ok) return;                                         // un filtre bloque à la clôture : on attend qu'ils redeviennent OK
+   string msg;
+   if(!GoalSetFromArg("+" + DoubleToString(PDbl(P_SL_PCT), 2) + "%", msg))
+   {
+      if(TimeGMT() - g_contErrAt >= 3600)
+      {
+         g_contErrAt = TimeGMT();
+         EvTyped("CRENEAU_SAUTE", 1, "⏭ Mode continu : objectif impossible (" + msg + ").",
+                 "{\"creneau\":\"continu\",\"raison\":\"objectif_refuse\"}");
+      }
+      return;
+   }
+   g_enabled = true;
+   g_stoppedManually = false;
+   GlobalVariableDel(GVN("stopped"));
+   g_cooldownUntilMs = 0;
+   g_failCount = 0;
+   g_nextTradeMs = 0;
+   SlotEntrySet(TimeGMT(), "continu");                     // fenêtre d'entrée : même règle qu'un créneau
+   GlobalVariablesFlush();
+   EvTyped("OBJECTIF_AUTO", 1, "🎯 Mode continu : tous les filtres OK à la clôture M5 de " + TimeToString(LocalNow(), TIME_MINUTES) +
+           " : objectif +" + DoubleToString(PDbl(P_SL_PCT), 2) + " % lancé.\n" + msg,
+           "{\"creneau\":\"continu\",\"cible\":" + NumS(g_goalTarget) + ",\"depart\":" + NumS(g_goalInit) + "}");
+}
+// [ARCHI] fin
 
 //+------------------------------------------------------------------+
 //| [SEUIL500] Clôture anticipée à SeuilArret                        |
@@ -899,6 +953,8 @@ void StatutWrite()
    j += ",\"seuil_reprise\":" + NumS(PDbl(P_SEUIL_REPRISE));
    j += ",\"seuil500_actif\":" + BoolS(PBool(P_SEUIL_ON));
    j += ",\"prochain_creneau\":\"" + (ns > 0 ? TimeToString(ns, TIME_DATE | TIME_MINUTES) : "") + "\"";
+   j += ",\"mode_continu\":" + BoolS(PBool(P_SL_CONT));                                   // [ARCHI] 7.8.0
+   j += ",\"continu_arme\":" + BoolS(ContArmed());
    j += ",\"coupures\":\"" + (PBool(P_CT_ON) ? CutsText() : "") + "\"";                      // [ARCHI] 7.0.0
    j += ",\"coupure_en_cours\":\"" + (g_cutPending ? g_cutName : "") + "\"";
    j += ",\"raison_blocage\":\"" + JsonEsc(g_blockReason) + "\"";
@@ -1329,6 +1385,7 @@ void ArchiTimer()
       EvFlushPending();
       CloseRetryTick();                  // fermeture voulue restée bloquée (marché fermé / trading désactivé) : nouvel essai
       SlotTick();
+      ContTick();                        // [ARCHI] 7.8.0 : mode continu
       SlotEntryTick();                   // [ARCHI] 6.6.0 : fenêtre d'entrée après le créneau
       CutTick();                         // [ARCHI] 7.0.0 : coupure de l'objectif
       //--- cohérence avec le panneau / l'ancien code : arrêt manuel <-> PAUSE

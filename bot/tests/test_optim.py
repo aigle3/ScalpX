@@ -21,8 +21,8 @@ P = {"gridatr": "0.7", "gridmin": "200", "gridmax": "500", "dyngrid": "1", "maxp
      "ct_on": "1", "ct_m00": str(1 << 21), "ct_m15": "0", "ct_m30": "0", "ct_m45": str(1 << 13)}
 
 
-def test_quatre_categories_et_variantes():
-    assert [g[0] for g in optim.GROUPS] == ["grille_lots", "signal_tp", "filtres", "objectif"]
+def test_cinq_categories_et_variantes():
+    assert [g[0] for g in optim.GROUPS] == ["grille_lots", "signal_tp", "filtres", "objectif", "continu"]
     vs = optim.variants(P, "grille_lots")
     assert [v.opts for v in vs[:6]] == [{"ga": "0.6"}, {"ga": "0.8"}, {"gn": "150"}, {"gn": "250"}, {"gx": "400"}, {"gx": "600"}]
     assert len(vs) == 36 and [v.key for v in vs] == [f"p{i}" for i in range(1, 37)]       # 18 grille + 18 lots
@@ -254,7 +254,7 @@ async def test_nuit_de_securite_apres_une_nuit_dangereuse(svc):  # noqa: F811
 
 
 def test_securite_au_plus_une_fois_par_tour():
-    """Logique du compteur : après une nuit de sécurité, 4 nuits normales avant la suivante."""
+    """Logique du compteur : après une nuit de sécurité, une nuit normale par catégorie avant la suivante."""
     import types
     from bot.optim import Optimizer
     meta = {}
@@ -264,10 +264,29 @@ def test_securite_au_plus_une_fois_par_tour():
     nights = []
     o.schedule_safety(lost=True, was_safety=False)
     nights.append(o.safety_next)
-    for _ in range(6):
+    for _ in range(len(optim.GROUPS) + 1):
         o.schedule_safety(lost=True, was_safety=o.safety_next)
         nights.append(o.safety_next)
-    assert nights == [True, False, False, False, False, True, False]
+    assert nights == [True] + [False] * len(optim.GROUPS) + [True]
     meta.clear()
     o.schedule_safety(lost=False, was_safety=False)
     assert not o.safety_next
+
+
+def test_nuit_mode_continu():
+    """Nuit 🔁 : mode inverse du compte, seul puis avec l'objectif à ±1 cran ; option ct= du labo."""
+    p = {**P, "sl_cont": "0", "sl_pct": "0.5"}
+    vs = optim.variants(p, "continu")
+    assert [v.opts for v in vs] == [{"ct": "1"}, {"ct": "1", "o": "0.4"}, {"ct": "1", "o": "0.6"}]
+    assert [v.key for v in vs] == ["p1", "p2", "p3"] and all(v.ref == "miroir" for v in vs)
+    assert vs[0].changes == {"sl_cont": ("0", "1")} and vs[1].changes == {"sl_cont": ("0", "1"), "sl_pct": ("0.5", "0.4")}
+    assert "|ct=1;o=0.4" in optim.scenario_file(vs)
+    back = optim.variants({**p, "sl_cont": "1"}, "continu")
+    assert back[0].opts == {"ct": "0"} and back[0].name.startswith("Créneaux")
+    assert optim.variants({**p, "sl_cont": "1", "sl_m00": "0"}, "continu") == []    # pas de créneau : retour impossible
+    assert optim.variants(P if "sl_cont" not in P else {k: v for k, v in P.items() if k != "sl_cont"}, "continu") == []  # EA < 7.8.0
+    assert optim.label_of("sl_cont", "1") == "Lancement des objectifs : mode continu"
+    assert optim.value_text("sl_cont", "0") == "créneaux"
+    rows = [{"sc": "p1", "opts": "o=0.40"}]
+    assert optim.ea_too_old(rows, vs[:1])                                               # EA qui ignore ct=
+    assert not optim.ea_too_old([{"sc": "p1", "opts": "ct=1"}], vs[:1])
