@@ -451,3 +451,17 @@ def test_commandes_simultanees_numeros_uniques_hors_boucle(tmp_path):
         return await q.send_and_wait("B", "PING", timeout=0.3, poll=0.05)
     r = asyncio.run(run())
     assert r.timeout and not list(tmp_path.glob("cmd_B_*.json"))               # sans réponse : commande retirée
+
+
+def test_backtest_incomplet(tmp_path):
+    """Bot 3.1.1 : un test arrêté avant la date de fin est détecté (et pas analysé comme complet)."""
+    from core import backtest as bt
+    d_to = 1_762_473_600                                   # 07/11/2026
+    assert bt.stopped_early({"sim": d_to - 40 * 86400}, d_to)
+    assert not bt.stopped_early({"sim": d_to - 2 * 86400}, d_to)   # week-end : derniers ticks le vendredi
+    assert not bt.stopped_early({}, d_to)
+    lg = tmp_path / "Tester" / "Agent-127.0.0.1-3000" / "logs"
+    lg.mkdir(parents=True)
+    (lg / "20261107.log").write_bytes("﻿KP\t0\t19:20:06.5\tCore 1\t2026.09.30 10:00:00   critical runtime error 502 in OnTick (array out of range in 'SX_Labo.mqh' (1012,12))\r\nAB\t0\t19:20:07\tCore 1\tfinal balance 312.40 EUR\r\n".encode("utf-16-le"))
+    errs = bt.log_errors(tmp_path)
+    assert len(errs) == 1 and "array out of range" in errs[0]

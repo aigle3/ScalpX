@@ -166,6 +166,45 @@ def tail_log(folder: Path, max_bytes: int = 6000) -> str:
     return (parts[-2] + " : " + parts[-1] if len(parts) >= 5 else last)[-160:]
 
 
+# Bot 3.1.1 : un test qui s'arrête avant la date de fin ne doit pas être analysé comme s'il était complet
+END_MARGIN_S = 3 * 86400            # week-end / jours fériés : les derniers ticks peuvent précéder d_to de 2-3 jours
+DEINIT = {0: "arrêt par l'EA", 1: "EA retiré", 2: "EA recompilé", 3: "symbole/période changé", 4: "graphique fermé",
+          5: "paramètres modifiés", 6: "compte changé", 7: "modèle appliqué", 8: "échec d'initialisation", 9: "terminal fermé"}
+_ERR_WORDS = ("critical", "runtime error", "array out of range", "zero divide", "invalid pointer", "stack overflow",
+              "not enough memory", "out of memory")
+
+
+def stopped_early(fin: dict, d_to: int) -> bool:
+    sim = int(fin.get("sim", 0) or 0)
+    return 0 < sim < d_to - END_MARGIN_S
+
+
+def log_errors(folder: Path, n: int = 3, max_bytes: int = 200_000) -> list[str]:
+    """Dernières lignes d'erreur des journaux des agents du testeur (erreur d'exécution de l'EA, historique, mémoire)."""
+    agents = Path(folder) / "Tester"
+    files = sorted(agents.glob("Agent-*/logs/*.log"), key=lambda p: p.stat().st_mtime) if agents.is_dir() else []
+    if not files:
+        return []
+    try:
+        with open(files[-1], "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - max_bytes))
+            raw = f.read()
+    except OSError:
+        return []
+    if raw[:2] == b"\xff\xfe" or raw.count(b"\x00") > len(raw) // 4:
+        text = raw[len(raw) % 2:].decode("utf-16-le", errors="replace")
+    else:
+        text = raw.decode("utf-8", errors="replace")
+    out = []
+    for l in text.replace("\ufeff", "").splitlines():
+        low = l.lower()
+        if any(w in low for w in _ERR_WORDS) or ("error" in low and "0 error" not in low):
+            parts = l.strip().split("\t")
+            out.append((parts[-1] if len(parts) >= 3 else l.strip())[-200:])
+    return out[-n:]
+
+
 # ------------------------------------------------------------------ résultats
 @dataclass
 class Result:

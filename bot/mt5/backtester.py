@@ -191,6 +191,17 @@ class BacktestManager:
             line = bt.tail_log(self.folder)
             run.error = "Le testeur s'est arrêté sans résultat" + (f" (dernier message de MT5 : {line})" if line else "") + "."
             return
+        if bt.stopped_early(fin, run.d_to):                    # Bot 3.1.1 : test incomplet → pas d'analyse trompeuse
+            sim = int(fin.get("sim", 0))
+            rs = fin.get("raison")
+            why = bt.DEINIT.get(int(rs), f"code {rs}") if isinstance(rs, (int, float)) else "inconnue"
+            errs = await asyncio.to_thread(bt.log_errors, self.folder)
+            line = bt.tail_log(self.folder)
+            run.error = (f"le test s'est arrêté au {bt.human_date(sim)} au lieu du {bt.human_date(run.d_to)} "
+                         f"(raison : {why} ; solde {float(fin.get('solde', 0) or 0):.2f})"
+                         + (" — MT5 : " + " | ".join(errs) if errs else (f" — MT5 : {line}" if line else "")))
+            log.warning("backtest #%s incomplet : %s", run.rid, run.error)
+            return
         run.note("📊 Analyse des résultats")
         await notify(run)
         run.result = bt.summarize(run.rid, run.d_from, run.d_to, fin, events)
