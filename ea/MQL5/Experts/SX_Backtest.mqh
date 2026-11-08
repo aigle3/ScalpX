@@ -21,6 +21,7 @@ int      g_btGoals = 0, g_btWon = 0, g_btCancel = 0, g_btCut = 0, g_btSL = 0, g_
 double   g_btWd = 0, g_btDep = 0, g_btPeak = 0, g_btMaxDD = 0, g_btStart = 0;
 datetime g_btDDTs = 0;                // 7.6.0 : pire drawdown : moment (GMT), equity de référence (pic) et equity au plus bas
 double   g_btDDPeak = 0, g_btDDEq = 0;
+double   g_btMinML = 0;               // 7.8.2 : niveau de marge le plus bas atteint (%)
 bool     g_btSOPending = false;       // 7.8.1 : stop-out à traiter (objectif terminé + recharge)
 int      g_btStopOuts = 0;            // 7.6.0 : stop-out du broker (fermetures forcées par le testeur, DEAL_REASON_SO)
 datetime g_btLastSO = 0;
@@ -293,7 +294,7 @@ string BtJson(bool fin, int reason)
           ",\"sautes\":" + IntegerToString(g_btSkip) + ",\"cycles\":" + IntegerToString(g_cycle) + ",\"retraits\":" + NumS(g_btWd) +
           ",\"recharges\":" + NumS(g_btDep) + ",\"nb_recharges\":" + IntegerToString(g_btReloads) + ",\"dd_max\":" + NumS(g_btMaxDD) +
           ",\"dd_ts\":" + IntegerToString((long)g_btDDTs) + ",\"dd_pic\":" + NumS(g_btDDPeak) + ",\"dd_eq\":" + NumS(g_btDDEq) +
-          ",\"stopouts\":" + IntegerToString(g_btStopOuts) +
+          ",\"stopouts\":" + IntegerToString(g_btStopOuts) + ",\"marge_min\":" + NumS(g_btMinML) + ",\"ea\":\"" + SX_VERSION + "\"" +
           ",\"positions\":" + IntegerToString(st_posCount) + ",\"objectif_actif\":" + BoolS(g_goalActive) +
           ",\"evenements\":" + IntegerToString(g_btEvents) + ",\"note\":\"" + JsonEsc(g_btNote) + "\"" +
           ",\"fin\":" + BoolS(fin) + (fin ? ",\"raison\":" + IntegerToString(reason) : "") + ",\"version\":\"" + SX_VERSION + "\"}";
@@ -338,9 +339,36 @@ void BtSecond()
    BtProgress();
 }
 
+// 7.8.2 : stop-out SIMULÉ par l'EA, un peu avant celui du broker. Le testeur MT5 ARRÊTE le test dès qu'un vrai stop-out
+// vide le compte (avant même que l'EA voie la clôture) : le test finissait des semaines avant la date de fin, sans
+// aucun objectif virtuel sur les 30 derniers jours. Même effet qu'un stop-out (tout est fermé à perte), mais l'EA garde
+// la main : objectif terminé, compte rechargé au seuil de reprise (BtCash), et le test continue jusqu'au bout.
+#define BT_SO_MARGIN_PTS 15.0         // déclenchement : niveau de marge <= stop-out du broker + 15 points
+void BtSimStopOut()
+{
+   if(g_closing || AccountInfoDouble(ACCOUNT_MARGIN) <= 0) return;
+   double ml = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
+   if(ml > 0 && (g_btMinML == 0 || ml < g_btMinML)) g_btMinML = ml;
+   double so = AccountInfoDouble(ACCOUNT_MARGIN_SO_SO);
+   bool hit;
+   if(AccountInfoInteger(ACCOUNT_MARGIN_SO_MODE) == ACCOUNT_STOPOUT_MODE_PERCENT)
+      hit = ml > 0 && ml <= MathMax(so, 1.0) + BT_SO_MARGIN_PTS;
+   else
+      hit = AccountInfoDouble(ACCOUNT_EQUITY) <= so * 1.15 + 1.0;
+   if(!hit) return;
+   double bal = AccountInfoDouble(ACCOUNT_BALANCE);
+   CloseAllFast("stop-out simulé (backtest)");
+   g_btLastSO = TimeCurrent();
+   g_btStopOuts++;
+   g_btSOPending = true;
+   EvTyped("BT_STOPOUT", 0, "", "{\"solde\":" + NumS(AccountInfoDouble(ACCOUNT_BALANCE)) + ",\"avant\":" + NumS(bal) +
+           ",\"marge\":" + NumS(ml) + ",\"simule\":true}");
+}
+
 // Début de OnTick (backtest seulement)
 void BtTick()
 {
+   BtSimStopOut();                    // 7.8.2 : à chaque tick (un stop-out se joue en quelques ticks)
    datetime t = TimeCurrent();
    if(t == g_btLastSec) return;
    g_btLastSec = t;
