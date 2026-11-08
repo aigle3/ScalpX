@@ -21,6 +21,7 @@ int      g_btGoals = 0, g_btWon = 0, g_btCancel = 0, g_btCut = 0, g_btSL = 0, g_
 double   g_btWd = 0, g_btDep = 0, g_btPeak = 0, g_btMaxDD = 0, g_btStart = 0;
 datetime g_btDDTs = 0;                // 7.6.0 : pire drawdown : moment (GMT), equity de référence (pic) et equity au plus bas
 double   g_btDDPeak = 0, g_btDDEq = 0;
+bool     g_btSOPending = false;       // 7.8.1 : stop-out à traiter (objectif terminé + recharge)
 int      g_btStopOuts = 0;            // 7.6.0 : stop-out du broker (fermetures forcées par le testeur, DEAL_REASON_SO)
 datetime g_btLastSO = 0;
 datetime g_btLastSec = 0;
@@ -244,6 +245,20 @@ void BtInit()
 void BtCash()
 {
    if(st_posCount > 0 || g_phase500) return;
+   // 7.8.1 : après un stop-out (compte du testeur vidé), l'objectif en cours est terminé (perdu) et le compte rechargé au
+   // seuil de reprise : sinon le testeur reste bloqué sur un compte à quelques euros et le test s'arrête avant la fin
+   // (plus aucun objectif virtuel sur les 30 derniers jours → l'optimiseur ne peut rien décider).
+   if(g_btSOPending)
+   {
+      g_btSOPending = false;
+      if(st_pendCount > 0) CancelPendingFast();
+      if(g_goalActive)
+      {
+         GoalCancel();
+         EvTyped("OBJECTIF_ANNULE", 0, "", "{\"raison\":\"stop_out\"}");
+      }
+      RefreshState();
+   }
    double bal = AccountInfoDouble(ACCOUNT_BALANCE), rep = PDbl(P_SEUIL_REPRISE);
    if(PBool(P_SEUIL_ON) && g_state == ST_ARRET && bal + 0.005 >= PDbl(P_SEUIL_ARRET))
    {
@@ -341,6 +356,7 @@ void BtOnDeal(ulong deal)
    if(g_btLastSO != 0 && t - g_btLastSO < 60) return;
    g_btLastSO = t;
    g_btStopOuts++;
+   g_btSOPending = true;
    EvTyped("BT_STOPOUT", 0, "", "{\"solde\":" + NumS(AccountInfoDouble(ACCOUNT_BALANCE)) + "}");
 }
 

@@ -198,7 +198,7 @@ class BacktestManager:
             errs = await asyncio.to_thread(bt.log_errors, self.folder)
             line = bt.tail_log(self.folder)
             run.error = (f"le test s'est arrêté au {bt.human_date(sim)} au lieu du {bt.human_date(run.d_to)} "
-                         f"(raison : {why} ; solde {float(fin.get('solde', 0) or 0):.2f})"
+                         f"(raison : {why} ; solde {float(fin.get('solde', 0) or 0):.2f} ; stop-outs {int(fin.get('stopouts', 0) or 0)})"
                          + (" — MT5 : " + " | ".join(errs) if errs else (f" — MT5 : {line}" if line else "")))
             log.warning("backtest #%s incomplet : %s", run.rid, run.error)
             return
