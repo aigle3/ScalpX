@@ -206,47 +206,15 @@ class Optimizer:
         if gkey == "objectif":
             cur += "; créneaux : " + optim.slots_label(optim._masks(params, optim.SLOT_KEYS))
         self.note(f"valeurs actuelles : {cur}")
-        d_from, d_to = bt.date_range(optim.SAFETY_DAYS)
-        inputs = await self.r._bt_inputs(ref.id)
-        if isinstance(inputs, str):
-            self.note(f"backtest impossible : {inputs}")
+        got = await self._backtest(ref, vs, f"🤖 optimiseur {gtitle}")
+        if isinstance(got, str):
+            if got.startswith("backtest impossible"):
+                return
+            self.ctx.db.opt_add(gkey, "erreur", got, "", None)
+            await self._send(f"❌ <b>Optimiseur · {esc(gtitle)}</b> : backtest en échec ({esc(got)}). Aucun réglage changé.")
             return
-        bparams, label, deposit, currency, leverage, comm, slip = inputs
-        rid = self.ctx.db.bt_create("opt", d_from, d_to, "reel", f"🤖 optimiseur {gtitle} · {label}")
-        self.note(f"démarrage {self._now().strftime('%H:%M')} : pas de limite de durée, le test va jusqu'au bout")
-        scen = Path(self.ctx.cfg.paths.common()) / f"bt_{rid}_scen.txt"
-        atomic_write(scen, optim.scenario_file(vs))
-        from mt5.backtester import Run
-        run = Run(rid, "opt", d_from, d_to, "reel", label)
-        self.note(f"backtest #{rid} : {bt.human_date(d_from)} → {bt.human_date(d_to)}, ticks réels, dépôt {deposit:.2f} {currency}")
-        last = {"stage": "", "pct": -10}
-
-        async def quiet(r) -> None:                            # pas de message Telegram la nuit : tout va au journal
-            pct = int(bt.progress_frac(r.progress, r.d_from, r.d_to) * 100)
-            if r.stage != last["stage"]:
-                last["stage"] = r.stage
-                log.info("backtest #%s : %s", rid, r.stage)
-            if pct >= last["pct"] + 10:
-                last["pct"] = pct
-                self.stage = f"backtest #{rid} : {pct} %"
-                log.info("backtest #%s : %s %% (jour simulé %s)", rid, pct,
-                         bt.human_date(int((r.progress or {}).get("sim", r.d_from) or r.d_from)))
-            if r.last_line and "error" in r.last_line.lower():
-                log.info("MT5 : %s", r.last_line)
-
-        try:
-            run = await self.r.bt.execute(run, params=bparams, deposit=deposit, currency=currency, leverage=leverage,
-                                          comm=comm, slip=slip, notify=quiet, poll_s=self.ctx.cfg.backtest.poll_s)
-        finally:
-            safe_remove(scen)
-        if run.result is not None:
-            run.result.params = dict(bparams)
-        self.ctx.db.bt_update(rid, "ok" if run.ok else "erreur", run.result.to_json() if run.result else "", run.error)
-        if not run.ok:
-            self.note(f"backtest #{rid} en échec : {run.error}")
-            self.ctx.db.opt_add(gkey, "erreur", run.error, "", rid)
-            await self._send(f"❌ <b>Optimiseur · {esc(gtitle)}</b> : backtest en échec ({esc(run.error)}). Aucun réglage changé.")
-            return
+        run, rid, bparams, currency = got
+        d_to = run.d_to
         rows = labo.rows_of(self.ctx.db.labo_since(0, f"bt_{rid}"), "SERIE")
         self.note(f"backtest #{rid} terminé en {int((time.time() - self.started) / 60)} min : {len(rows)} objectifs virtuels")
         if optim.ea_too_old(rows, vs):
@@ -257,10 +225,40 @@ class Optimizer:
                              "Installe la mise à jour de l'EA ; aucun réglage changé.")
             return
         dec = optim.decide(rows, vs, d_to, params)
+        # après une nuit normale où les réglages actuels sont dangereux : la nuit suivante est une nuit 🛟 Sécurité
+        # (après une nuit de sécurité, on revient à la rotation, qui revérifiera)
+        lost = bool(dec.table) and dec.table[0].lost60 > 0
+        cur_ok, cur_why = optim.real_check(run.result)        # Bot 3.2.0 : robot réel du testeur = réglages actuels
+        self.note(f"robot réel du testeur (réglages actuels) : {cur_why}")
+        if not cur_ok:
+            lost = True
+        # Bot 3.2.0 : 🔒 confirmation. Chaque variante n'est jugée que seule (séries virtuelles) : avant d'appliquer, l'ENSEMBLE
+        # des réglages avec le changement (et les créneaux) est rejoué par le robot réel du testeur sur 60 j. Refusé au
+        # moindre stop-out, compte perdu ou drawdown ≥ 90 %.
+        combo: dict = {}
+        if dec.change is not None:
+            combo.update(dec.change.changes)
+        if dec.slots is not None and dec.slots.changes:
+            combo.update(dec.slots.changes)
+        refused = ""
+        conf_line = ""
+        if combo:
+            self.note("🔒 confirmation : backtest de l'ensemble des réglages avec " +
+                      " ; ".join(f"{p_} {o} → {n}" for p_, (o, n) in combo.items()))
+            got2 = await self._backtest(ref, [], f"🔒 confirmation {gtitle}", {p_: n for p_, (o, n) in combo.items()})
+            if isinstance(got2, str):
+                refused = f"confirmation impossible ({got2})"
+            else:
+                ok2, why2 = optim.real_check(got2[0].result)
+                if ok2:
+                    conf_line = f"🔒 Confirmé par le backtest #{got2[1]} de l'ensemble : {why2}"
+                else:
+                    refused = f"l'ensemble des réglages avec ce changement ne passe pas (backtest #{got2[1]} : {why2})"
+            self.note(conf_line or f"🔒 REFUSÉ : {refused}")
         wider: list[str] = []
         if not safety:                                         # portée de recherche des réglages testés pour le prochain tour
             keys = sorted({k for v in vs for k in v.changes if k in optim.NUM})
-            changed = set(dec.change.changes) if dec.change is not None else set()
+            changed = set(dec.change.changes) if dec.change is not None and not refused else set()
             before = self.scale()
             sc, idl = optim.next_scale(before, self.idle(), keys, changed)
             self.ctx.db.meta_set("opt_scale", json.dumps(sc))
@@ -269,9 +267,6 @@ class Optimizer:
             if wider:
                 self.note(f"{optim.IDLE_PASSES} passages sans changement : au prochain tour, recherche plus loin (" +
                           ", ".join(f"{k} ±{sc[k]} crans" for k in wider) + ")")
-        # après une nuit normale où les réglages actuels sont dangereux : la nuit suivante est une nuit 🛟 Sécurité
-        # (après une nuit de sécurité, on revient à la rotation, qui revérifiera)
-        lost = bool(dec.table) and dec.table[0].lost60 > 0
         wait = self.schedule_safety(lost, safety)
         if lost and not safety and wait > 0:
             self.note(f"compte perdu sur 60 j, mais nuit de sécurité déjà faite récemment : prochaine possible dans {wait} nuit(s)")
@@ -282,7 +277,25 @@ class Optimizer:
         lines = [f"🤖 <b>Optimiseur · {esc(gtitle)}</b> · nuit du {self._now().strftime('%d/%m')}",
                  f"<i>{nv} variantes testées · choix sur {optim.CHOOSE_DAYS} j, sécurité sur {optim.SAFETY_DAYS} j · "
                  f"backtest #{rid} ({int((time.time() - self.started) / 60)} min)</i>", ""]
-        if dec.change is not None:
+        if refused:
+            lines.append(f"🔒 <b>Refusé à la confirmation</b> : {esc(refused)}")
+            would = " · ".join(f"{optim.label_of(p_, o).split(' : ')[0]} {esc(optim.value_text(p_, o))} → {esc(optim.value_text(p_, n))}"
+                               for p_, (o, n) in combo.items() if p_ not in optim.SLOT_KEYS)
+            if dec.slots is not None and dec.slots.changes:
+                cur_m = optim._masks(params, optim.SLOT_KEYS)
+                new_m = [int(dec.slots.changes.get(k, (str(m), str(m)))[1]) for k, m in zip(optim.SLOT_KEYS, cur_m)]
+                would = (would + " · " if would else "") + f"créneaux {esc(optim.slots_label(new_m))}"
+            lines.append(f"   proposé : {would}")
+            lines.append("   <b>aucun réglage changé</b>")
+            dec.change = None
+            if dec.slots is not None:
+                dec.slots.changes = {}
+                dec.slots.lines = []
+        if not cur_ok:
+            lines.append(f"⚠️ <b>Réglages actuels</b> (robot réel du testeur) : {esc(cur_why)}")
+        if refused:
+            pass                                               # déjà expliqué ci-dessus
+        elif dec.change is not None:
             v = dec.change
             oks = []
             for param, (old, new) in v.changes.items():
@@ -298,8 +311,10 @@ class Optimizer:
         else:
             lines.append(f"⏸ <b>Aucun changement</b> : {esc(dec.note)}")
             self.note(f"aucun changement : {dec.note}")
+        if conf_line:
+            lines.append(esc(conf_line))
         sp = dec.slots
-        if sp is not None:                                     # 🕐 créneaux : retraits / ajouts
+        if sp is not None and not refused:                                     # 🕐 créneaux : retraits / ajouts
             if sp.changes:
                 n_ok = []
                 for key, (old, new) in sp.changes.items():
@@ -336,6 +351,52 @@ class Optimizer:
         self.note(f"nuit terminée à {self._now().strftime('%H:%M')}")
         kb = ([[("↩️ Annuler ce changement", f"d:opu:{oid}")]] if applied else []) + [[("🤖 Optimiseur", "d:opt"), ("✖ Fermer", "d:close")]]
         await self._send("\n".join(lines), kb, silent=True)
+
+    async def _backtest(self, ref, vs: list, title: str, override: dict[str, str] | None = None):
+        """Backtest de 60 j sur le terminal de test : réglages du compte de référence (+ `override`) pour le robot du
+        testeur, `vs` en séries virtuelles. → (run, rid, bparams, devise) ou message d'erreur (str)."""
+        d_from, d_to = bt.date_range(optim.SAFETY_DAYS)
+        inputs = await self.r._bt_inputs(ref.id)
+        if isinstance(inputs, str):
+            self.note(f"backtest impossible : {inputs}")
+            return f"backtest impossible : {inputs}"
+        bparams, label, deposit, currency, leverage, comm, slip = inputs
+        if override:
+            bparams = {**bparams, **override}
+        rid = self.ctx.db.bt_create("opt", d_from, d_to, "reel", f"{title} · {label}")
+        self.note(f"démarrage {self._now().strftime('%H:%M')} : pas de limite de durée, le test va jusqu'au bout")
+        scen = Path(self.ctx.cfg.paths.common()) / f"bt_{rid}_scen.txt"
+        atomic_write(scen, optim.scenario_file(vs))
+        from mt5.backtester import Run
+        run = Run(rid, "opt", d_from, d_to, "reel", label)
+        self.note(f"backtest #{rid} : {bt.human_date(d_from)} → {bt.human_date(d_to)}, ticks réels, dépôt {deposit:.2f} {currency}")
+        last = {"stage": "", "pct": -10}
+
+        async def quiet(r) -> None:                            # pas de message Telegram la nuit : tout va au journal
+            pct = int(bt.progress_frac(r.progress, r.d_from, r.d_to) * 100)
+            if r.stage != last["stage"]:
+                last["stage"] = r.stage
+                log.info("backtest #%s : %s", rid, r.stage)
+            if pct >= last["pct"] + 10:
+                last["pct"] = pct
+                self.stage = f"backtest #{rid} : {pct} %"
+                log.info("backtest #%s : %s %% (jour simulé %s)", rid, pct,
+                         bt.human_date(int((r.progress or {}).get("sim", r.d_from) or r.d_from)))
+            if r.last_line and "error" in r.last_line.lower():
+                log.info("MT5 : %s", r.last_line)
+
+        try:
+            run = await self.r.bt.execute(run, params=bparams, deposit=deposit, currency=currency, leverage=leverage,
+                                          comm=comm, slip=slip, notify=quiet, poll_s=self.ctx.cfg.backtest.poll_s)
+        finally:
+            safe_remove(scen)
+        if run.result is not None:
+            run.result.params = dict(bparams)
+        self.ctx.db.bt_update(rid, "ok" if run.ok else "erreur", run.result.to_json() if run.result else "", run.error)
+        if not run.ok:
+            self.note(f"backtest #{rid} en échec : {run.error}")
+            return run.error or "erreur inconnue"
+        return run, rid, bparams, currency
 
     async def _apply(self, insts, key: str, raw: str) -> int:
         """Réglage appliqué à tous les comptes lancés + preset ⭐ actif (et .set de BASE)."""

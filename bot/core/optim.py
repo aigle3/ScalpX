@@ -433,6 +433,25 @@ class SlotPlan:
     changes: dict = field(default_factory=dict)           # masque → (ancien, nouveau)
 
 
+def real_check(res) -> tuple[bool, str]:
+    """Bot 3.2.0 : robot RÉEL du testeur (marge et stop-out du broker simulés) sur 60 j : sûr si aucun stop-out, aucun
+    compte perdu (rechargé sous le seuil de reprise) et drawdown < DD_LIMIT. Sert à confirmer l'ENSEMBLE des réglages
+    avec le changement avant de l'appliquer (chaque variante n'est testée que seule en séries virtuelles)."""
+    if res is None:
+        return False, "pas de résultat du testeur"
+    bad = []
+    if res.stopouts > 0:
+        bad.append(f"{res.stopouts} stop-out(s)")
+    if res.reloads > 0:
+        bad.append(f"compte perdu {res.reloads} fois")
+    if res.dd_max >= DD_LIMIT:
+        bad.append(f"drawdown {res.dd_max:.0f} %")
+    if bad:
+        return False, " · ".join(bad) + f" sur {SAFETY_DAYS} j"
+    return True, (f"aucun stop-out, aucun compte perdu, drawdown max {res.dd_max:.0f} %, "
+                  f"{res.net:+.2f} € sur {SAFETY_DAYS} j")
+
+
 @dataclass
 class Decision:
     change: Variant | None = None

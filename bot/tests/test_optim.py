@@ -290,3 +290,87 @@ def test_nuit_mode_continu():
     rows = [{"sc": "p1", "opts": "o=0.40"}]
     assert optim.ea_too_old(rows, vs[:1])                                               # EA qui ignore ct=
     assert not optim.ea_too_old([{"sc": "p1", "opts": "ct=1"}], vs[:1])
+
+
+# ---- Bot 3.2.0 : 🔒 confirmation de l'ensemble des réglages par le robot réel du testeur avant d'appliquer
+def test_real_check():
+    from core.backtest import Result
+    ok, why = optim.real_check(Result(1, 0, 0, deposit=200, final=260, dd_max=40, stopouts=0))
+    assert ok and "aucun stop-out" in why and "+60.00" in why
+    ok, why = optim.real_check(Result(1, 0, 0, dd_max=95, stopouts=2, reloads=1))
+    assert not ok and "2 stop-out(s)" in why and "compte perdu 1 fois" in why and "drawdown 95 %" in why
+    assert optim.real_check(None)[0] is False
+
+
+def _opt_env(tmp_path, monkeypatch, results):
+    """Optimiseur branché sur une vraie base, testeur simulé : `results` = Result rendus par backtest successif."""
+    import asyncio as aio
+    from types import SimpleNamespace as NS
+    from storage.db import Database
+    from bot import optim as bo
+    from core.backtest import Result
+    db = Database(tmp_path / "o.db")
+    sent, calls, sets = [], [], []
+    inst = NS(id="A", label="A")
+
+    class BT:
+        def configured(self): return True
+        async def execute(self, run, *, params, **kw):
+            calls.append(dict(params))
+            run.result = results[len(calls) - 1]
+            run.ok = True
+            return run
+
+    class Sender:
+        async def send(self, chat, text, kb, silent): sent.append(text)
+
+    async def bt_inputs(_id): return (dict(P), "A", 200.0, "EUR", 500, 0.0, 0.0)
+    async def flash_refresh(**kw): return None
+    store = NS(active="", set_value=lambda *a: None)
+    r = NS(bt=BT(), sender=Sender(), chat_id=1, _bt_inputs=bt_inputs,
+           dash=NS(flash=lambda *a: None, refresh=flash_refresh, store=store), sync_base_set=lambda: None)
+    paths = NS(data=tmp_path, common=lambda: tmp_path)
+    r.ctx = NS(db=db, cfg=NS(paths=paths, backtest=NS(poll_s=1), reports=NS(timezone="Europe/Paris")), deploy=NS(running=False),
+               mgr=NS(is_running=lambda i: True))
+    monkeypatch.setattr(db, "list", lambda *a, **k: [inst])
+
+    async def read_raw(ctx, i): return dict(P)
+    async def send_cmd(ctx, i, cmd, args):
+        sets.append(tuple(args))
+        return NS(ok=True)
+    monkeypatch.setattr(bo.pui, "read_raw", read_raw)
+    monkeypatch.setattr(bo.act, "send_cmd", send_cmd)
+    monkeypatch.setattr(bo.labo, "rows_of", lambda *a: [])
+    o = bo.Optimizer(r)
+    o.started = __import__("time").time()
+    return o, db, sent, calls, sets, aio
+
+
+def test_confirmation_refuse(tmp_path, monkeypatch):
+    from core.backtest import Result
+    v = optim.Variant("v1", "Grille 1,3 × ATR", {"gridatr": ("0.7", "0.9")})
+    dec = optim.Decision(change=v, reason="meilleur", table=[])
+    monkeypatch.setattr(optim, "decide", lambda *a, **k: dec)
+    ok_cur = Result(1, 0, 0, deposit=200, final=250, dd_max=50, stopouts=0)
+    bad = Result(2, 0, 0, deposit=200, final=8, dd_max=97, stopouts=1)
+    o, db, sent, calls, sets, aio = _opt_env(tmp_path, monkeypatch, [ok_cur, bad])
+    aio.run(o._run(True))
+    assert len(calls) == 2 and calls[1]["gridatr"] == "0.9" and calls[0].get("gridatr") != "0.9"
+    assert sets == []                                            # rien appliqué
+
+    assert "Refusé à la confirmation" in sent[-1] and "1 stop-out(s)" in sent[-1]
+
+
+def test_confirmation_ok_et_reglages_actuels_dangereux(tmp_path, monkeypatch):
+    from core.backtest import Result
+    v = optim.Variant("v1", "Grille 1,3 × ATR", {"gridatr": ("0.7", "0.9")})
+    dec = optim.Decision(change=v, reason="meilleur", table=[])
+    monkeypatch.setattr(optim, "decide", lambda *a, **k: dec)
+    cur_bad = Result(1, 0, 0, deposit=200, final=8, dd_max=97, stopouts=1)
+    good = Result(2, 0, 0, deposit=200, final=240, dd_max=45, stopouts=0)
+    o, db, sent, calls, sets, aio = _opt_env(tmp_path, monkeypatch, [cur_bad, good])
+    aio.run(o._run(True))
+    assert ("gridatr", "0.9") in sets
+
+    assert "Confirmé par le backtest" in sent[-1] and "Réglages actuels" in sent[-1]
+    assert o.safety_next                                         # réglages actuels dangereux → nuit 🛟 ensuite
