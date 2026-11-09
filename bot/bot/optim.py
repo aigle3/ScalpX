@@ -218,7 +218,7 @@ class Optimizer:
         rows = labo.rows_of(self.ctx.db.labo_since(0, f"bt_{rid}"), "SERIE")
         self.note(f"backtest #{rid} terminé en {int((time.time() - self.started) / 60)} min : {len(rows)} objectifs virtuels")
         if optim.ea_too_old(rows, vs):
-            need = "7.8.0" if gkey == "continu" else "7.7.0"
+            need = "7.7.0"
             self.note(f"EA du testeur trop ancien (< {need}) : options des variantes ignorées, nuit annulée")
             self.ctx.db.opt_add(gkey, "erreur", f"EA du testeur < {need}", "", rid)
             await self._send(f"❌ <b>Optimiseur · {esc(gtitle)}</b> : l'EA du testeur est trop ancien ({need} ou plus requis). "
@@ -471,12 +471,12 @@ class Optimizer:
 
 GUIDE = """❓ <b>L'optimiseur, en bref</b>
 
-<b>Ce qu'il fait</b> : chaque nuit à <b>21 h</b> (réglable), il rejoue les <b>60 derniers jours</b> dans le testeur avec tes réglages actuels et jusqu'à 38 variantes (des robots fictifs joués en parallèle sur les mêmes prix). Pas de limite de durée : le test va jusqu'au bout, même après 2 h. Une <b>catégorie</b> par nuit, 5 nuits à la suite :
+<b>Ce qu'il fait</b> : chaque nuit à <b>21 h</b> (réglable), il rejoue les <b>60 derniers jours</b> dans le testeur avec tes réglages actuels et jusqu'à 38 variantes (des robots fictifs joués en parallèle sur les mêmes prix). Pas de limite de durée : le test va jusqu'au bout, même après 2 h. Une <b>catégorie</b> par nuit, 4 nuits à la suite :
 🧱 <b>Grille et lots</b> (ATR de la grille, minimum, maximum · ordres en attente, multiplicateur de lot, trades avant multiplication)
 📐 <b>Signal et TP</b> (EMA rapide, EMA lente, période ATR · multiplicateur ATR du TP, TP minimum, TP maximum)
 🛡️ <b>Filtres</b> (chacun activé ou désactivé · ATR min/max, volume min/max, extension max, corps de bougie, bougies du signal récent)
 🎯 <b>Objectif et créneaux</b> (% de l'objectif · créneaux)
-🔁 <b>Mode continu</b> (objectifs lancés dès que tous les filtres sont OK à la clôture M5, au lieu des créneaux — ou l'inverse —, seul ou avec l'objectif à ±1 cran)
+Le <b>mode continu</b> n'est jamais modifié par l'optimiseur : c'est toi qui le choisis.
 
 <b>Comment il choisit</b>
 • Il ne garde qu'une variante qui <b>ne perd jamais le compte</b> sur 60 jours et 30 jours, avec un drawdown sous 90 %.

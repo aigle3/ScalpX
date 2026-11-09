@@ -1,7 +1,7 @@
 """Optimiseur autonome (EA 7.7.0+) : chaque nuit, une catégorie de réglages est testée autour des valeurs actuelles du
 compte de référence, dans UN backtest de 60 jours où chaque variante est un scénario virtuel (valeurs absolues).
 
-Cycle de 5 nuits consécutives : 🧱 Grille et lots → 📐 Signal et TP → 🛡️ Filtres → 🎯 Objectif et créneaux → 🔁 Mode continu.
+Cycle de 4 nuits consécutives : 🧱 Grille et lots → 📐 Signal et TP → 🛡️ Filtres → 🎯 Objectif et créneaux.
 
 Choix sur les 30 derniers jours, sécurité sur 60 jours :
   - une variante n'est retenue que si elle ne perd JAMAIS le compte (60 j et 30 j) et reste sous DD_LIMIT de drawdown ;
@@ -12,8 +12,7 @@ Choix sur les 30 derniers jours, sécurité sur 60 jours :
 Portée : 3 passages sans changement d'un réglage → recherche 2 fois plus loin (1 → 2 → 4 crans, puis retour à 1).
 Créneaux (nuit 🎯) : un créneau est retiré s'il dépasse 80 % de drawdown sur 60 j ; une heure pile libre, testée seule,
 est ajoutée si elle reste sous 80 % de drawdown, ne perd jamais le compte et gagne de l'argent. Coupures jamais touchées.
-Mode continu (nuit 🔁, EA 7.8.0+) : le mode inverse du compte (continu ↔ créneaux) est testé seul et avec l'objectif à ±1 cran ;
-il n'est adopté qu'avec les mêmes règles (sûr sur 60 j, nettement meilleur sur 30 j).
+Le mode continu (sl_cont) n'est jamais modifié par l'optimiseur (Bot 3.2.1).
 """
 from __future__ import annotations
 
@@ -76,7 +75,6 @@ GROUPS: list[tuple[str, str, list[list[str]]]] = [
     ("signal_tp", "📐 Signal et TP", [["fast", "slow", "atrp"], ["atrmult", "tpmin", "tpmax"]]),
     ("filtres", "🛡️ Filtres", [["atrmin", "atrmax"], ["volmin", "volmax"], ["extatr"], ["canbody"], ["freshbars"]]),
     ("objectif", "🎯 Objectif et créneaux", [["sl_pct"]]),
-    ("continu", "🔁 Mode continu", []),                  # EA 7.8.0 : continu ↔ créneaux (variantes propres, voir continu_variants)
 ]
 MODE_KEY = "sl_cont"
 # nuit 🛟 Sécurité : hors rotation, lancée après une nuit où les réglages actuels perdent le compte
@@ -96,8 +94,6 @@ def group_params(key: str) -> list[str]:
     """Réglages numériques d'une catégorie (portée de recherche, journal)."""
     if key == SAFETY[0]:
         return list(SAFETY[2])
-    if key == "continu":
-        return [MODE_KEY, "sl_pct"]
     g = next((x for x in GROUPS if x[0] == key), None)
     return [k for sub in g[2] for k in sub] if g else []
 
@@ -263,8 +259,6 @@ def variants(params: dict[str, str], group: str, scale: dict[str, int] | None = 
     Un témoin « calcul propre » est ajouté en tête dès qu'une variante se compare à lui."""
     if group == SAFETY[0]:
         return safety_variants(params)
-    if group == "continu":
-        return continu_variants(params, scale)
     g = next((x for x in GROUPS if x[0] == group), None)
     if g is None:
         return []
@@ -314,25 +308,6 @@ def variants(params: dict[str, str], group: str, scale: dict[str, int] | None = 
 
 NEW_OPTS = frozenset({"tb", "ef", "es", "ap", "am", "tn", "tx", "an", "ax", "vn", "vx", "ea", "cb", "r", "sm", "ct"})
 
-
-def continu_variants(params: dict[str, str], scale: dict[str, int] | None = None) -> list[Variant]:
-    """Nuit 🔁 Mode continu : le mode inverse du compte (continu ↔ créneaux), seul puis avec l'objectif à ±1 cran
-    (un objectif lancé plus souvent n'a pas forcément la même taille idéale). Retour aux créneaux testé seulement si
-    le compte en a. Rien à tester si l'EA ne connaît pas encore le mode (réglage absent)."""
-    if MODE_KEY not in params:
-        return []
-    old = "1" if params.get(MODE_KEY, "0") == "1" else "0"
-    new = "0" if old == "1" else "1"
-    if new == "0" and not slots_of(_masks(params, SLOT_KEYS)):
-        return []
-    name = "Mode continu (filtres OK + clôture M5)" if new == "1" else "Créneaux (mode continu désactivé)"
-    out = [Variant("", name, {MODE_KEY: (old, new)}, opts={"ct": new}, kind="mode")]
-    for r in _moves(params, "sl_pct", scale):
-        out.append(Variant("", f"{name} + objectif {fnum(float(r))} %", {MODE_KEY: (old, new), "sl_pct": (params["sl_pct"], r)},
-                           opts={"ct": new, "o": r}, kind="mode"))
-    for n, v in enumerate(out, 1):
-        v.key = f"p{n}"
-    return out
 
 
 def ea_too_old(rows: list[dict], vs: list[Variant]) -> bool:

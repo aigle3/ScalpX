@@ -22,7 +22,7 @@ P = {"gridatr": "0.7", "gridmin": "200", "gridmax": "500", "dyngrid": "1", "maxp
 
 
 def test_cinq_categories_et_variantes():
-    assert [g[0] for g in optim.GROUPS] == ["grille_lots", "signal_tp", "filtres", "objectif", "continu"]
+    assert [g[0] for g in optim.GROUPS] == ["grille_lots", "signal_tp", "filtres", "objectif"]
     vs = optim.variants(P, "grille_lots")
     assert [v.opts for v in vs[:6]] == [{"ga": "0.6"}, {"ga": "0.8"}, {"gn": "150"}, {"gn": "250"}, {"gx": "400"}, {"gx": "600"}]
     assert len(vs) == 36 and [v.key for v in vs] == [f"p{i}" for i in range(1, 37)]       # 18 grille + 18 lots
@@ -273,24 +273,12 @@ def test_securite_au_plus_une_fois_par_tour():
     assert not o.safety_next
 
 
-def test_nuit_mode_continu():
-    """Nuit 🔁 : mode inverse du compte, seul puis avec l'objectif à ±1 cran ; option ct= du labo."""
-    p = {**P, "sl_cont": "0", "sl_pct": "0.5"}
-    vs = optim.variants(p, "continu")
-    assert [v.opts for v in vs] == [{"ct": "1"}, {"ct": "1", "o": "0.4"}, {"ct": "1", "o": "0.6"}]
-    assert [v.key for v in vs] == ["p1", "p2", "p3"] and all(v.ref == "miroir" for v in vs)
-    assert vs[0].changes == {"sl_cont": ("0", "1")} and vs[1].changes == {"sl_cont": ("0", "1"), "sl_pct": ("0.5", "0.4")}
-    assert "|ct=1;o=0.4" in optim.scenario_file(vs)
-    back = optim.variants({**p, "sl_cont": "1"}, "continu")
-    assert back[0].opts == {"ct": "0"} and back[0].name.startswith("Créneaux")
-    assert optim.variants({**p, "sl_cont": "1", "sl_m00": "0"}, "continu") == []    # pas de créneau : retour impossible
-    assert optim.variants(P if "sl_cont" not in P else {k: v for k, v in P.items() if k != "sl_cont"}, "continu") == []  # EA < 7.8.0
-    assert optim.label_of("sl_cont", "1") == "Lancement des objectifs : mode continu"
-    assert optim.value_text("sl_cont", "0") == "créneaux"
-    rows = [{"sc": "p1", "opts": "o=0.40"}]
-    assert optim.ea_too_old(rows, vs[:1])                                               # EA qui ignore ct=
-    assert not optim.ea_too_old([{"sc": "p1", "opts": "ct=1"}], vs[:1])
 
+def test_mode_continu_hors_optimisation():
+    """Bot 3.2.1 : aucune nuit ne touche au mode continu."""
+    assert all("sl_cont" not in k for g in optim.GROUPS for ks in g[2] for k in ks)
+    for g in optim.GROUPS:
+        assert all("sl_cont" not in v.changes for v in optim.variants({**P, "sl_cont": "1"}, g[0]))
 
 # ---- Bot 3.2.0 : 🔒 confirmation de l'ensemble des réglages par le robot réel du testeur avant d'appliquer
 def test_real_check():
