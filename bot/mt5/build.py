@@ -154,12 +154,61 @@ def command_line(cfg: Config, log_path: Path) -> str:
             f'/inc:"{base / "MQL5"}" /log:"{log_path}"')
 
 
+COMPILE_TIMEOUT_S = 300.0           # Bot 3.2.4 : 5 min (3 min avant)
+
+
+def _kill_tree(pid: int) -> None:
+    try:
+        import psutil
+        p = psutil.Process(pid)
+        for c in p.children(recursive=True):
+            try:
+                c.kill()
+            except psutil.Error:
+                pass
+        p.kill()
+    except Exception:                                         # psutil absent / processus déjà fini
+        pass
+
+
+def kill_stale(base: Path) -> int:
+    """Bot 3.2.4 : ferme les MetaEditor de BASE restés ouverts (compilation précédente bloquée, fenêtre oubliée) :
+    tant qu'il en reste un, chaque nouvelle compilation attend derrière lui et finit en « n'a pas fini »."""
+    try:
+        import psutil
+    except ImportError:
+        return 0
+    target = os.path.normcase(os.path.abspath(str(Path(base) / METAEDITOR)))
+    n = 0
+    for p in psutil.process_iter(["name", "exe"]):
+        try:
+            if (p.info.get("name") or "").lower() != METAEDITOR.lower():
+                continue
+            exe = p.info.get("exe") or ""
+            if exe and os.path.normcase(os.path.abspath(exe)) != target:
+                continue
+            _kill_tree(p.pid)
+            n += 1
+        except Exception:
+            continue
+    if n:
+        log.warning("compilation : %d MetaEditor de BASE resté(s) ouvert(s) fermé(s)", n)
+        time.sleep(2)
+    return n
+
+
 def _run(cmd: str, timeout: float) -> None:
-    subprocess.run(cmd, timeout=timeout, shell=False, check=False,
-                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    proc = subprocess.Popen(cmd, shell=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_tree(proc.pid)                                  # sinon MetaEditor reste bloqué et bloque les suivantes
+        raise
 
 
-async def compile_ea(cfg: Config, timeout: float = 180.0, runner=None) -> BuildResult:
+async def compile_ea(cfg: Config, timeout: float = COMPILE_TIMEOUT_S, runner=None) -> BuildResult:
+    if runner is None:
+        await asyncio.get_running_loop().run_in_executor(None, kill_stale, cfg.paths.base)
     runner = runner or _run
     ver = source_version(cfg)
     ex5 = experts(cfg) / cfg.mt5.ea_file
@@ -173,7 +222,12 @@ async def compile_ea(cfg: Config, timeout: float = 180.0, runner=None) -> BuildR
     try:
         await asyncio.get_running_loop().run_in_executor(None, runner, command_line(cfg, log_path), timeout)
     except subprocess.TimeoutExpired:
-        return BuildResult(False, ver, -1, 0, "MetaEditor n'a pas fini en 3 min")
+        try:
+            tail = [l for l in basemod._decode(log_path.read_bytes()).splitlines() if l.strip()][-2:]
+        except OSError:
+            tail = []
+        return BuildResult(False, ver, -1, 0, f"MetaEditor n'a pas fini en {int(timeout // 60)} min (fermé ; réessaie)"
+                           + ("\n" + "\n".join(tail) if tail else ""))
     except OSError as exc:
         return BuildResult(False, ver, -1, 0, f"MetaEditor non lancé : {exc}")
     try:

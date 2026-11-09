@@ -102,3 +102,17 @@ async def test_mise_a_jour_github_meme_version_compile_quand_meme(cfg, db):
     res = await b.auto_build(cfg, db, req, runner=fake_metaeditor(cfg))
     assert res.ok and (ex / "ScalpX_v5.ex5").read_text() == "compiled 5.0"
     assert b.pending_build(cfg, db) is None                      # .ex5 à jour : rien à refaire
+
+
+def test_kill_stale_sans_metaeditor(tmp_path):
+    """Bot 3.2.4 : rien à fermer → 0, sans erreur (psutil absent ou aucun MetaEditor de BASE)."""
+    assert b.kill_stale(tmp_path) == 0
+
+
+async def test_compilation_trop_longue(cfg):
+    import subprocess
+
+    def slow(cmd, timeout):
+        raise subprocess.TimeoutExpired(cmd, timeout)
+    res = await b.compile_ea(cfg, timeout=300, runner=slow)
+    assert not res.ok and "5 min" in res.detail
