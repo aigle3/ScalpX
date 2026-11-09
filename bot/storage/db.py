@@ -251,6 +251,10 @@ class Database:
     def opt_list(self, limit: int = 10) -> list[sqlite3.Row]:
         return self._all("SELECT * FROM opt_runs ORDER BY id DESC LIMIT ?", (limit,))
 
+    def opt_history(self) -> list[sqlite3.Row]:
+        """Toutes les nuits, de la plus ancienne à la plus récente (reset : valeurs d'avant la 1re optimisation)."""
+        return self._all("SELECT * FROM opt_runs ORDER BY id ASC")
+
     def opt_get(self, rid: int) -> sqlite3.Row | None:
         r = self._all("SELECT * FROM opt_runs WHERE id=?", (rid,))
         return r[0] if r else None

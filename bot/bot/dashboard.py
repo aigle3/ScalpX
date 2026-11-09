@@ -169,7 +169,7 @@ class Dashboard:
             kb: Keyboard = [
                 [("⏸ Suspendre" if o.on else "✅ Activer", "d:opton"), (f"🕐 {o.hour:02d}:00 ▸", "d:opth")],
                 [("▶️ Lancer maintenant", "d:optgo"), ("📜 Journal", "d:optj")],
-                [("🔑 Terminal de test", "d:btc")],
+                [("🔑 Terminal de test", "d:btc"), ("♻️ Réinitialiser", "d:optr")],
                 [("❓ Guide", "d:optg"), ("⬅ Rapports", "d:rpt"), ("🏠 Accueil", "d:home")],
             ]
             if self.bt is not None and self.bt.busy():

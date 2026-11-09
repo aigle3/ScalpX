@@ -137,7 +137,7 @@ class Router:
             if len(p) > 2 and p[2].isdigit() and int(p[2]) in self.dash.SST_DAYS:
                 self.dash.sst_days = int(p[2])
             self.dash.goto("sst")
-        elif sub in ("opt", "opton", "opth", "optgo", "optj", "optf", "optg", "opu"):   # 🤖 optimiseur
+        elif sub in ("opt", "opton", "opth", "optgo", "optj", "optf", "optg", "opu", "optr"):   # 🤖 optimiseur
             r = await self._opt_cb(sub, p)
             if r is not None:
                 return r
@@ -654,11 +654,27 @@ class Router:
         elif sub == "optg":
             await self.sender.send(self.chat_id, GUIDE, [[("✖ Fermer", "d:close")]], True)
             return ""
+        elif sub == "optr":                                     # Bot 3.3.0 : ♻️ réinitialisation
+            if o.running or self.bt.busy():
+                d.flash("⏳ Un test ou une optimisation est en cours : réessaie après.")
+                return None
+            return await self._ask("♻️ <b>Réinitialiser l'optimiseur ?</b>\n"
+                                   "• Cycle remis à zéro (prochaine nuit : 🧱 Grille et lots, compteurs effacés).\n"
+                                   f"• Réglages remis au preset <b>{esc(o.BASE_PRESET)}</b> (valeurs d'avant la 1re optimisation, "
+                                   "créé la 1re fois) sur tous les comptes lancés et dans le preset ⭐.\n"
+                                   "Coupures et mode continu non modifiés.", self._opt_reset, ("opt",), "♻️ Réinitialiser")
         elif sub == "opu" and arg.isdigit():
             rid = int(arg)
             return await self._ask("↩️ <b>Annuler ce changement de l'optimiseur ?</b>\nL'ancienne valeur est remise sur tous les comptes lancés "
                                    "et dans le preset ⭐.", lambda: self._opt_revert(rid), ("opt",), "↩️ Annuler le changement")
         return None
+
+    async def _opt_reset(self) -> None:
+        msg = await self.optim.reset()
+        self.ctx.db.add_action("", "Optimiseur réinitialisé (cycle + preset de base)", True)
+        await self.sender.send(self.chat_id, msg, [[("🤖 Optimiseur", "d:opt"), ("✖ Fermer", "d:close")]], False)
+        self.dash.goto("opt")
+        await self.dash.refresh(force=True)
 
     async def _opt_revert(self, rid: int) -> None:
         msg = await self.optim.revert(rid)

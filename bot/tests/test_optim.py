@@ -345,3 +345,37 @@ def test_testeur_sans_trading_reel(tmp_path, monkeypatch):
     aio.run(o._run(True))
     assert len(calls) == 1 and calls[0]["bt_labo_seul"] == "1" and ("gridatr", "0.9") in sets
     assert "Réglages actuels" not in sent[-1]
+
+
+def test_reinitialisation(tmp_path, monkeypatch):
+    """Bot 3.3.0 : ♻️ cycle à zéro + preset de base = valeurs d'avant la 1re optimisation (créé une fois, réutilisé)."""
+    import json
+    from core.presets import PresetStore
+    o, db, sent, calls, sets, aio = _opt_env(tmp_path, monkeypatch, [])
+    store = PresetStore(tmp_path / "presets.json")
+    store.put("mon", {"gridatr": "0.9", "freshbars": "18", "f_atr": "0", "sl_cont": "1"})
+    store.set_active("mon")
+    o.r.dash.store = store
+    o.r.sync_base_set = lambda: None
+    # historique : f_atr 1→0, gridatr 0.7→0.8 puis 0.8→0.9, freshbars 30→18 (annulé puis refait : 1re valeur gardée)
+    db.opt_add("filtres", "change", "", json.dumps({"f_atr": ["1", "0"]}), 1)
+    db.opt_add("grille_lots", "change", "", json.dumps({"gridatr": ["0.7", "0.8"]}), 2)
+    db.opt_add("grille_lots", "change", "", json.dumps({"gridatr": ["0.8", "0.9"]}), 3)
+    db.opt_add("filtres", "change", "", json.dumps({"freshbars": ["30", "18"], "sl_cont": ["0", "1"]}), 4)
+    db.meta_set("opt_grp", "3"); db.meta_set("opt_scale", '{"gridatr": 2}'); db.meta_set("opt_safety", "1")
+    assert o.initial_values() == {"f_atr": "1", "gridatr": "0.7", "freshbars": "30"}
+
+    async def read_raw(ctx, i): return {**P, "gridatr": "0.9", "freshbars": "18", "f_atr": "0", "sl_cont": "1"}
+    from bot import optim as bo
+    monkeypatch.setattr(bo.pui, "read_raw", read_raw)
+    msg = aio.run(o.reset())
+    assert set(sets) == {("f_atr", "1"), ("gridatr", "0.7"), ("freshbars", "30")}       # sl_cont jamais touché
+    assert o.group_index() == 0 and o.scale() == {} and not o.safety_next
+    assert store.presets[o.BASE_PRESET]["gridatr"] == "0.7" and store.presets["mon"]["gridatr"] == "0.7"
+    assert "Optimiseur réinitialisé" in msg and "0,9 × ATR → 0,7 × ATR" in msg
+    # 2e reset : preset de base réutilisé, l'historique du reset n'est pas une « optimisation »
+    store.presets[o.BASE_PRESET]["gridatr"] = "0.6"
+    assert "gridatr" in o.initial_values()
+    sets.clear()
+    aio.run(o.reset())
+    assert ("gridatr", "0.6") in sets

@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from core import backtest as bt, labo, optim
+from core import backtest as bt, labo, optim, presets as ps
 from core.fsio import atomic_write, safe_remove
 from . import actions as act
 from . import presets_ui as pui
@@ -371,6 +371,79 @@ class Optimizer:
             except Exception:
                 log.exception("preset ⭐ → .set de BASE")
         return ok
+
+    # ---- Bot 3.3.0 : ♻️ réinitialisation (cycle + preset de base d'avant la 1re optimisation)
+    BASE_PRESET = "🧩 Base avant optimisation"
+    NEVER_RESET = ("sl_cont",)                               # choix de l'utilisateur, jamais touché par l'optimiseur
+
+    def initial_values(self) -> dict[str, str]:
+        """Valeur de chaque réglage AVANT le premier changement de l'optimiseur (historique des nuits)."""
+        out: dict[str, str] = {}
+        for r in self.ctx.db.opt_history():
+            try:
+                ap = json.loads(r["applied"] or "{}")
+            except ValueError:
+                continue
+            if r["grp"] == "reset":                           # une réinitialisation n'est pas une optimisation
+                continue
+            for k, ov in ap.items():
+                if k not in out and isinstance(ov, (list, tuple)) and len(ov) == 2 and not k.startswith("ct_"):
+                    out[k] = str(ov[0])
+        return {k: v for k, v in out.items() if k not in self.NEVER_RESET}
+
+    def base_preset(self) -> dict[str, str]:
+        """Preset « 🧩 Base avant optimisation » : créé la 1re fois (preset ⭐ actif + valeurs d'avant l'optimiseur), puis
+        réutilisé tel quel à chaque réinitialisation."""
+        store = self.r.dash.store
+        if self.BASE_PRESET not in store.presets:
+            base = dict(store.presets.get(store.active, {})) if store.active else {}
+            base.update(self.initial_values())
+            store.put(self.BASE_PRESET, base)
+            log.info("preset de base créé : %d réglage(s)", len(base))
+        return dict(store.presets[self.BASE_PRESET])
+
+    def reset_cycle(self) -> None:
+        for k, v in (("opt_grp", "0"), ("opt_scale", "{}"), ("opt_idle", "{}"), ("opt_safety", "0"), ("opt_safety_wait", "0")):
+            self.ctx.db.meta_set(k, v)
+
+    async def reset(self) -> str:
+        if self.running:
+            return "⏳ Optimisation en cours : réessaie quand elle est finie."
+        base = {k: v for k, v in self.base_preset().items()
+                if k not in self.NEVER_RESET and not k.startswith("ct_") and k in ps.BY_KEY}
+        running = [i for i in self.ctx.db.list() if self.ctx.mgr.is_running(i)]
+        store = self.r.dash.store
+        if running:
+            try:
+                cur = await pui.read_raw(self.ctx, running[0])
+            except Exception:
+                cur = None
+        else:
+            cur = None
+        if not cur:
+            cur = dict(store.presets.get(store.active, {})) if store.active else {}
+        diff = {k: (cur.get(k, ""), v) for k, v in base.items() if cur.get(k) != v}
+        self.reset_cycle()
+        done = []
+        for k, (o, n) in diff.items():
+            ok = await self._apply(running, k, n)
+            name = optim.label_of(k, n)
+            name = name[:-len(optim.value_text(k, n)) - 3] if name.endswith(" : " + optim.value_text(k, n)) else name
+            done.append(f"{name} : {optim.value_text(k, o) if o else '?'} → {optim.value_text(k, n)}"
+                        f" ({ok}/{len(running)})")
+        summary = "♻️ Réinitialisation : cycle remis à zéro" + (" ; " + " ; ".join(done) if done else " ; réglages déjà à la base")
+        self.ctx.db.opt_add("reset", "change" if diff else "inchange", summary,
+                            json.dumps({k: [o, n] for k, (o, n) in diff.items() if o}), None)
+        self.note(summary)
+        lines = ["♻️ <b>Optimiseur réinitialisé</b>",
+                 f"🔄 Cycle remis à zéro : prochaine nuit {esc(optim.GROUPS[0][1])}, recherche normale, pas de nuit 🛟 en attente.",
+                 f"🧩 Preset de base : <b>{esc(self.BASE_PRESET)}</b>"]
+        if done:
+            lines += [f"Réglages remis ({len(done)}) :"] + [f"• {esc(d_)}" for d_ in done]
+        else:
+            lines.append("Réglages : déjà à la base, rien à changer.")
+        lines.append("<i>Coupures et mode continu non modifiés. ↩️ Annuler possible depuis 🤖 Optimiseur.</i>")
+        return "\n".join(lines)
 
     async def revert(self, oid: int) -> str:
         row = self.ctx.db.opt_get(oid)
