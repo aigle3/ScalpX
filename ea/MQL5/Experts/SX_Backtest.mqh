@@ -21,6 +21,7 @@ int      g_btGoals = 0, g_btWon = 0, g_btCancel = 0, g_btCut = 0, g_btSL = 0, g_
 double   g_btWd = 0, g_btDep = 0, g_btPeak = 0, g_btMaxDD = 0, g_btStart = 0;
 datetime g_btDDTs = 0;                // 7.6.0 : pire drawdown : moment (GMT), equity de référence (pic) et equity au plus bas
 double   g_btDDPeak = 0, g_btDDEq = 0;
+bool     g_btLaboOnly = false;        // 7.8.3 : optimiseur : le robot du testeur ne trade pas (séries virtuelles seules)
 double   g_btMinML = 0;               // 7.8.2 : niveau de marge le plus bas atteint (%)
 bool     g_btSOPending = false;       // 7.8.1 : stop-out à traiter (objectif terminé + recharge)
 int      g_btStopOuts = 0;            // 7.6.0 : stop-out du broker (fermetures forcées par le testeur, DEAL_REASON_SO)
@@ -209,6 +210,7 @@ int BtLoadParams()
       string line = FileReadString(h);
       int p = StringFind(line, "=");
       if(p <= 0) continue;
+      if(StringSubstr(line, 0, p) == "bt_labo_seul") { g_btLaboOnly = (StringToInteger(StringSubstr(line, p + 1)) != 0); continue; }
       int id = FindParamByKey(StringSubstr(line, 0, p));
       if(id < 0) continue;
       double v = StringToDouble(StringSubstr(line, p + 1));
@@ -239,7 +241,7 @@ void BtInit()
    Log("Backtest " + BacktestId + " : " + IntegerToString(MathMax(n, 0)) + " réglages chargés, " + IntegerToString(g_slotsN) +
        " créneaux, " + IntegerToString(g_bcN) + " news" + (g_btNote != "" ? " (" + g_btNote + ")" : ""));
    EvTyped("BT_DEBUT", 0, "", "{\"reglages\":" + IntegerToString(n) + ",\"creneaux\":" + IntegerToString(g_slotsN) + ",\"news\":" +
-           IntegerToString(g_bcN) + ",\"note\":\"" + JsonEsc(g_btNote) + "\",\"solde\":" + NumS(g_btStart) + ",\"version\":\"" + SX_VERSION + "\"}");
+           IntegerToString(g_bcN) + ",\"note\":\"" + JsonEsc(g_btNote) + "\",\"labo_seul\":" + BoolS(g_btLaboOnly) + ",\"solde\":" + NumS(g_btStart) + ",\"version\":\"" + SX_VERSION + "\"}");
 }
 
 // Retrait simulé au seuil 500 (le robot reprend ensuite au seuil de reprise) ; recharge si le solde passe sous la reprise
@@ -318,7 +320,16 @@ void BtSecond()
    BtNewsTick();
    LaboTimer1Hz();
    SlotTick();
-   ContTick();                        // 7.8.0 : mode continu
+   if(g_btLaboOnly)
+   {
+      // 7.8.3 : optimiseur : seules les séries virtuelles comptent (le scénario « miroir » = réglages actuels). Le robot
+      // du testeur ne trade pas : un gap qui vide son compte (solde négatif) faisait arrêter le test par MT5 au 22/10.
+      // SlotTick reste appelé (il déclenche les créneaux des séries virtuelles) ; l'objectif réel est aussitôt annulé,
+      // avant tout ordre (le trading vient après, dans le même tick).
+      if(g_goalActive) GoalCancel();
+   }
+   else
+      ContTick();                     // 7.8.0 : mode continu
    SlotEntryTick();
    CutTick();
    BtCash();

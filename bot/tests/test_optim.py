@@ -334,15 +334,14 @@ def _opt_env(tmp_path, monkeypatch, results):
     return o, db, sent, calls, sets, aio
 
 
-def test_reglages_actuels_dangereux_sans_rejeu(tmp_path, monkeypatch):
+
+def test_testeur_sans_trading_reel(tmp_path, monkeypatch):
+    """Bot 3.2.3 : un seul backtest, robot du testeur sans trading (bt_labo_seul), décision sur les séries virtuelles."""
     from core.backtest import Result
-    v = optim.Variant("v1", "Grille 1,3 × ATR", {"gridatr": ("0.7", "0.9")})
+    v = optim.Variant("v1", "Grille 0,9 × ATR", {"gridatr": ("0.7", "0.9")})
     dec = optim.Decision(change=v, reason="meilleur", table=[])
     monkeypatch.setattr(optim, "decide", lambda *a, **k: dec)
-    cur_bad = Result(1, 0, 0, deposit=200, final=8, dd_max=97, stopouts=1)
-    o, db, sent, calls, sets, aio = _opt_env(tmp_path, monkeypatch, [cur_bad])
+    o, db, sent, calls, sets, aio = _opt_env(tmp_path, monkeypatch, [Result(1, 0, 0, deposit=200, final=200)])
     aio.run(o._run(True))
-    assert len(calls) == 1 and ("gridatr", "0.9") in sets       # Bot 3.2.2 : un seul backtest, pas de rejeu
-
-    assert "Confirmé" not in sent[-1] and "Réglages actuels" in sent[-1]
-    assert o.safety_next                                         # réglages actuels dangereux → nuit 🛟 ensuite
+    assert len(calls) == 1 and calls[0]["bt_labo_seul"] == "1" and ("gridatr", "0.9") in sets
+    assert "Réglages actuels" not in sent[-1]

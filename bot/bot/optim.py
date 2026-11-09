@@ -228,10 +228,6 @@ class Optimizer:
         # après une nuit normale où les réglages actuels sont dangereux : la nuit suivante est une nuit 🛟 Sécurité
         # (après une nuit de sécurité, on revient à la rotation, qui revérifiera)
         lost = bool(dec.table) and dec.table[0].lost60 > 0
-        cur_ok, cur_why = optim.real_check(run.result)        # Bot 3.2.0 : robot réel du testeur = réglages actuels
-        self.note(f"robot réel du testeur (réglages actuels) : {cur_why}")
-        if not cur_ok:
-            lost = True
         wider: list[str] = []
         if not safety:                                         # portée de recherche des réglages testés pour le prochain tour
             keys = sorted({k for v in vs for k in v.changes if k in optim.NUM})
@@ -254,8 +250,6 @@ class Optimizer:
         lines = [f"🤖 <b>Optimiseur · {esc(gtitle)}</b> · nuit du {self._now().strftime('%d/%m')}",
                  f"<i>{nv} variantes testées · choix sur {optim.CHOOSE_DAYS} j, sécurité sur {optim.SAFETY_DAYS} j · "
                  f"backtest #{rid} ({int((time.time() - self.started) / 60)} min)</i>", ""]
-        if not cur_ok:
-            lines.append(f"⚠️ <b>Réglages actuels</b> (robot réel du testeur) : {esc(cur_why)}")
         if dec.change is not None:
             v = dec.change
             oks = []
@@ -322,6 +316,9 @@ class Optimizer:
         bparams, label, deposit, currency, leverage, comm, slip = inputs
         if override:
             bparams = {**bparams, **override}
+        # Bot 3.2.3 (EA 7.8.3+) : le robot du testeur ne trade pas, seules les séries virtuelles (dont « miroir » = réglages
+        # actuels) servent à décider : un gap qui vidait son compte faisait arrêter le test par MT5 avant la fin.
+        bparams = {**bparams, "bt_labo_seul": "1"}
         rid = self.ctx.db.bt_create("opt", d_from, d_to, "reel", f"{title} · {label}")
         self.note(f"démarrage {self._now().strftime('%H:%M')} : pas de limite de durée, le test va jusqu'au bout")
         scen = Path(self.ctx.cfg.paths.common()) / f"bt_{rid}_scen.txt"
