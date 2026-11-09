@@ -129,19 +129,37 @@ def read_events(p: Path) -> list[dict]:
     return out
 
 
+def _mtime(p: Path) -> float:
+    """Bot 3.3.1 : MT5 supprime ses anciens journaux au démarrage (fichier listé puis disparu) : -1 au lieu d'une erreur."""
+    try:
+        return p.stat().st_mtime
+    except OSError:
+        return -1.0
+
+
+def _newest(paths) -> Path | None:
+    best, bt_ = None, -1.0
+    for p in paths:
+        t = _mtime(p)
+        if t > bt_:
+            best, bt_ = p, t
+    return best
+
+
 def tail_log(folder: Path, max_bytes: int = 6000) -> str:
     """Dernière ligne utile des journaux du terminal de backtest (testeur, agents, terminal) : « où en est MT5 ? »."""
-    best: Path | None = None
-    for sub in ("Tester/logs", "logs"):
-        d = Path(folder) / sub
-        for p in list(d.glob("*.log")) if d.is_dir() else []:
-            if best is None or p.stat().st_mtime > best.stat().st_mtime:
-                best = p
-    agents = Path(folder) / "Tester"
-    if agents.is_dir():
-        for p in agents.glob("Agent-*/logs/*.log"):
-            if best is None or p.stat().st_mtime > best.stat().st_mtime:
-                best = p
+    cands: list[Path] = []
+    try:
+        for sub in ("Tester/logs", "logs"):
+            d = Path(folder) / sub
+            if d.is_dir():
+                cands += list(d.glob("*.log"))
+        agents = Path(folder) / "Tester"
+        if agents.is_dir():
+            cands += list(agents.glob("Agent-*/logs/*.log"))
+    except OSError:
+        return ""
+    best = _newest(cands)
     if best is None:
         return ""
     try:
@@ -182,11 +200,14 @@ def stopped_early(fin: dict, d_to: int) -> bool:
 def log_errors(folder: Path, n: int = 3, max_bytes: int = 200_000) -> list[str]:
     """Dernières lignes d'erreur des journaux des agents du testeur (erreur d'exécution de l'EA, historique, mémoire)."""
     agents = Path(folder) / "Tester"
-    files = sorted(agents.glob("Agent-*/logs/*.log"), key=lambda p: p.stat().st_mtime) if agents.is_dir() else []
-    if not files:
+    try:
+        last = _newest(list(agents.glob("Agent-*/logs/*.log"))) if agents.is_dir() else None
+    except OSError:
+        last = None
+    if last is None:
         return []
     try:
-        with open(files[-1], "rb") as f:
+        with open(last, "rb") as f:
             f.seek(0, 2)
             f.seek(max(0, f.tell() - max_bytes))
             raw = f.read()

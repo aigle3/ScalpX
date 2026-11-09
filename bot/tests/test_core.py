@@ -465,3 +465,22 @@ def test_backtest_incomplet(tmp_path):
     (lg / "20261107.log").write_bytes("﻿KP\t0\t19:20:06.5\tCore 1\t2026.09.30 10:00:00   critical runtime error 502 in OnTick (array out of range in 'SX_Labo.mqh' (1012,12))\r\nAB\t0\t19:20:07\tCore 1\tfinal balance 312.40 EUR\r\n".encode("utf-16-le"))
     errs = bt.log_errors(tmp_path)
     assert len(errs) == 1 and "array out of range" in errs[0]
+
+
+def test_journaux_mt5_supprimes_pendant_la_lecture(tmp_path, monkeypatch):
+    """Bot 3.3.1 : un journal listé puis supprimé par MT5 (rotation au démarrage) ne fait plus échouer le backtest."""
+    from pathlib import Path
+    from core import backtest as bt
+    d = tmp_path / "Tester" / "logs"
+    d.mkdir(parents=True)
+    (d / "20261104.log").write_text("vieux")
+    (d / "20261110.log").write_text("x\tx\t00:40\tTester\tsynchronisation\n")
+    real = Path.stat
+
+    def stat(self, *a, **k):
+        if self.name == "20261104.log":
+            raise FileNotFoundError(2, "The system cannot find the file specified", str(self))
+        return real(self, *a, **k)
+    monkeypatch.setattr(Path, "stat", stat)
+    assert "synchronisation" in bt.tail_log(tmp_path)
+    assert bt.log_errors(tmp_path) == []
