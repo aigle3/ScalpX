@@ -232,33 +232,10 @@ class Optimizer:
         self.note(f"robot réel du testeur (réglages actuels) : {cur_why}")
         if not cur_ok:
             lost = True
-        # Bot 3.2.0 : 🔒 confirmation. Chaque variante n'est jugée que seule (séries virtuelles) : avant d'appliquer, l'ENSEMBLE
-        # des réglages avec le changement (et les créneaux) est rejoué par le robot réel du testeur sur 60 j. Refusé au
-        # moindre stop-out, compte perdu ou drawdown ≥ 90 %.
-        combo: dict = {}
-        if dec.change is not None:
-            combo.update(dec.change.changes)
-        if dec.slots is not None and dec.slots.changes:
-            combo.update(dec.slots.changes)
-        refused = ""
-        conf_line = ""
-        if combo:
-            self.note("🔒 confirmation : backtest de l'ensemble des réglages avec " +
-                      " ; ".join(f"{p_} {o} → {n}" for p_, (o, n) in combo.items()))
-            got2 = await self._backtest(ref, [], f"🔒 confirmation {gtitle}", {p_: n for p_, (o, n) in combo.items()})
-            if isinstance(got2, str):
-                refused = f"confirmation impossible ({got2})"
-            else:
-                ok2, why2 = optim.real_check(got2[0].result)
-                if ok2:
-                    conf_line = f"🔒 Confirmé par le backtest #{got2[1]} de l'ensemble : {why2}"
-                else:
-                    refused = f"l'ensemble des réglages avec ce changement ne passe pas (backtest #{got2[1]} : {why2})"
-            self.note(conf_line or f"🔒 REFUSÉ : {refused}")
         wider: list[str] = []
         if not safety:                                         # portée de recherche des réglages testés pour le prochain tour
             keys = sorted({k for v in vs for k in v.changes if k in optim.NUM})
-            changed = set(dec.change.changes) if dec.change is not None and not refused else set()
+            changed = set(dec.change.changes) if dec.change is not None else set()
             before = self.scale()
             sc, idl = optim.next_scale(before, self.idle(), keys, changed)
             self.ctx.db.meta_set("opt_scale", json.dumps(sc))
@@ -277,25 +254,9 @@ class Optimizer:
         lines = [f"🤖 <b>Optimiseur · {esc(gtitle)}</b> · nuit du {self._now().strftime('%d/%m')}",
                  f"<i>{nv} variantes testées · choix sur {optim.CHOOSE_DAYS} j, sécurité sur {optim.SAFETY_DAYS} j · "
                  f"backtest #{rid} ({int((time.time() - self.started) / 60)} min)</i>", ""]
-        if refused:
-            lines.append(f"🔒 <b>Refusé à la confirmation</b> : {esc(refused)}")
-            would = " · ".join(f"{optim.label_of(p_, o).split(' : ')[0]} {esc(optim.value_text(p_, o))} → {esc(optim.value_text(p_, n))}"
-                               for p_, (o, n) in combo.items() if p_ not in optim.SLOT_KEYS)
-            if dec.slots is not None and dec.slots.changes:
-                cur_m = optim._masks(params, optim.SLOT_KEYS)
-                new_m = [int(dec.slots.changes.get(k, (str(m), str(m)))[1]) for k, m in zip(optim.SLOT_KEYS, cur_m)]
-                would = (would + " · " if would else "") + f"créneaux {esc(optim.slots_label(new_m))}"
-            lines.append(f"   proposé : {would}")
-            lines.append("   <b>aucun réglage changé</b>")
-            dec.change = None
-            if dec.slots is not None:
-                dec.slots.changes = {}
-                dec.slots.lines = []
         if not cur_ok:
             lines.append(f"⚠️ <b>Réglages actuels</b> (robot réel du testeur) : {esc(cur_why)}")
-        if refused:
-            pass                                               # déjà expliqué ci-dessus
-        elif dec.change is not None:
+        if dec.change is not None:
             v = dec.change
             oks = []
             for param, (old, new) in v.changes.items():
@@ -311,10 +272,8 @@ class Optimizer:
         else:
             lines.append(f"⏸ <b>Aucun changement</b> : {esc(dec.note)}")
             self.note(f"aucun changement : {dec.note}")
-        if conf_line:
-            lines.append(esc(conf_line))
         sp = dec.slots
-        if sp is not None and not refused:                                     # 🕐 créneaux : retraits / ajouts
+        if sp is not None:                                     # 🕐 créneaux : retraits / ajouts
             if sp.changes:
                 n_ok = []
                 for key, (old, new) in sp.changes.items():

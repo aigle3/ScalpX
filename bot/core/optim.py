@@ -410,8 +410,8 @@ class SlotPlan:
 
 def real_check(res) -> tuple[bool, str]:
     """Bot 3.2.0 : robot RÉEL du testeur (marge et stop-out du broker simulés) sur 60 j : sûr si aucun stop-out, aucun
-    compte perdu (rechargé sous le seuil de reprise) et drawdown < DD_LIMIT. Sert à confirmer l'ENSEMBLE des réglages
-    avec le changement avant de l'appliquer (chaque variante n'est testée que seule en séries virtuelles)."""
+    compte perdu (rechargé sous le seuil de reprise) et drawdown < DD_LIMIT. Contrôle des réglages actuels (pas de rejeu).
+    """
     if res is None:
         return False, "pas de résultat du testeur"
     bad = []

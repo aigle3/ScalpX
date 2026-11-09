@@ -280,7 +280,7 @@ def test_mode_continu_hors_optimisation():
     for g in optim.GROUPS:
         assert all("sl_cont" not in v.changes for v in optim.variants({**P, "sl_cont": "1"}, g[0]))
 
-# ---- Bot 3.2.0 : 🔒 confirmation de l'ensemble des réglages par le robot réel du testeur avant d'appliquer
+# ---- Bot 3.2.0 : contrôle des réglages actuels par le robot réel du testeur (sans rejeu depuis 3.2.2)
 def test_real_check():
     from core.backtest import Result
     ok, why = optim.real_check(Result(1, 0, 0, deposit=200, final=260, dd_max=40, stopouts=0))
@@ -334,31 +334,15 @@ def _opt_env(tmp_path, monkeypatch, results):
     return o, db, sent, calls, sets, aio
 
 
-def test_confirmation_refuse(tmp_path, monkeypatch):
-    from core.backtest import Result
-    v = optim.Variant("v1", "Grille 1,3 × ATR", {"gridatr": ("0.7", "0.9")})
-    dec = optim.Decision(change=v, reason="meilleur", table=[])
-    monkeypatch.setattr(optim, "decide", lambda *a, **k: dec)
-    ok_cur = Result(1, 0, 0, deposit=200, final=250, dd_max=50, stopouts=0)
-    bad = Result(2, 0, 0, deposit=200, final=8, dd_max=97, stopouts=1)
-    o, db, sent, calls, sets, aio = _opt_env(tmp_path, monkeypatch, [ok_cur, bad])
-    aio.run(o._run(True))
-    assert len(calls) == 2 and calls[1]["gridatr"] == "0.9" and calls[0].get("gridatr") != "0.9"
-    assert sets == []                                            # rien appliqué
-
-    assert "Refusé à la confirmation" in sent[-1] and "1 stop-out(s)" in sent[-1]
-
-
-def test_confirmation_ok_et_reglages_actuels_dangereux(tmp_path, monkeypatch):
+def test_reglages_actuels_dangereux_sans_rejeu(tmp_path, monkeypatch):
     from core.backtest import Result
     v = optim.Variant("v1", "Grille 1,3 × ATR", {"gridatr": ("0.7", "0.9")})
     dec = optim.Decision(change=v, reason="meilleur", table=[])
     monkeypatch.setattr(optim, "decide", lambda *a, **k: dec)
     cur_bad = Result(1, 0, 0, deposit=200, final=8, dd_max=97, stopouts=1)
-    good = Result(2, 0, 0, deposit=200, final=240, dd_max=45, stopouts=0)
-    o, db, sent, calls, sets, aio = _opt_env(tmp_path, monkeypatch, [cur_bad, good])
+    o, db, sent, calls, sets, aio = _opt_env(tmp_path, monkeypatch, [cur_bad])
     aio.run(o._run(True))
-    assert ("gridatr", "0.9") in sets
+    assert len(calls) == 1 and ("gridatr", "0.9") in sets       # Bot 3.2.2 : un seul backtest, pas de rejeu
 
-    assert "Confirmé par le backtest" in sent[-1] and "Réglages actuels" in sent[-1]
+    assert "Confirmé" not in sent[-1] and "Réglages actuels" in sent[-1]
     assert o.safety_next                                         # réglages actuels dangereux → nuit 🛟 ensuite
