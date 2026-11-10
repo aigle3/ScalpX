@@ -437,3 +437,57 @@ def test_depart_du_preset_martin(tmp_path, monkeypatch):
     assert store.presets[o.BASE_PRESET]["gridatr"] == "0.7"              # base = copie initiale de Martin
     assert store.presets["Martin"]["gridatr"] == "0.9" and store.active == "Martin"
     assert ("gridatr", "0.9") in sets
+
+
+def test_serie_d_optimisations(tmp_path, monkeypatch):
+    """Bot 3.6.0 : 🔁 n optimisations à la suite dans l'ordre du cycle, nuit sautée pendant la série, résumé final."""
+    from core.backtest import Result
+    from datetime import datetime
+    monkeypatch.setattr(optim, "decide", lambda *a, **k: optim.Decision(change=None, reason="", table=[], note="rien de mieux"))
+    o, db, sent, calls, sets, aio = _opt_env(tmp_path, monkeypatch, [Result(i, 0, 0, deposit=200, final=200) for i in range(1, 10)])
+    o.r.bt.busy = lambda: False
+    db.meta_set("opt_grp", "1")
+    grps = []
+    real = o._run
+
+    async def spy(manual):
+        grps.append(o.group_index())
+        if o.series_i == 2:                                     # pendant la série : l'optimisation de la nuit est sautée
+            o._now = lambda: datetime(2026, 11, 10, o.hour, 5)
+            assert not o.due() and db.meta_get("opt_day", "") == "2026-11-10"
+        await real(manual)
+    o._run = spy
+    aio.run(o.run_series(3))
+    assert grps == [1, 2, 3] and o.group_index() == 0 and len(calls) == 3
+    assert not o.series_active
+    assert any("série 2/3" in s for s in sent)
+    assert "Série d'optimisations terminée</b> : 3/3" in sent[-1] and "1. 📐" in sent[-1]
+
+
+def test_serie_arret_demande(tmp_path, monkeypatch):
+    from core.backtest import Result
+    monkeypatch.setattr(optim, "decide", lambda *a, **k: optim.Decision(change=None, reason="", table=[], note="rien"))
+    o, db, sent, calls, sets, aio = _opt_env(tmp_path, monkeypatch, [Result(i, 0, 0, deposit=200, final=200) for i in range(1, 10)])
+    o.r.bt.busy = lambda: False
+    real = o._run
+
+    async def spy(manual):
+        o.series_stop = True                                    # ⏹ demandé pendant la 1re
+        await real(manual)
+    o._run = spy
+    aio.run(o.run_series(5))
+    assert len(calls) == 1 and "1/5" in sent[-1] and "arrêtée à ta demande" in sent[-1]
+
+
+@pytest.mark.asyncio
+async def test_menu_serie(svc):  # noqa: F811
+    ctx, sender, dash, router, *_ = svc
+    await router.on_callback("d:opt")
+    text, kb = dash.render()
+    assert any(d == "d:ops" for row in kb for _, d in row)
+    await router.on_callback("d:ops")
+    text, kb = dash.render()
+    assert "Série d'optimisations" in text and any(d == "d:ops:5" for row in kb for _, d in row)
+    await router.on_callback("d:ops:5")
+    text, kb = dash.render()
+    assert "série de 5 optimisations" in text

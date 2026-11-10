@@ -137,7 +137,7 @@ class Router:
             if len(p) > 2 and p[2].isdigit() and int(p[2]) in self.dash.SST_DAYS:
                 self.dash.sst_days = int(p[2])
             self.dash.goto("sst")
-        elif sub in ("opt", "opton", "opth", "optgo", "optj", "optf", "optg", "opu", "optr"):   # 🤖 optimiseur
+        elif sub in ("opt", "opton", "opth", "optgo", "optj", "optf", "optg", "opu", "optr", "ops", "opsx"):   # 🤖 optimiseur
             r = await self._opt_cb(sub, p)
             if r is not None:
                 return r
@@ -654,6 +654,27 @@ class Router:
         elif sub == "optg":
             await self.sender.send(self.chat_id, GUIDE, [[("✖ Fermer", "d:close")]], True)
             return ""
+        elif sub == "ops":                                      # Bot 3.6.0 : 🔁 série d'optimisations
+            if o.series_active:
+                d.flash(f"🔁 Une série est déjà en cours ({o.series_i}/{o.series_n}).")
+            elif not arg:
+                d.goto("ops")
+            elif arg.isdigit() and int(arg) in o.SERIES_CHOICES:
+                if o.running or self.bt.busy():
+                    d.flash("⏳ Un test ou une optimisation est en cours : réessaie après.")
+                    return None
+                n = int(arg)
+                import functools
+                return await self._ask(f"🔁 <b>Lancer une série de {n} optimisations ?</b>\n"
+                                       "Elles s'enchaînent dans l'ordre du cycle (🛟 Sécurité comprise si besoin), chacune applique "
+                                       "ses changements à Martin ⭐ et aux comptes. Compte environ 15 à 30 min par optimisation.\n"
+                                       "L'optimisation de la nuit est sautée pendant la série. Arrêt possible à tout moment.",
+                                       functools.partial(self._opt_series, n), ("opt",), f"🔁 Lancer {n}")
+        elif sub == "opsx":
+            if o.series_active:
+                o.series_stop = True
+                self.ctx.db.add_action("", "Série d'optimisations : arrêt demandé", True)
+                d.flash("⏹ La série s'arrêtera après l'optimisation en cours.")
         elif sub == "optr":                                     # Bot 3.3.0 : ♻️ réinitialisation
             if o.running or self.bt.busy():
                 d.flash("⏳ Un test ou une optimisation est en cours : réessaie après.")
@@ -668,6 +689,13 @@ class Router:
             return await self._ask("↩️ <b>Annuler ce changement de l'optimiseur ?</b>\nL'ancienne valeur est remise sur tous les comptes lancés "
                                    "et dans le preset ⭐.", lambda: self._opt_revert(rid), ("opt",), "↩️ Annuler le changement")
         return None
+
+    async def _opt_series(self, n: int) -> None:
+        self.ctx.db.add_action("", f"Série de {n} optimisations lancée", True)
+        self._bg(self.optim.run_series(n))
+        self.dash.goto("opt")
+        self.dash.flash(f"🔁 Série de {n} optimisations lancée : suivi ici et dans 📜 Journal.")
+        await self.dash.refresh(force=True)
 
     async def _opt_reset(self) -> None:
         msg = await self.optim.reset()

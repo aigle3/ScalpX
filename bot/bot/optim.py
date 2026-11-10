@@ -48,6 +48,9 @@ class Optimizer:
         self.running = False
         self.stage = ""
         self.started = 0.0
+        self.series_n = 0                  # Bot 3.6.0 : 🔁 série d'optimisations (0 = aucune)
+        self.series_i = 0
+        self.series_stop = False
         self.path = setup_log(self.ctx.cfg.paths.data)
         if self.ctx.db.meta_get("opt_v3", "") != "1":          # bot 3.0.0 : départ à 21 h, compteurs de portée remis à zéro
             self.ctx.db.meta_set("opt_hour", str(DEFAULT_HOUR))
@@ -121,11 +124,91 @@ class Optimizer:
         return datetime.now(ZoneInfo(self.ctx.cfg.reports.timezone))
 
     def due(self) -> bool:
-        """À lancer maintenant ? (activé, heure atteinte depuis moins de 50 min, pas encore fait pour cette nuit)."""
-        if not self.on or self.running:
+        """À lancer maintenant ? (activé, heure atteinte depuis moins de 50 min, pas encore fait pour cette nuit).
+        Pendant une 🔁 série, l'optimisation de la nuit est sautée (la série respecte déjà le cycle)."""
+        if not self.on:
             return False
         n = self._now()
-        return n.hour == self.hour and n.minute < 50 and self.ctx.db.meta_get("opt_day", "") != n.strftime("%Y-%m-%d")
+        today = n.strftime("%Y-%m-%d")
+        if not (n.hour == self.hour and n.minute < 50 and self.ctx.db.meta_get("opt_day", "") != today):
+            return False
+        if self.series_active:
+            self.ctx.db.meta_set("opt_day", today)
+            log.info("optimisation de la nuit sautée : série en cours (%d/%d)", self.series_i, self.series_n)
+            return False
+        return not self.running
+
+    # ---- 🔁 série d'optimisations (Bot 3.6.0)
+    SERIES_CHOICES = (2, 3, 4, 5, 6, 8, 10)
+
+    @property
+    def series_active(self) -> bool:
+        return self.series_n > 0
+
+    def series_tag(self) -> str:
+        return f" · série {self.series_i}/{self.series_n}" if self.series_active else ""
+
+    async def run_series(self, n: int) -> None:
+        """n optimisations à la suite, dans l'ordre du cycle (sécurité comprise). S'arrête sur demande (après
+        l'optimisation en cours), sur un backtest en échec ou si rien n'a pu être lancé."""
+        if self.running or self.series_active or n < 1:
+            return
+        self.series_n, self.series_i, self.series_stop = n, 0, False
+        t0 = time.time()
+        log.info("━━━━━━━━ SÉRIE de %d optimisations", n)
+        await self._send(f"🔁 <b>Série de {n} optimisations</b> lancée : elles s'enchaînent dans l'ordre du cycle "
+                         f"(1re : {esc(optim.SAFETY[1] if self.safety_next else optim.GROUPS[self.group_index()][1])}). "
+                         "Un message à chaque optimisation, puis un résumé. L'optimisation de la nuit est sautée pendant la série.")
+        ids: list[int] = []
+        why = ""
+        try:
+            for i in range(1, n + 1):
+                if self.series_stop:
+                    why = "arrêtée à ta demande"
+                    break
+                self.series_i = i
+                while self.r.bt.busy() or self.running:         # un test manuel tourne : on attend sa fin
+                    self.stage = f"série {i}/{n} : attente de la fin du test en cours"
+                    await asyncio.sleep(20)
+                last = self.ctx.db.opt_list(1)
+                before = last[0]["id"] if last else 0
+                log.info("━━━━ série : optimisation %d/%d", i, n)
+                await self.run(manual=True)
+                new = self.ctx.db.opt_list(1)
+                if not new or new[0]["id"] == before:
+                    why = "rien n'a pu être lancé (voir 📜 Journal)"
+                    break
+                ids.append(new[0]["id"])
+                if new[0]["status"] == "erreur":
+                    why = "backtest en échec"
+                    break
+        except Exception as exc:
+            log.exception("série d'optimisations")
+            why = f"erreur inattendue ({exc})"
+        finally:
+            done = len(ids)
+            rows = [self.ctx.db.opt_get(x) for x in ids]
+            nch = sum(1 for r in rows if r is not None and r["status"] == "change")
+            mins = int((time.time() - t0) / 60)
+            head = "✅" if not why else "⏹" if why.startswith("arrêtée") else "⚠️"
+            lines = [f"{head} <b>Série d'optimisations terminée</b> : {done}/{n} en {mins // 60} h {mins % 60:02d}"
+                     + (f" · {esc(why)}" if why else ""),
+                     f"{nch} changement(s) appliqué(s) à Martin et aux comptes."]
+            for k, r in enumerate(rows, 1):
+                if r is None:
+                    continue
+                g = next((t for key, t, _ in optim.GROUPS if key == r["grp"]), optim.SAFETY[1] if r["grp"] == optim.SAFETY[0] else r["grp"])
+                st = {"change": "✅ changé", "inchange": "⏸ aucun changement", "erreur": "❌ échec"}.get(r["status"], r["status"])
+                lines.append(f"{k}. {esc(g)} : {st}")
+            lines.append(f"Prochaine : {esc(optim.SAFETY[1] if self.safety_next else optim.GROUPS[self.group_index()][1])}")
+            log.info("SÉRIE terminée : %d/%d%s", done, n, f" ({why})" if why else "")
+            self.series_n = self.series_i = 0
+            self.series_stop = False
+            await self._send("\n".join(lines))
+            try:
+                await self.r.dash.refresh(force=True)
+            except Exception:
+                pass
 
     def note(self, text: str) -> None:
         self.stage = text
@@ -159,7 +242,7 @@ class Optimizer:
             log.exception("optimiseur : message Telegram")
 
     async def _run(self, manual: bool) -> None:
-        self.note("━━━━ nuit d'optimisation" + (" (lancée à la main)" if manual else ""))
+        self.note("━━━━ nuit d'optimisation" + (self.series_tag() if self.series_active else " (lancée à la main)" if manual else ""))
         if not self.r.bt.configured():
             self.note("terminal de backtest non configuré : rien à faire")
             await self._send("⚠️ <b>Optimiseur</b> : configure d'abord le terminal de test (🤖 Optimiseur → 🔑 Terminal de test).")
@@ -212,7 +295,7 @@ class Optimizer:
             if got.startswith("backtest impossible"):
                 return
             self.ctx.db.opt_add(gkey, "erreur", got, "", None)
-            await self._send(f"❌ <b>Optimiseur · {esc(gtitle)}</b> : backtest en échec ({esc(got)}). Aucun réglage changé.")
+            await self._send(f"❌ <b>Optimiseur · {esc(gtitle)}{self.series_tag()}</b> : backtest en échec ({esc(got)}). Aucun réglage changé.")
             return
         run, rid, bparams, currency = got
         d_to = run.d_to
@@ -248,7 +331,8 @@ class Optimizer:
             log.info("  %-34s 30 j : ✅ %d/%d %+.2f € | 60 j : 💀 %d DD %.0f %% %+.2f € %s", r.name, r.won30, r.n30, r.net30,
                      r.lost60, r.dd60, r.net60, "sûr" if r.safe else "NON SÛR")
         applied: dict = {}
-        lines = [f"🤖 <b>Optimiseur · {esc(gtitle)}</b> · nuit du {self._now().strftime('%d/%m')}",
+        lines = [f"🤖 <b>Optimiseur · {esc(gtitle)}</b> · " + (f"série {self.series_i}/{self.series_n}" if self.series_active
+                                                              else f"nuit du {self._now().strftime('%d/%m')}"),
                  f"<i>{nv} variantes testées · choix sur {optim.CHOOSE_DAYS} j, sécurité sur {optim.SAFETY_DAYS} j · "
                  f"backtest #{rid} ({int((time.time() - self.started) / 60)} min)</i>", ""]
         if dec.change is not None:
@@ -498,6 +582,9 @@ class Optimizer:
         acc = self.r.bt.account() if getattr(self.r, "bt", None) is not None else None
         lines.append(f"🔑 Terminal de test : compte {acc['login']} · {esc(acc.get('server', ''))}" if acc
                      else "🔑 Terminal de test : <b>à configurer</b> (bouton 🔑 ci-dessous)")
+        if self.series_active:
+            lines.append(f"🔁 <b>Série en cours : optimisation {self.series_i}/{self.series_n}</b>"
+                         + (" · ⏹ arrêt demandé (après celle-ci)" if self.series_stop else ""))
         if self.running:
             lines.append(f"⏳ En cours depuis {int((time.time() - self.started) / 60)} min : {esc(self.stage)}")
         sc = {k: v for k, v in self.scale().items() if v > 1}
@@ -549,6 +636,7 @@ Le <b>mode continu</b> n'est jamais modifié par l'optimiseur : c'est toi qui le
 • ✅/⏸ : activer ou suspendre l'optimiseur.
 • 🕐 : changer l'heure de lancement.
 • ▶️ Lancer maintenant : une nuit tout de suite.
+• 🔁 Série d'optimisations : 2 à 10 optimisations enchaînées dans l'ordre du cycle (la nuit est sautée pendant la série) ; ⏹ pour l'arrêter après celle en cours.
 • 🔑 Terminal de test : le compte du broker utilisé par le testeur (démo ou réel, aucun ordre passé).
 • 📜 Journal : tout ce qu'il a fait, ligne par ligne ; 📎 le fichier complet à me transmettre en cas de problème.
 

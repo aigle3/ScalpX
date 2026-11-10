@@ -169,6 +169,7 @@ class Dashboard:
             kb: Keyboard = [
                 [("⏸ Suspendre" if o.on else "✅ Activer", "d:opton"), (f"🕐 {o.hour:02d}:00 ▸", "d:opth")],
                 [("▶️ Lancer maintenant", "d:optgo"), ("📜 Journal", "d:optj")],
+                [("⏹ Arrêter la série", "d:opsx") if o.series_active else ("🔁 Série d'optimisations", "d:ops")],
                 [("🔑 Terminal de test", "d:btc"), ("♻️ Réinitialiser", "d:optr")],
                 [("❓ Guide", "d:optg"), ("⬅ Rapports", "d:rpt"), ("🏠 Accueil", "d:home")],
             ]
@@ -178,6 +179,20 @@ class Dashboard:
             if last is not None:
                 kb.insert(2, [(f"↩️ Annuler le dernier changement", f"d:opu:{last['id']}")])
             return self._with_flash(o.status_text()), kb
+        if kind == "ops" and self.optim is not None:        # Bot 3.6.0 : 🔁 nombre d'optimisations de la série
+            o = self.optim
+            from core import optim as copt
+            order = []
+            gi = o.group_index()
+            for k in range(6):
+                order.append(copt.GROUPS[(gi + k) % len(copt.GROUPS)][1].split(" ", 1)[0])
+            text = ("🔁 <b>Série d'optimisations</b>\n"
+                    "Choisis combien d'optimisations enchaîner, dans l'ordre du cycle :\n"
+                    + ("🛟 → " if o.safety_next else "") + " → ".join(order) + " …\n"
+                    "<i>≈ 15 à 30 min chacune · l'optimisation de la nuit est sautée pendant la série.</i>")
+            row1 = [(str(n), f"d:ops:{n}") for n in o.SERIES_CHOICES[:4]]
+            row2 = [(str(n), f"d:ops:{n}") for n in o.SERIES_CHOICES[4:]]
+            return self._with_flash(text), [row1, row2, [("⬅ Optimiseur", "d:opt"), ("🏠 Accueil", "d:home")]]
         if kind == "btw":                                   # 🔑 compte du terminal de test (optimiseur)
             from . import backtest_ui as bui
             return bui.render_wizard(self)
