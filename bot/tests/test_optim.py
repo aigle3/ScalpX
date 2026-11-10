@@ -182,6 +182,9 @@ async def test_nuit_complete_application_et_annulation(svc):  # noqa: F811
     ctx.db.meta_set("opt_grp", "2")                          # catégorie 🛡️ Filtres (réglages connus du faux EA)
     ea.start()
     try:
+        from bot import presets_ui as pui_
+        dash.store.put("Martin", await pui_.read_raw(ctx, a))   # Bot 3.5.0 : le preset ⭐ fait foi
+        dash.store.set_active("Martin")
         await router.on_callback("d:rpt")
         await router.on_callback("d:opt")
         text, kb = dash.render()
@@ -312,10 +315,14 @@ def _opt_env(tmp_path, monkeypatch, results):
     class Sender:
         async def send(self, chat, text, kb, silent): sent.append(text)
 
-    async def bt_inputs(_id): return (dict(P), "A", 200.0, "EUR", 500, 0.0, 0.0)
+    async def bt_inputs(src):
+        assert src == "preset:Martin"                         # Bot 3.5.0 : jamais un compte
+        return (dict(store.presets["Martin"]), "Martin", 200.0, "EUR", 500, 0.0, 0.0)
     async def flash_refresh(**kw): return None
     from core.presets import PresetStore
     store = PresetStore(tmp_path / "p0.json")
+    store.put("Martin", dict(P))
+    store.set_active("Martin")
     r = NS(bt=BT(), sender=Sender(), chat_id=1, _bt_inputs=bt_inputs,
            dash=NS(flash=lambda *a: None, refresh=flash_refresh, store=store), sync_base_set=lambda: None)
     paths = NS(data=tmp_path, common=lambda: tmp_path)
@@ -404,3 +411,29 @@ def test_preset_de_travail_jamais_la_base(tmp_path, monkeypatch):
     aio.run(o.reset())
     assert store.active == "Martin" and store.presets["Martin"]["gridatr"] == "0.7"
     assert store.presets[o.BASE_PRESET] == {"gridatr": "0.7"}
+
+
+
+def test_depart_du_preset_martin(tmp_path, monkeypatch):
+    """Bot 3.5.0 : l'optimiseur part de Martin ⭐ (pas d'un compte), crée la base (copie de Martin) au 1er lancement,
+    puis modifie seulement Martin."""
+    v = optim.Variant("v1", "Grille 0,9 × ATR", {"gridatr": ("0.7", "0.9")})
+    seen = {}
+
+    def decide(*a, **k):
+        seen["params"] = a[0] if a else k.get("params")
+        return optim.Decision(change=v, reason="meilleur", table=[])
+    monkeypatch.setattr(optim, "decide", decide)
+    from core.backtest import Result
+    o, db, sent, calls, sets, aio = _opt_env(tmp_path, monkeypatch, [Result(1, 0, 0, deposit=200, final=200)])
+    store = o.r.dash.store
+    store.presets["Martin"]["gridatr"] = "0.7"
+    from bot import optim as bo
+
+    async def read_raw(ctx, i):
+        raise AssertionError("ne doit plus lire les réglages d'un compte")
+    monkeypatch.setattr(bo.pui, "read_raw", read_raw)
+    aio.run(o._run(True))
+    assert store.presets[o.BASE_PRESET]["gridatr"] == "0.7"              # base = copie initiale de Martin
+    assert store.presets["Martin"]["gridatr"] == "0.9" and store.active == "Martin"
+    assert ("gridatr", "0.9") in sets

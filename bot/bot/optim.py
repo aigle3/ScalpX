@@ -167,17 +167,18 @@ class Optimizer:
         if self.ctx.deploy.running:
             self.note("déploiement de l'EA en cours : optimisation reportée à demain")
             return
-        running = [i for i in self.ctx.db.list() if self.ctx.mgr.is_running(i)]
-        if not running:
-            self.note("aucun terminal lancé : rien à optimiser")
-            return
-        ref = running[0]
-        self.note(f"compte de référence : {ref.label} ({ref.id})")
-        params = await pui.read_raw(self.ctx, ref)
+        # Bot 3.5.0 : le preset ⭐ de travail (ex. Martin) FAIT FOI : l'optimiseur part de ses réglages (plus d'aucun compte),
+        # le modifie et l'applique. Au 1er lancement, le preset de base (copie de Martin) est créé, puis jamais retouché.
+        work = self.work_preset()
+        params = dict(self.r.dash.store.presets.get(work, {})) if work else {}
         if not params:
-            self.note("réglages du compte de référence illisibles (PARAMS sans réponse)")
-            await self._send(f"⚠️ <b>Optimiseur</b> : réglages de {esc(ref.label)} illisibles, nuit annulée.")
+            self.note("aucun preset ⭐ : rien à optimiser")
+            await self._send("⚠️ <b>Optimiseur</b> : aucun preset ⭐ (ex. Martin). Crée ou choisis-en un dans 💾 Presets, nuit annulée.")
             return
+        self.base_preset()
+        ref = work
+        running = [i for i in self.ctx.db.list() if self.ctx.mgr.is_running(i)]   # comptes où appliquer Martin
+        self.note(f"réglages de départ : preset ⭐ {work} ({len(params)} réglages)")
         vs: list[optim.Variant] = []
         safety = self.safety_next
         if safety:                                             # nuit 🛟 Sécurité (hors rotation : opt_grp inchangé)
@@ -305,11 +306,10 @@ class Optimizer:
         kb = ([[("↩️ Annuler ce changement", f"d:opu:{oid}")]] if applied else []) + [[("🤖 Optimiseur", "d:opt"), ("✖ Fermer", "d:close")]]
         await self._send("\n".join(lines), kb, silent=True)
 
-    async def _backtest(self, ref, vs: list, title: str, override: dict[str, str] | None = None):
-        """Backtest de 60 j sur le terminal de test : réglages du compte de référence (+ `override`) pour le robot du
-        testeur, `vs` en séries virtuelles. → (run, rid, bparams, devise) ou message d'erreur (str)."""
+    async def _backtest(self, ref: str, vs: list, title: str, override: dict[str, str] | None = None):
+        """Backtest de 60 j sur le terminal de test : réglages du preset `ref` (+ `override`), `vs` en séries virtuelles. → (run, rid, bparams, devise) ou message d'erreur (str)."""
         d_from, d_to = bt.date_range(optim.SAFETY_DAYS)
-        inputs = await self.r._bt_inputs(ref.id)
+        inputs = await self.r._bt_inputs(f"preset:{ref}")      # Bot 3.5.0 : réglages du preset ⭐, pas d'un compte
         if isinstance(inputs, str):
             self.note(f"backtest impossible : {inputs}")
             return f"backtest impossible : {inputs}"
@@ -439,15 +439,7 @@ class Optimizer:
         running = [i for i in self.ctx.db.list() if self.ctx.mgr.is_running(i)]
         store = self.r.dash.store
         work = self.work_preset()
-        if running:
-            try:
-                cur = await pui.read_raw(self.ctx, running[0])
-            except Exception:
-                cur = None
-        else:
-            cur = None
-        if not cur:
-            cur = dict(store.presets.get(work, {})) if work else {}
+        cur = dict(store.presets.get(work, {})) if work else {}   # Bot 3.5.0 : Martin fait foi
         diff = {k: (cur.get(k, ""), v) for k, v in base.items() if cur.get(k) != v}
         self.reset_cycle()
         if work:                                              # le preset de travail (⭐) reprend TOUTES les valeurs de base
