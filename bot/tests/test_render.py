@@ -200,3 +200,11 @@ def test_mode_continu_accueil_et_titre():
     a = view(1, objectif_actif=False, mode_continu=True, continu_arme=True)
     txt = render.home_text([a], totals([a]), {}, "EUR", "3", "7.8.0", False, 1.0, time.time())
     assert "⏳ <b>Mode continu</b> : filtres OK, lancement à la clôture M5" in txt
+
+
+def test_accueil_tous_les_comptes():
+    """Bot 3.4.0 : les 9 comptes (et plus) apparaissent sur l'accueil, plus de limite à 8."""
+    vs = [view(i) for i in range(1, 13)]
+    txt = render.home_text(vs, totals(vs), {}, "EUR", "3", "7.8.3", False, 1.0, time.time())
+    assert "autre(s) : 👥 Comptes" not in txt and txt.count("\n🟢 ") + txt.count(">🟢 ") >= 0
+    assert all(v.inst.label in txt for v in vs)

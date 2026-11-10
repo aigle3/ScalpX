@@ -309,7 +309,7 @@ def slot_stats_text(stats: dict, days: int, n_accounts: int, cur: str) -> str:
 
 
 def home_text(views: list[AccountView], t: Totals, vps: dict[str, float], cur: str, bot_v: str, ea_v: str,
-              update_pending: bool, data_age_s: float | None, now: float, max_lines: int = 8,
+              update_pending: bool, data_age_s: float | None, now: float, max_lines: int = 40,   # Bot 3.4.0 : tous les comptes (40 tient dans un message)
               extra_alerts: list[str] | None = None) -> str:
     """Accueil compact : état du trading, argent, alertes, puis une ligne par compte (objectif 🎯 ou vers 500)."""
     c = "" if t.currency_mixed else cur

@@ -314,7 +314,8 @@ def _opt_env(tmp_path, monkeypatch, results):
 
     async def bt_inputs(_id): return (dict(P), "A", 200.0, "EUR", 500, 0.0, 0.0)
     async def flash_refresh(**kw): return None
-    store = NS(active="", set_value=lambda *a: None)
+    from core.presets import PresetStore
+    store = PresetStore(tmp_path / "p0.json")
     r = NS(bt=BT(), sender=Sender(), chat_id=1, _bt_inputs=bt_inputs,
            dash=NS(flash=lambda *a: None, refresh=flash_refresh, store=store), sync_base_set=lambda: None)
     paths = NS(data=tmp_path, common=lambda: tmp_path)
@@ -372,6 +373,7 @@ def test_reinitialisation(tmp_path, monkeypatch):
     assert set(sets) == {("f_atr", "1"), ("gridatr", "0.7"), ("freshbars", "30")}       # sl_cont jamais touché
     assert o.group_index() == 0 and o.scale() == {} and not o.safety_next
     assert store.presets[o.BASE_PRESET]["gridatr"] == "0.7" and store.presets["mon"]["gridatr"] == "0.7"
+    assert store.active == "mon"
     assert "Optimiseur réinitialisé" in msg and "0,9 × ATR → 0,7 × ATR" in msg
     # 2e reset : preset de base réutilisé, l'historique du reset n'est pas une « optimisation »
     store.presets[o.BASE_PRESET]["gridatr"] = "0.6"
@@ -379,3 +381,26 @@ def test_reinitialisation(tmp_path, monkeypatch):
     sets.clear()
     aio.run(o.reset())
     assert ("gridatr", "0.6") in sets
+
+
+
+def test_preset_de_travail_jamais_la_base(tmp_path, monkeypatch):
+    """Bot 3.4.0 : l'optimiseur modifie et applique « Martin » (⭐), jamais le preset de base, même s'il était ⭐."""
+    from core.presets import PresetStore
+    o, db, sent, calls, sets, aio = _opt_env(tmp_path, monkeypatch, [])
+    store = PresetStore(tmp_path / "presets.json")
+    store.put("conseille", {"gridatr": "0.7"})
+    store.put("Martin", {"gridatr": "0.8"})
+    store.put(o.BASE_PRESET, {"gridatr": "0.7"})
+    store.set_active(o.BASE_PRESET)
+    o.r.dash.store = store
+    synced = []
+    o.r.sync_base_set = lambda: synced.append(store.active)
+    aio.run(o._apply([], "gridatr", "1.0"))
+    assert store.active == "Martin" and store.presets["Martin"]["gridatr"] == "1.0"
+    assert store.presets[o.BASE_PRESET]["gridatr"] == "0.7" and synced == ["Martin"]
+    # reset : Martin reprend la base, la base ne bouge pas, Martin reste ⭐
+    store.set_active(o.BASE_PRESET)
+    aio.run(o.reset())
+    assert store.active == "Martin" and store.presets["Martin"]["gridatr"] == "0.7"
+    assert store.presets[o.BASE_PRESET] == {"gridatr": "0.7"}

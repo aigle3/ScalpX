@@ -260,7 +260,7 @@ class Optimizer:
                               for p_, (o, n) in v.changes.items())
             lines.append(f"✅ <b>Changé</b> : {what}" + (" <i>(combinaison testée ensemble)</i>" if len(v.changes) > 1 else ""))
             lines.append(f"   pourquoi : {esc(dec.reason)}")
-            lines.append(f"   appliqué à {min(oks)}/{len(running)} compte(s)" + (" + preset ⭐" if self.r.dash.store.active else ""))
+            lines.append(f"   appliqué à {min(oks)}/{len(running)} compte(s)" + f" + preset ⭐ {esc(self.work_preset())}")
             self.note("CHANGEMENT " + " ; ".join(f"{p_} : {o} → {n}" for p_, (o, n) in v.changes.items())
                       + f" ({dec.reason}) ; appliqué à {min(oks)}/{len(running)}")
         else:
@@ -355,7 +355,8 @@ class Optimizer:
         return run, rid, bparams, currency
 
     async def _apply(self, insts, key: str, raw: str) -> int:
-        """Réglage appliqué à tous les comptes lancés + preset ⭐ actif (et .set de BASE)."""
+        """Réglage appliqué à tous les comptes lancés + preset de travail ⭐ (ex. « Martin », jamais le preset de base) + .set
+        de BASE (nouveaux comptes)."""
         res = await asyncio.gather(*[act.send_cmd(self.ctx, i, "SET", [key, raw]) for i in insts], return_exceptions=True)
         ok = 0
         for i, r in zip(insts, res):
@@ -364,8 +365,9 @@ class Optimizer:
             if not good:
                 log.warning("SET %s=%s → %s : %s", key, raw, i.label, r if isinstance(r, Exception) else getattr(r, "message", "?"))
         store = self.r.dash.store
-        if store.active:
-            store.set_value(store.active, key, raw)
+        work = self.work_preset()
+        if work:
+            store.set_value(work, key, raw)
             try:
                 self.r.sync_base_set()
             except Exception:
@@ -391,12 +393,35 @@ class Optimizer:
                     out[k] = str(ov[0])
         return {k: v for k, v in out.items() if k not in self.NEVER_RESET}
 
+    def work_preset(self) -> str:
+        """Bot 3.4.0 : preset que l'optimiseur modifie et applique (ex. « Martin »). Jamais le preset de base : si c'est lui
+        qui est ⭐, on reprend le preset de travail mémorisé (ou le 1er autre preset) et on le remet ⭐ (→ nouveaux comptes)."""
+        store = self.r.dash.store
+        skip = (self.BASE_PRESET, ps.RECOMMENDED_NAME)
+        if store.active and store.active != self.BASE_PRESET:
+            name = store.active
+        else:
+            name = self.ctx.db.meta_get("opt_work", "") or ""
+            if name not in store.presets or name == self.BASE_PRESET:
+                name = next((n for n in store.names() if n not in skip), "")
+            if not name:
+                if not store.presets:
+                    return ""
+                name = "Martin"
+                store.put(name, dict(store.presets.get(self.BASE_PRESET, {})))
+            store.set_active(name)
+            log.info("preset de travail de l'optimiseur : %s (remis ⭐)", name)
+        if self.ctx.db.meta_get("opt_work", "") != name:
+            self.ctx.db.meta_set("opt_work", name)
+        return name
+
     def base_preset(self) -> dict[str, str]:
         """Preset « 🧩 Base avant optimisation » : créé la 1re fois (preset ⭐ actif + valeurs d'avant l'optimiseur), puis
         réutilisé tel quel à chaque réinitialisation."""
         store = self.r.dash.store
         if self.BASE_PRESET not in store.presets:
-            base = dict(store.presets.get(store.active, {})) if store.active else {}
+            work = self.work_preset()
+            base = dict(store.presets.get(work, {})) if work else {}
             base.update(self.initial_values())
             store.put(self.BASE_PRESET, base)
             log.info("preset de base créé : %d réglage(s)", len(base))
@@ -413,6 +438,7 @@ class Optimizer:
                 if k not in self.NEVER_RESET and not k.startswith("ct_") and k in ps.BY_KEY}
         running = [i for i in self.ctx.db.list() if self.ctx.mgr.is_running(i)]
         store = self.r.dash.store
+        work = self.work_preset()
         if running:
             try:
                 cur = await pui.read_raw(self.ctx, running[0])
@@ -421,9 +447,16 @@ class Optimizer:
         else:
             cur = None
         if not cur:
-            cur = dict(store.presets.get(store.active, {})) if store.active else {}
+            cur = dict(store.presets.get(work, {})) if work else {}
         diff = {k: (cur.get(k, ""), v) for k, v in base.items() if cur.get(k) != v}
         self.reset_cycle()
+        if work:                                              # le preset de travail (⭐) reprend TOUTES les valeurs de base
+            store.put(work, {**store.presets.get(work, {}), **base})
+            store.set_active(work)
+            try:
+                self.r.sync_base_set()
+            except Exception:
+                log.exception("preset ⭐ → .set de BASE")
         done = []
         for k, (o, n) in diff.items():
             ok = await self._apply(running, k, n)
@@ -437,7 +470,8 @@ class Optimizer:
         self.note(summary)
         lines = ["♻️ <b>Optimiseur réinitialisé</b>",
                  f"🔄 Cycle remis à zéro : prochaine nuit {esc(optim.GROUPS[0][1])}, recherche normale, pas de nuit 🛟 en attente.",
-                 f"🧩 Preset de base : <b>{esc(self.BASE_PRESET)}</b>"]
+                 f"🧩 Preset de base (jamais modifié) : <b>{esc(self.BASE_PRESET)}</b>",
+                 f"⭐ Preset de travail remis à la base et appliqué : <b>{esc(work or '—')}</b> (nouveaux comptes compris)"]
         if done:
             lines += [f"Réglages remis ({len(done)}) :"] + [f"• {esc(d_)}" for d_ in done]
         else:
@@ -517,7 +551,7 @@ Le <b>mode continu</b> n'est jamais modifié par l'optimiseur : c'est toi qui le
 
 <b>Les créneaux</b> (nuit 🎯) : un créneau est <b>retiré</b> s'il dépasse <b>80 % de drawdown</b> sur 60 jours ; chaque <b>heure pile libre</b> est testée seule et <b>ajoutée</b> si elle reste sous 80 %, ne perd jamais le compte et gagne de l'argent. Il ne retire jamais le dernier créneau. Les coupures ne sont jamais touchées.
 
-<b>Ce que tu reçois</b> : un message par nuit avec l'ancienne valeur, la nouvelle, la raison, les meilleures variantes et un bouton <b>↩️ Annuler ce changement</b>. Le réglage est appliqué à tous les comptes lancés et au preset ⭐ actif.
+<b>Ce que tu reçois</b> : un message par nuit avec l'ancienne valeur, la nouvelle, la raison, les meilleures variantes et un bouton <b>↩️ Annuler ce changement</b>. Le réglage est appliqué à tous les comptes lancés et à ton preset ⭐ de travail (ex. Martin, utilisé aussi pour les nouveaux comptes). Le preset « 🧩 Base avant optimisation » n'est jamais modifié : il sert au ♻️ reset.
 
 <b>Les boutons</b>
 • ✅/⏸ : activer ou suspendre l'optimiseur.
