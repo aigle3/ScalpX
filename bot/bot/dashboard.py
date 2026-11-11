@@ -189,7 +189,7 @@ class Dashboard:
             text = ("🔁 <b>Série d'optimisations</b>\n"
                     "Choisis combien d'optimisations enchaîner, dans l'ordre du cycle :\n"
                     + ("🛟 → " if o.safety_next else "") + " → ".join(order) + " …\n"
-                    "<i>≈ 15 à 30 min chacune · l'optimisation de la nuit est sautée pendant la série.</i>")
+                    "<i>≈ 15 à 30 min chacune (50 ≈ 12 à 25 h) · l'optimisation de la nuit est sautée pendant la série.</i>")
             row1 = [(str(n), f"d:ops:{n}") for n in o.SERIES_CHOICES[:4]]
             row2 = [(str(n), f"d:ops:{n}") for n in o.SERIES_CHOICES[4:]]
             return self._with_flash(text), [row1, row2, [("⬅ Optimiseur", "d:opt"), ("🏠 Accueil", "d:home")]]

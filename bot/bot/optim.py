@@ -139,7 +139,7 @@ class Optimizer:
         return not self.running
 
     # ---- 🔁 série d'optimisations (Bot 3.6.0)
-    SERIES_CHOICES = (2, 3, 4, 5, 6, 8, 10)
+    SERIES_CHOICES = (2, 3, 5, 10, 15, 20, 30, 50)       # Bot 3.6.1 : jusqu'à 50
 
     @property
     def series_active(self) -> bool:
@@ -636,7 +636,7 @@ Le <b>mode continu</b> n'est jamais modifié par l'optimiseur : c'est toi qui le
 • ✅/⏸ : activer ou suspendre l'optimiseur.
 • 🕐 : changer l'heure de lancement.
 • ▶️ Lancer maintenant : une nuit tout de suite.
-• 🔁 Série d'optimisations : 2 à 10 optimisations enchaînées dans l'ordre du cycle (la nuit est sautée pendant la série) ; ⏹ pour l'arrêter après celle en cours.
+• 🔁 Série d'optimisations : 2 à 50 optimisations enchaînées dans l'ordre du cycle (la nuit est sautée pendant la série) ; ⏹ pour l'arrêter après celle en cours.
 • 🔑 Terminal de test : le compte du broker utilisé par le testeur (démo ou réel, aucun ordre passé).
 • 📜 Journal : tout ce qu'il a fait, ligne par ligne ; 📎 le fichier complet à me transmettre en cas de problème.
 
