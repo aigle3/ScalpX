@@ -232,7 +232,8 @@ class BacktestManager:
                 n = 0
                 for name in (self.cfg.mt5.terminal_exe, "metatester64.exe"):
                     try:
-                        n += await asyncio.to_thread(self.procs.lower_priority, self.folder / name)
+                        n += await asyncio.to_thread(self.procs.lower_priority, self.folder / name,
+                                                     getattr(self.cfg.backtest, "free_cores", 1))
                     except Exception:
                         log.exception("backtest : priorité de %s", name)
                 if n and not getattr(run, "_low_noted", False):

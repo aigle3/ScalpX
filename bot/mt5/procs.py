@@ -75,18 +75,26 @@ class PsutilProcesses:
     def _invalidate(self) -> None:
         self._running_at = 0.0
 
-    def lower_priority(self, exe: Path) -> int:
+    def lower_priority(self, exe: Path, free_cores: int = 0) -> int:
         """Priorité « basse » (inactivité) pour les processus de cet exécutable : le testeur ne prend que le processeur
-        laissé libre par les terminaux réels. Renvoie le nombre de processus abaissés."""
+        laissé libre par les terminaux réels. Bot 3.6.2 : `free_cores` premiers cœurs interdits au testeur (réservés au
+        bot et aux comptes). Renvoie le nombre de processus modifiés."""
         cls = getattr(psutil, "IDLE_PRIORITY_CLASS", 19)
+        ncpu = psutil.cpu_count() or 1
+        aff = list(range(min(free_cores, ncpu - 1), ncpu)) if free_cores > 0 and ncpu > 1 else None
         n = 0
         for p in self.find(exe):
+            changed = False
             try:
                 if p.nice() != cls:
                     p.nice(cls)
-                    n += 1
-            except (psutil.Error, OSError):
-                continue
+                    changed = True
+                if aff is not None and hasattr(p, "cpu_affinity") and sorted(p.cpu_affinity()) != aff:
+                    p.cpu_affinity(aff)
+                    changed = True
+            except (psutil.Error, OSError, AttributeError):
+                pass
+            n += changed
         return n
 
     def find(self, exe: Path) -> list[psutil.Process]:

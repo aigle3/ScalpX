@@ -207,8 +207,8 @@ async def test_testeur_en_priorite_basse(stack):
     cfg, db, *_ = stack
     tp = TesterProcs(cfg.paths.common())
     lowered = []
-    tp.lower_priority = lambda exe: lowered.append(Path(exe).name) or 1
+    tp.lower_priority = lambda exe, free=0: lowered.append((Path(exe).name, free)) or 1
     m = _mgr(cfg, db, tp)
     db.meta_set("bt_account", json.dumps({"login": 1, "server": "S"}))
     run = await m.execute(Run(11, "bt", 0, 86400, "m1", "x"), params={}, deposit=125, currency="EUR", leverage=100, poll_s=0.01)
-    assert run.ok and "metatester64.exe" in lowered and any("priorité basse" in t for _, t in run.log)
+    assert run.ok and ("metatester64.exe", 1) in lowered and any("priorité basse" in t for _, t in run.log)

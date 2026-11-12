@@ -43,7 +43,7 @@ class MT5(BaseModel):
 
 class Timing(BaseModel):
     heartbeat_stale_s: int = 30            # au-delà : heartbeat considéré ancien (🟠)
-    create_timeout_s: int = 120
+    create_timeout_s: int = 300           # Bot 3.6.2 : 5 min (VPS chargé : le terminal met plus de 2 min à charger l'EA)
     refused_s: int = 40                    # création : compte vu « non connecté » pendant ce délai → identifiants refusés
     stop_wait_s: int = 30                  # attente après FERMER_TERMINAL avant kill
     launch_stagger_s: int = 5              # écart entre deux lancements au démarrage
@@ -113,6 +113,7 @@ class Backtest(BaseModel):
     setup_stall_min: int = 5               # configuration du compte : abandon plus rapide
     poll_s: float = 4.0                    # lecture de l'avancement du testeur (le message Telegram est édité au plus toutes les 5 s)
     low_priority: bool = True              # testeur en priorité basse : les terminaux réels passent toujours avant
+    free_cores: int = 1                    # Bot 3.6.2 : cœurs laissés au bot et aux comptes (le testeur ne les utilise pas)
 
 
 class Config(BaseModel):

@@ -460,7 +460,16 @@ async def j_update(context: ContextTypes.DEFAULT_TYPE) -> None:
                 await s.sender.send(s.chat_id, f"⚠️ Mises à jour : {render.esc(err)}", None, True)
         if not res.ok:
             return
-    plan = await loop.run_in_executor(None, upd.plan_update, cfg, Path(__file__).resolve().parent.parent)
+    # Bot 3.6.2 : la comparaison paquet ↔ installation relit tous les fichiers (bloquait la boucle du bot 3 à 14 s sur un
+    # VPS chargé) : refaite seulement si le commit, l'installation ou le preset ⭐ changent, ou toutes les 15 min.
+    key = (s.ctx.db.meta_get("installed_commit") or "", res.sha if cfg.update.github else "", s.dash.store.active,
+           s.ctx.db.meta_get("update_offered") or "")
+    cache = getattr(s, "_plan_cache", None)
+    if cache is not None and cache[0] == key and time.monotonic() - cache[1] < 900:
+        plan = cache[2]
+    else:
+        plan = await loop.run_in_executor(None, upd.plan_update, cfg, Path(__file__).resolve().parent.parent)
+        s._plan_cache = (key, time.monotonic(), plan)
     if plan is None:
         return
     pending = "" if plan.empty else plan.stamp
@@ -501,6 +510,14 @@ async def startup(app: Application) -> None:
     """Après le démarrage : relance échelonnée des instances DEMARRE, reprise d'un déploiement interrompu."""
     s: Services = app.bot_data["svc"]
     s.router.sync_base_set()                                        # preset ⭐ actif → .set de BASE
+    try:                                                            # Bot 3.6.2 : le bot passe avant le testeur sur un VPS chargé
+        import psutil
+        cls = getattr(psutil, "ABOVE_NORMAL_PRIORITY_CLASS", None)
+        if cls is not None:
+            psutil.Process().nice(cls)
+            log.info("bot en priorité « supérieure à la normale »")
+    except Exception:
+        log.warning("priorité du bot non modifiée", exc_info=True)
     try:
         from core import presets as cps
         name = cps.ensure_recommended(s.dash.store, bool(s.ctx.db.meta_get("preset_conseille_v1")))
