@@ -198,6 +198,9 @@ class Router:
             await self.dash.refresh(force=True)
             self._bg(self.check_updates_now())
             return "Vérification…"
+        elif sub == "menu":                                     # Bot 3.6.3 : bouton permanent « 📊 Tableau de bord »
+            await self.sender.reply_menu(self.chat_id, "📊 Bouton « Tableau de bord » remis en bas de l'écran.")
+            self.dash.flash("📊 Bouton du bas remis.")
         elif sub == "win":
             procs = self.ctx.mgr.procs
             insts = [i for i in self.ctx.db.list() if self.ctx.mgr.is_running(i)]

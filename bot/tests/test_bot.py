@@ -1560,3 +1560,19 @@ async def test_deployer_base_pas_encore_compilee(svc):
     text, kb = sender.sent[-1][1], sender.sent[-1][2]
     assert "pas encore compilée en v7.4.1" in text and "Tous les comptes sont à jour" not in text
     assert "d:bld" in [d for row in kb for _, d in row]
+
+
+async def test_bouton_du_bas_remis(svc):
+    """Bot 3.6.3 : 🛠 Système → 📊 Remettre le bouton du bas renvoie le clavier permanent."""
+    ctx, sender, dash, router, *_ = svc
+    sent = []
+
+    async def rm(chat, text):
+        sent.append(text)
+        return 1
+    sender.reply_menu = rm
+    await router.on_callback("d:sys")
+    _, kb = dash.render()
+    assert any(d == "d:menu" for row in kb for _, d in row)
+    await router.on_callback("d:menu")
+    assert sent and "Tableau de bord" in sent[0]

@@ -191,7 +191,16 @@ async def h_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await svc(context).sender.delete(update.effective_chat.id, m.message_id)    # garde la conversation propre
         except Exception:
             pass
-    await svc(context).router.on_text((m.text or "") if m is not None else "")
+    s = svc(context)
+    await s.router.on_text((m.text or "") if m is not None else "")
+    # Bot 3.6.3 : le bouton permanent « 📊 Tableau de bord » peut disparaître côté Telegram (autre appareil, historique
+    # effacé…). Tout message tapé le remet (au plus une fois toutes les 10 min ; le bouton lui-même ne le renvoie pas).
+    if m is not None and (m.text or "") != MENU_BUTTON and time.monotonic() - getattr(s, "_menu_at", -1e9) > 600:
+        s._menu_at = time.monotonic()
+        try:
+            await s.sender.reply_menu(s.chat_id, "📊 Bouton « Tableau de bord » remis en bas de l'écran.")
+        except Exception:
+            log.warning("bouton du tableau de bord : envoi impossible", exc_info=True)
 
 
 async def h_cb(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
