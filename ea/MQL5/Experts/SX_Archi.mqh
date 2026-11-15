@@ -1388,6 +1388,7 @@ void ArchiTimer()
       ContTick();                        // [ARCHI] 7.8.0 : mode continu
       SlotEntryTick();                   // [ARCHI] 6.6.0 : fenêtre d'entrée après le créneau
       CutTick();                         // [ARCHI] 7.0.0 : coupure de l'objectif
+      if(g_state == ST_ARRET) Seuil500Tick();   // [ARCHI] 7.8.4 : reprise après retrait détectée aussi sans tick (marché fermé le week-end)
       //--- cohérence avec le panneau / l'ancien code : arrêt manuel <-> PAUSE
       if(g_state == ST_ACTIF && g_stoppedManually) SetState(ST_PAUSE, true, "Arrêt manuel détecté");
       else if(g_state == ST_PAUSE && !g_stoppedManually && g_enabled) SetState(ST_ACTIF, true, "Reprise manuelle détectée");
