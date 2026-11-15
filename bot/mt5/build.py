@@ -154,7 +154,7 @@ def command_line(cfg: Config, log_path: Path) -> str:
             f'/inc:"{base / "MQL5"}" /log:"{log_path}"')
 
 
-COMPILE_TIMEOUT_S = 300.0           # Bot 3.2.4 : 5 min (3 min avant)
+COMPILE_TIMEOUT_S = 900.0           # Bot 3.6.4 : 15 min (5 min avant : VPS chargé, compilation coupée à 95 %)
 
 
 def _kill_tree(pid: int) -> None:
@@ -198,7 +198,10 @@ def kill_stale(base: Path) -> int:
 
 
 def _run(cmd: str, timeout: float) -> None:
-    proc = subprocess.Popen(cmd, shell=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    # Bot 3.6.4 : MetaEditor en priorité « au-dessus de la normale » : avec le VPS à 100 % (terminaux, testeur),
+    # la phase d'optimisation de la compilation (après « generating code 95 % ») n'avançait plus.
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "ABOVE_NORMAL_PRIORITY_CLASS", 0)
+    proc = subprocess.Popen(cmd, shell=False, creationflags=flags)
     try:
         proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:

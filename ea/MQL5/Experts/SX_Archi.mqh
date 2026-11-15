@@ -825,6 +825,30 @@ void Close500Sequence()
    ContinueTo500(bal);
 }
 
+// [ARCHI] début 7.8.5 : reprise après retrait (solde entre le seuil de reprise et le seuil d'arrêt)
+void RepriseApresRetrait(double bal)
+{
+   g_cycle++;
+   CapitalFlag(false);
+   SetState(ST_ACTIF, false);
+   EvTyped("REPRISE_RETRAIT", 2,
+           "🟢 REPRISE APRÈS RETRAIT\n━━━━━━━━━━━━━━━━━━\n💰 Solde : " + NumS(bal) + " " + Cur() + " | cycle " + IntegerToString(g_cycle) +
+           "\n🕐 Prochain créneau : " + NextSlotText(),
+           "{\"solde\":" + NumS(bal) + ",\"cycle\":" + IntegerToString(g_cycle) + "}");
+}
+
+// Appelée chaque seconde par le timer : le week-end (marché fermé) aucun tick n'arrive, Seuil500Tick ne tourne pas.
+void RepriseRetraitTimer()
+{
+   if(g_state != ST_ARRET || g_closing || g_phase500 || !PBool(P_SEUIL_ON)) return;
+   RefreshState();
+   if(st_posCount + st_pendCount > 0) return;                    // Seuil500Tick s'en charge (fermeture / annulation)
+   double bal = AccountInfoDouble(ACCOUNT_BALANCE);
+   if(bal + 0.005 >= PDbl(P_SEUIL_ARRET) || bal + 0.005 < PDbl(P_SEUIL_REPRISE)) return;
+   RepriseApresRetrait(bal);
+}
+// [ARCHI] fin
+
 // Appelé à chaque tick, juste après GoalTick() (même endroit et même fréquence que le 1 %)
 void Seuil500Tick()
 {
@@ -859,17 +883,7 @@ void Seuil500Tick()
          if(now - lastCancel > 1000) { lastCancel = now; CancelPendingFast(); }
       }
       if(bal + 0.005 >= PDbl(P_SEUIL_ARRET)) return;                // en attente de retrait
-      if(bal + 0.005 >= PDbl(P_SEUIL_REPRISE))
-      {
-         g_cycle++;
-         CapitalFlag(false);
-         SetState(ST_ACTIF, false);
-         EvTyped("REPRISE_RETRAIT", 2,
-                 "🟢 REPRISE APRÈS RETRAIT\n━━━━━━━━━━━━━━━━━━\n💰 Solde : " + NumS(bal) + " " + Cur() + " | cycle " + IntegerToString(g_cycle) +
-                 "\n🕐 Prochain créneau : " + NextSlotText(),
-                 "{\"solde\":" + NumS(bal) + ",\"cycle\":" + IntegerToString(g_cycle) + "}");
-         return;
-      }
+      if(bal + 0.005 >= PDbl(P_SEUIL_REPRISE)) { RepriseApresRetrait(bal); return; }
       if(!g_capSent)
       {
          CapitalFlag(true);
@@ -1388,7 +1402,7 @@ void ArchiTimer()
       ContTick();                        // [ARCHI] 7.8.0 : mode continu
       SlotEntryTick();                   // [ARCHI] 6.6.0 : fenêtre d'entrée après le créneau
       CutTick();                         // [ARCHI] 7.0.0 : coupure de l'objectif
-      if(g_state == ST_ARRET) Seuil500Tick();   // [ARCHI] 7.8.4 : reprise après retrait détectée aussi sans tick (marché fermé le week-end)
+      RepriseRetraitTimer();             // [ARCHI] 7.8.5 : reprise après retrait détectée aussi sans tick (marché fermé le week-end)
       //--- cohérence avec le panneau / l'ancien code : arrêt manuel <-> PAUSE
       if(g_state == ST_ACTIF && g_stoppedManually) SetState(ST_PAUSE, true, "Arrêt manuel détecté");
       else if(g_state == ST_PAUSE && !g_stoppedManually && g_enabled) SetState(ST_ACTIF, true, "Reprise manuelle détectée");
