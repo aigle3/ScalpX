@@ -126,7 +126,7 @@ def system_kb(pending: bool, previous: str = "") -> Keyboard:
         [(("🔔 " if pending else "") + "⬆ Mises à jour", "d:upd"), ("🔨 Compiler l'EA", "d:bld")],
         [("📜 Journaux", "d:logs"), ("🪟 Réduire les terminaux", "d:win")],
         [("🏓 Ping", "d:png"), ("🧾 Journal des actions", "d:jra")],
-        [("📊 Remettre le bouton du bas", "d:menu")],
+        [("📊 Remettre le bouton du bas", "d:menu"), ("🎬 Plex", "d:plex")],
         [("🔄 Redémarrer le bot", "d:rst"), ("🔃", "d:sys")],
         [("⬅ Accueil", "d:home")],
     ]
@@ -160,3 +160,22 @@ def crash_report(ctx: Ctx, now: float | None = None) -> tuple[str, bool]:
 
 def log_path(ctx: Ctx, name: str) -> Path:
     return ctx.cfg.paths.data / "logs" / name
+
+
+def plex_screen(ctx: Ctx, flash: str = "") -> tuple[str, Keyboard]:
+    """Bot 3.8.0 : écran 🎬 Plex (état, allumer / éteindre)."""
+    from core import plex
+    try:
+        st = plex.state(ctx.cfg.plex.exe)
+    except Exception as exc:
+        return f"🎬 <b>Plex</b>\n\n❌ état illisible : {esc(str(exc))}", [[("⬅ Système", "d:sys")]]
+    lines = [plex.status_text(st), ""]
+    if not st.exe:
+        lines.append("⚠️ Plex Media Server.exe introuvable : indique son chemin dans config.toml, section [plex], exe = …")
+    else:
+        lines.append(f"<i>{esc(st.exe)}</i>")
+    lines.append("Les terminaux MT5 ne sont pas touchés." + (" Plex tourne en priorité basse." if ctx.cfg.plex.low_priority else ""))
+    if flash:
+        lines = [flash, ""] + lines
+    btn = ("⏹ Éteindre Plex", "d:plexoff") if st.running else ("▶ Allumer Plex", "d:plexon")
+    return "\n".join(lines), [[btn, ("🔃", "d:plex")], [("⬅ Système", "d:sys")]]

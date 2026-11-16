@@ -158,6 +158,9 @@ class Dashboard:
             return self._render_actions()
         if kind == "rpt":
             return self._render_reports()
+        if kind == "plex":                                  # Bot 3.8.0
+            from .system import plex_screen
+            return plex_screen(self.ctx, self._flash_text())
         if kind == "logs":
             return self._render_logs()
         if kind == "flt":

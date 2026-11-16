@@ -118,6 +118,11 @@ class Backtest(BaseModel):
     free_cores: int = 1                    # Bot 3.6.2 : cœurs laissés au bot et aux comptes (le testeur ne les utilise pas)
 
 
+class Plex(BaseModel):
+    exe: str = ""                          # Bot 3.8.0 : chemin de « Plex Media Server.exe » (vide : emplacement habituel)
+    low_priority: bool = True              # serveur lancé en priorité basse (les terminaux MT5 passent avant)
+
+
 class Config(BaseModel):
     paths: Paths = Paths()
     mt5: MT5 = MT5()
@@ -129,6 +134,7 @@ class Config(BaseModel):
     update: Update = Update()
     backup: Backup = Backup()
     backtest: Backtest = Backtest()
+    plex: Plex = Plex()
 
     # secrets (depuis .env, jamais depuis config.toml)
     token: str = ""

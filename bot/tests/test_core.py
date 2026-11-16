@@ -484,3 +484,35 @@ def test_journaux_mt5_supprimes_pendant_la_lecture(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "stat", stat)
     assert "synchronisation" in bt.tail_log(tmp_path)
     assert bt.log_errors(tmp_path) == []
+
+
+# ---------------------------------------------------------------- Bot 3.8.0 : Plex
+def test_plex_etat_et_commandes(monkeypatch):
+    from core import plex
+    assert plex._is_plex("Plex Media Server.exe") and plex._is_plex("Plex Transcoder.exe")
+    assert not plex._is_plex("Plex Update Service.exe") and not plex._is_plex("terminal64.exe")
+    assert "arrêté" in plex.status_text(plex.PlexState(False))
+    t = plex.status_text(plex.PlexState(True, 3, 12.4, 350, 1000.0), now=1000.0 + 3 * 3600 + 5 * 60)
+    assert "en marche depuis 3 h 05" in t and "CPU 12 %" in t and "350 Mo" in t
+    monkeypatch.setattr(plex, "_procs", lambda: [])
+    monkeypatch.setattr(plex, "find_exe", lambda configured="": None)
+    assert "introuvable" in plex.start()
+    assert plex.stop() == "déjà arrêté"
+
+
+def test_plex_ecran_systeme(monkeypatch):
+    from core import plex
+    from bot.system import plex_screen, system_kb
+    assert any(cb == "d:plex" for row in system_kb(False) for _, cb in row)
+
+    class C:
+        class cfg:
+            class plex:
+                exe = ""
+                low_priority = True
+    monkeypatch.setattr(plex, "state", lambda exe="": plex.PlexState(False, exe=r"C:\Plex\Plex Media Server.exe"))
+    text, kb = plex_screen(C)
+    assert "arrêté" in text and kb[0][0] == ("▶ Allumer Plex", "d:plexon")
+    monkeypatch.setattr(plex, "state", lambda exe="": plex.PlexState(True, 2, 5.0, 200, 0, "x"))
+    text, kb = plex_screen(C, "✅ Plex lancé")
+    assert text.startswith("✅ Plex lancé") and kb[0][0] == ("⏹ Éteindre Plex", "d:plexoff")

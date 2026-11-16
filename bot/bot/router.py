@@ -162,6 +162,24 @@ class Router:
             return ""
         elif sub == "sys":
             self.dash.goto("sys")
+        elif sub == "plex":                                     # Bot 3.8.0 : 🎬 serveur Plex
+            self.dash.goto("plex")
+        elif sub in ("plexon", "plexoff"):
+            from core import plex
+            pc = self.ctx.cfg.plex
+            self.dash.goto("plex")
+            self.dash.flash("⏳ " + ("Démarrage" if sub == "plexon" else "Arrêt") + " de Plex…")
+            await self.dash.refresh(force=True)
+            try:
+                res = await asyncio.to_thread(plex.start, pc.exe, pc.low_priority) if sub == "plexon" else \
+                      await asyncio.to_thread(plex.stop)
+            except Exception as exc:
+                log.exception("Plex")
+                res = f"❌ erreur : {exc}"
+            self.ctx.db.add_action("", "PLEX " + ("ALLUMÉ" if sub == "plexon" else "ÉTEINT"), not res.startswith(("❌", "⚠")), res)
+            if sub == "plexon" and not res.startswith("❌"):
+                await asyncio.sleep(3)                          # le serveur apparaît dans la liste des processus
+            self.dash.flash(("✅ " if not res.startswith(("❌", "⚠")) else "") + "Plex " + esc(res))
         elif sub == "crash":
             from .system import crash_report
             text, has = crash_report(self.ctx)
