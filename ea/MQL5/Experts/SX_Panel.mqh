@@ -677,7 +677,7 @@ int DrawFilters(int x, int w, int y0, bool detailed = true)
 int PanelWidth()
 {
    if(g_panelCompact) return 380;
-   int cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS) - PN_X - 70;   // laisse l'échelle des prix visible
+   int cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS) - PN_X - (CHART_PRICE_HIDDEN ? 12 : 70);   // [ARCHI] 7.9.0 : plus d'échelle des prix
    return MathMax(740, MathMin(2400, cw));                                  // toute la largeur utile
 }
 

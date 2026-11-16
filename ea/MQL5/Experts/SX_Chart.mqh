@@ -18,6 +18,9 @@
 //+------------------------------------------------------------------+
 //| Style du graphique                                               |
 //+------------------------------------------------------------------+
+// [ARCHI] 7.9.0 : le graphique des prix n'est plus dessiné (moins de CPU) : seul le panneau d'informations reste visible
+#define CHART_PRICE_HIDDEN true
+
 void ChartSaveOriginal()
 {
    if(g_chartStyled) return;
@@ -159,7 +162,7 @@ void ChartClearEMAs()
 //+------------------------------------------------------------------+
 void ChartDrawEMAs(bool force)
 {
-   if(!PBool(P_CH_EMA)) { if(g_lastEmaBar != 0) ChartClearEMAs(); return; }
+   if(!PBool(P_CH_EMA) || CHART_PRICE_HIDDEN) { if(g_lastEmaBar != 0) ChartClearEMAs(); return; }   // [ARCHI] 7.9.0
    if(g_hFast == INVALID_HANDLE || g_hSlow == INVALID_HANDLE) return;
 
    datetime t[];
@@ -241,7 +244,7 @@ void ChartClearLevels()
 
 void ChartDrawLevels()
 {
-   if(!PBool(P_CH_LEVELS) || st_posCount == 0) { ChartClearLevels(); return; }
+   if(!PBool(P_CH_LEVELS) || st_posCount == 0 || CHART_PRICE_HIDDEN) { ChartClearLevels(); return; }   // [ARCHI] 7.9.0 : graphique masqué
    bool buy = (st_posType == POSITION_TYPE_BUY);
    HLine("L_AVG", st_avg, C_AVG, STYLE_DOT, 1, "Prix moyen " + PX(st_avg) + "  (" + F2(st_posLots) + " lot)");
    if(g_tpPrice > 0)
@@ -281,6 +284,7 @@ void ChartRefreshAll(bool full)
 {
    if(full)
    {
+      ChartSetInteger(0, CHART_SHOW, !CHART_PRICE_HIDDEN);   // [ARCHI] 7.9.0 : bougies, échelles et barres masquées, panneau seul
       ChartApplyStyle();
       ChartRemoveATR();
       ChartEnsureATR();
@@ -296,7 +300,7 @@ void ChartShutdown(bool restoreStyle)
 {
    ChartRemoveATR();
    ObjectsDeleteAll(0, SX_PREFIX);
-   if(restoreStyle) ChartRestoreOriginal();
+   if(restoreStyle) { ChartRestoreOriginal(); ChartSetInteger(0, CHART_SHOW, true); }   // [ARCHI] 7.9.0 : EA retiré, graphique rendu
    ChartRedraw(0);
 }
 //+------------------------------------------------------------------+

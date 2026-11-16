@@ -6,6 +6,7 @@ Les numéros de ligne sont ceux des fichiers v5.
 ## Versions
 | Version | Date | Changement |
 |---|---|---|
+| 7.9.0 | 2026-11-16 | **Graphique des prix masqué** (`CHART_SHOW` = faux) : plus de bougies, d'échelles, d'EMA ni de lignes TP / grille dessinées (moins de CPU) ; seul le panneau d'informations reste, sur toute la largeur. Graphique rendu si l'EA est retiré. Calculs et trading inchangés. |
 | 7.8.6 | 2026-11-16 | Panneau du graphique en **mode continu** : plus de créneaux ni de compte à rebours ; le planning affiche « mode continu » et le déclenchement (attente des filtres / clôture M5 dans N s / objectif en cours) ; messages d'attente adaptés. Affichage seul, trading inchangé. |
 | 7.8.5 | 2026-11-16 | Reprise après retrait sans tick (7.8.4) réécrite : petite fonction dédiée `RepriseRetraitTimer()` appelée par le timer, au lieu d'appeler `Seuil500Tick()` à deux endroits ; le bloc de reprise est partagé (`RepriseApresRetrait()`). La compilation de la 7.8.4 restait bloquée à 95 % sur le VPS. Comportement identique, trading inchangé. |
 | 7.8.4 | 2026-11-15 | **Reprise après retrait sans attendre un tick** : en `ARRET_500`, le contrôle « solde entre le seuil de reprise et le seuil d'arrêt » tourne aussi dans le timer (1 fois/s), pas seulement à chaque tick. Avant, un retrait fait le week-end (marché fermé, aucun tick) laissait le compte affiché « à 500 » avec un montant à retirer jusqu'à la réouverture. Trading inchangé. |
