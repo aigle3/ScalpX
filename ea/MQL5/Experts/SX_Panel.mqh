@@ -731,11 +731,11 @@ int DrawStats(int x, int w, int y0)
    int cx = x + 12, cw = w - 24;
    int y = CardBegin(7, x, y0, w);
    CvSection(cx, y, "STATISTIQUES DES TRADES");
-   CvText(x + w - 12, y, "positions de l'EA fermées · " + _Symbol, PC_DIM, 8, 1);
+   CvText(x + w - 12, y, "positions fermées", PC_DIM, 8, 1);
    y += 20;
-   string head[8] = { "Période", "Trades", "Longs", "Courts", "Gagnés", "Perdus", "Réussite", "Résultat" };
+   string head[8] = { "Période", "Trades", "Longs", "Courts", "Gagnés", "Perdus", "Réussite", Cur() };
    int col[8];
-   int first = cw * 16 / 100, rest = (cw - first) / 7;
+   int first = cw * 14 / 100, rest = (cw - first) / 7;
    col[0] = cx;
    for(int c = 1; c < 8; c++) col[c] = cx + first + rest * c;     // colonnes alignées à droite
    for(int c = 0; c < 8; c++) CvText(col[c], y, head[c], PC_DIM, 8, c == 0 ? 0 : 1, true);
@@ -752,7 +752,7 @@ int DrawStats(int x, int w, int y0)
       CvText(col[4], y, IntegerToString(g_stWon[k]), PC_GREEN, 9, 1);
       CvText(col[5], y, IntegerToString(g_stLost[k]), g_stLost[k] > 0 ? PC_RED : PC_DIM, 9, 1);
       CvText(col[6], y, n > 0 ? F0((double)g_stWon[k] / n * 100.0) + " %" : "—", PC_TEXT, 9, 1);
-      CvText(col[7], y, Sgn(g_stNet[k]) + " " + Cur(), g_stNet[k] >= 0 ? PC_GREEN : PC_RED, 9, 1, true);
+      CvText(col[7], y, Sgn(g_stNet[k]), g_stNet[k] >= 0 ? PC_GREEN : PC_RED, 9, 1, true);
       y += 18;
    }
    return CardEnd(7, y0, y);
@@ -816,6 +816,7 @@ int PanelDraw()
       int ya = DrawPlanning(xa, cw, y) + 10;
       ya = DrawGoal(xa, cw, ya) + 10;
       ya = DrawSeries(xa, cw, ya) + 10;
+      ya = DrawStats(xa, cw, ya) + 10;   // [ARCHI] 7.10.1 : sous la série (en bas, elle sortait de l'écran)
       int yb = DrawAccount(xb, cw, y) + 10;
       yb = DrawMarket(xb, cw, yb, false) + 10;
       int yc = DrawFilters(xc, cw, y) + 10;
@@ -829,12 +830,12 @@ int PanelDraw()
       int ya = DrawPlanning(xa, cw, y) + 10;
       ya = DrawGoal(xa, cw, ya) + 10;
       ya = DrawSeries(xa, cw, ya) + 10;
+      ya = DrawStats(xa, cw, ya) + 10;   // [ARCHI] 7.10.1 : sous la série (en bas, elle sortait de l'écran)
       int yb = DrawAccount(xb, cw, y) + 10;
       yb = DrawMarket(xb, cw, yb, false) + 10;
       yb = DrawFilters(xb, cw, yb, false) + 10;
       y = MathMax(ya, yb);
    }
-   if(!g_panelCompact) y = DrawStats(xl, iw, y) + 10;   // [ARCHI] 7.10.0 : statistiques (toute la largeur)
    if(!g_panelCompact)
    {
       //--- Session (toute la largeur)
