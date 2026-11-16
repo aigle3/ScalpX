@@ -376,7 +376,7 @@ class DeployManager:
     async def _run_batch(self, insts: list[Instance], version: str, view: dict[str, tuple[str, str]],
                          progress: ProgressCb | None) -> list[DeployOutcome]:
         """1) maintenance + sauvegarde de l'ancien .ex5 partout ; 2) fermeture de TOUS les terminaux en même temps ;
-        3) nouvel .ex5 copié partout ; 4) relance échelonnée ; 5) attente du nouvel EA sur tous en parallèle.
+        3) nouvel .ex5 copié partout ; 4) relance un par un, chacun attendu (nouvel EA en ligne) avant le suivant.
         Un compte dont le nouvel EA ne répond pas retrouve son ancien .ex5 (les autres gardent le nouveau)."""
         t_start = time.monotonic()
         self.phase = "installation"
@@ -424,56 +424,54 @@ class DeployManager:
                 outcomes[inst.id] = DeployOutcome(inst.id, "failed", f"arrêt du terminal : {r}")
                 await show(inst.id, FAILED, f"arrêt du terminal : {r}")
         log.info("déploiement groupé : terminaux fermés en %d s", int(time.monotonic() - t_stop))
-        old_ts: dict[str, float] = {}
-        launched_at: dict[str, float] = {}
-        stagger = max(0, self.cfg.timing.launch_stagger_s)
-        for k, inst in enumerate(stopped):
+        # Bot 3.8.1 : nouvel EA copié partout, puis relance UN PAR UN : le terminal suivant n'est lancé qu'une fois le
+        # précédent revenu (nouvel EA en ligne et connecté) ou son délai écoulé.
+        for inst in stopped:
             try:
                 self.install_ex5(inst, self._base_ex5())
-                old = self.status.read(inst.id)
-                old_ts[inst.id] = old.ts if old is not None else 0
-                if k and stagger:
-                    await asyncio.sleep(stagger)
-                launched_at[inst.id] = time.time()
-                self.mgr.launch(inst)
-                await show(inst.id, RUNNING, f"📦 nouvel EA v{version} copié · 🚀 terminal relancé : attente du nouvel EA")
+                await show(inst.id, RUNNING, f"📦 nouvel EA v{version} copié · en attente de relance")
             except Exception as exc:
                 outcomes[inst.id] = DeployOutcome(inst.id, "failed", f"erreur : {exc}")
-        waiting = [i for i in stopped if i.id not in outcomes]
-        deadline = time.monotonic() + self.cfg.timing.verify_deploy_s
-        last: dict[str, str] = {i.id: "aucun heartbeat" for i in waiting}
-        shown = time.monotonic()
-        while waiting and time.monotonic() < deadline:
-            for inst in list(waiting):
+        todo = [i for i in stopped if i.id not in outcomes]
+        for k, inst in enumerate(todo, 1):
+            old = self.status.read(inst.id)
+            old_ts = old.ts if old is not None else 0
+            t0 = time.time()
+            try:
+                self.mgr.launch(inst)
+            except Exception as exc:
+                outcomes[inst.id] = DeployOutcome(inst.id, "failed", f"relance impossible : {exc}")
+                continue
+            log.info("déploiement groupé %s : terminal relancé (%d/%d)", inst.label, k, len(todo))
+            await show(inst.id, RUNNING, f"🚀 terminal relancé ({k}/{len(todo)}) : attente du nouvel EA")
+            deadline = time.monotonic() + self.cfg.timing.verify_deploy_s
+            last, shown = "aucun heartbeat", time.monotonic()
+            res: DeployOutcome | None = None
+            while time.monotonic() < deadline:
                 st = self.status.read(inst.id)
-                if st is None or st.ts <= old_ts.get(inst.id, 0) or st.ts < launched_at[inst.id] - 2:
-                    continue
-                last[inst.id] = f"version {st.version or '?'}" + ("" if st.connecte else ", terminal pas encore connecté au serveur")
-                if not st.connecte:
-                    continue
-                waiting.remove(inst)
-                pe, pc = pre[inst.id]
-                if pe is not None and (st.etat != pe or st.cycle != pc):
-                    outcomes[inst.id] = DeployOutcome(inst.id, "failed", f"état/cycle modifiés ({pe}/{pc} → {st.etat}/{st.cycle})")
-                    continue
-                v = st.version or version
-                self.sync_set(inst)
-                self.db.set_desired(inst.id, DEMARRE)
-                self.db.set_version(inst.id, v, "déploiement")
-                back = int(time.time() - launched_at[inst.id])
-                outcomes[inst.id] = DeployOutcome(inst.id, "ok", f"v{v} en ligne, connecté · terminal revenu en {back} s")
-                await show(inst.id, OK, outcomes[inst.id].message)
-            if waiting and time.monotonic() - shown >= 10:
-                shown = time.monotonic()
-                for inst in waiting:
-                    await show(inst.id, RUNNING, f"📡 attente du nouvel EA : {int(time.time() - launched_at[inst.id])} s "
-                                                 f"(dernier signe : {last[inst.id]})")
-            if waiting:
+                if st is not None and st.ts > old_ts and st.ts >= t0 - 2:
+                    last = f"version {st.version or '?'}" + ("" if st.connecte else ", terminal pas encore connecté au serveur")
+                    if st.connecte:
+                        pe, pc = pre[inst.id]
+                        if pe is not None and (st.etat != pe or st.cycle != pc):
+                            res = DeployOutcome(inst.id, "failed", f"état/cycle modifiés ({pe}/{pc} → {st.etat}/{st.cycle})")
+                        else:
+                            v = st.version or version
+                            self.sync_set(inst)
+                            self.db.set_desired(inst.id, DEMARRE)
+                            self.db.set_version(inst.id, v, "déploiement")
+                            res = DeployOutcome(inst.id, "ok", f"v{v} en ligne, connecté · terminal revenu en {int(time.time() - t0)} s")
+                            await show(inst.id, OK, res.message)
+                        break
+                if time.monotonic() - shown >= 10:
+                    shown = time.monotonic()
+                    await show(inst.id, RUNNING, f"📡 attente du nouvel EA ({k}/{len(todo)}) : {int(time.time() - t0)} s "
+                                                 f"(dernier signe : {last})")
                 await asyncio.sleep(1.0)
-        for inst in waiting:
-            outcomes[inst.id] = DeployOutcome(inst.id, "failed", f"heartbeat du nouvel EA non reçu ({last[inst.id]})")
+            outcomes[inst.id] = res or DeployOutcome(inst.id, "failed", f"heartbeat du nouvel EA non reçu ({last})")
         # échecs : ancien .ex5 restauré, terminal relancé
         bad = [i for i in stopped if outcomes[i.id].status == "failed"]
+        stagger = max(0, self.cfg.timing.launch_stagger_s)
         for k, inst in enumerate(bad):
             await show(inst.id, RUNNING, f"❌ {outcomes[inst.id].message} : restauration de l'ancien EA…")
             await self.mgr.stop(inst, force=True, set_desired=None)

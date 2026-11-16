@@ -446,6 +446,10 @@ async def test_deploiement_groupe_ferme_tout_puis_relance(stack):
     real_launch, real_stop = mgr.launch, mgr.stop
 
     def launch(inst, ini=None):
+        prev = [e[1] for e in order if e[0] == "launch"]
+        if prev:                                                   # Bot 3.8.1 : le précédent est revenu avant
+            st = status.read(prev[-1])
+            assert st is not None and st.connecte, "terminal suivant relancé avant le retour du précédent"
         order.append(("launch", inst.id))
         return real_launch(inst, ini)
 
