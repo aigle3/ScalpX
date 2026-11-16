@@ -276,11 +276,14 @@ string ResumeMsg(color &col)
    {
       if(bal < PDbl(P_SEUIL_REPRISE)) { col = PC_RED; return "Solde sous " + F0(PDbl(P_SEUIL_REPRISE)) + " " + Cur() + " : aucune nouvelle série ne sera lancée."; }
       col = PC_ORANGE;
+      if(PBool(P_SL_CONT)) return ContArmed() ? "Mode continu : filtres OK, objectif lancé à la clôture de la bougie M5 s'ils le sont encore."   // [ARCHI] 7.8.6
+                                              : "Mode continu : objectif lancé dès que tous les filtres sont OK (puis clôture de la bougie M5).";
       return "Aucun objectif : le trading reprend au prochain créneau, " + slot + ".";
    }
    if(!g_configOK) { col = PC_ORANGE; return "Paramètres à valider (commande VALIDER) avant de reprendre."; }
    if(!g_enabled)  { col = PC_BLUE; return "Robot arrêté : touche Démarrer pour reprendre l'objectif en cours."; }
-   if(st_posCount > 0) { col = PC_GREEN; return "Série en cours. Prochain créneau : " + slot + " (sauté si l'objectif n'est pas terminé)."; }
+   if(st_posCount > 0) { col = PC_GREEN; return PBool(P_SL_CONT) ? "Série en cours. Mode continu : objectif suivant après celui-ci."   // [ARCHI] 7.8.6
+                                                                 : "Série en cours. Prochain créneau : " + slot + " (sauté si l'objectif n'est pas terminé)."; }
    if(g_blockReason != "") { col = PC_ORANGE; return "Nouvelle série bloquée (" + g_blockReason + ") : reprise automatique dès que la condition se libère."; }
    col = PC_GREEN;
    return "Prêt : ouverture d'une série au prochain signal. Prochain créneau : " + slot + ".";
@@ -382,15 +385,18 @@ int DrawPlanning(int x, int w, int y0)
    // [ARCHI] début
    int cx = x + 12, cr = x + w - 12, cw = w - 24;
    datetime ns = NextSlot();
-   bool slotsOn = (PBool(P_SL_ON) && g_slotsN > 0);
+   bool cont = PBool(P_SL_CONT);                      // [ARCHI] 7.8.6 : mode continu, pas de créneaux affichés
+   bool slotsOn = (!cont && PBool(P_SL_ON) && g_slotsN > 0);
    int y = CardBegin(0, x, y0, w);
    CvSection(cx, y, "PLANNING");
    CvText(cr, y, "Heure EA " + TimeToString(LocalNow(), TIME_MINUTES | TIME_SECONDS), PC_DIM, 8, 1);
    y += 18;
    CvText(cx, y, "Prochain objectif +" + F1(PDbl(P_SL_PCT)) + " %", PC_TEXT, 10, 0, true);
-   CvText(cr, y, slotsOn ? SlotLabel(ns) : "créneaux désactivés", slotsOn ? PC_ORANGE : PC_DIM, 10, 1, true);
+   if(cont) CvText(cr, y, "mode continu", PC_GREEN, 10, 1, true);   // [ARCHI] 7.8.6
+   else     CvText(cr, y, slotsOn ? SlotLabel(ns) : "créneaux désactivés", slotsOn ? PC_ORANGE : PC_DIM, 10, 1, true);
    y += 20;
-   CvRow(cx, cr, y, "Compte à rebours", slotsOn ? Countdown(ns) : "—", PC_TEXT, true);
+   if(cont) CvRow(cx, cr, y, "Déclenchement", g_goalActive ? "objectif en cours" : (ContArmed() ? "clôture M5 dans " + IntegerToString(MathMax(0, (int)(g_contArm + 300 - TimeCurrent()))) + " s" : "attente des filtres"), PC_TEXT, true);
+   else     CvRow(cx, cr, y, "Compte à rebours", slotsOn ? Countdown(ns) : "—", PC_TEXT, true);
    y += 20;
    color rc;
    string rm = ResumeMsg(rc);
@@ -470,12 +476,13 @@ int DrawGoal(int x, int w, int y0)
    else
    {
       datetime ns = NextSlot();
-      bool slotsOn = (PBool(P_SL_ON) && g_slotsN > 0);
+      bool slotsOn = (!PBool(P_SL_CONT) && PBool(P_SL_ON) && g_slotsN > 0);   // [ARCHI] 7.8.6
       CvSection(cx, y, "OBJECTIF");
       y += 20;
       CvText(cx, y, "Aucun objectif actif", PC_TEXT, 9, 0, true);
       y += 18;
-      CvText(cx, y, slotsOn ? "Le suivant démarre " + SlotLabel(ns) : "Lance un objectif depuis le bot (bouton Objectif)", PC_DIM, 8);
+      CvText(cx, y, PBool(P_SL_CONT) ? "Mode continu : le suivant démarre quand tous les filtres sont OK"   // [ARCHI] 7.8.6
+                    : (slotsOn ? "Le suivant démarre " + SlotLabel(ns) : "Lance un objectif depuis le bot (bouton Objectif)"), PC_DIM, 8);
       y += 16;
    }
    return CardEnd(1, y0, y);
