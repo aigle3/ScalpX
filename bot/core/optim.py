@@ -239,7 +239,7 @@ def _num_variant(params: dict[str, str], vals: dict[str, str]) -> Variant:
 
 def slot_candidates(params: dict[str, str]) -> list[int]:
     """Heures piles libres où un créneau pourrait être ajouté (pas déjà un créneau à cette heure, pas de coupure dans l'heure)."""
-    if params.get("sl_on", "1") != "1":
+    if params.get("sl_on", "1") != "1" or params.get(MODE_KEY) == "1":   # Bot 3.6.5 : mode continu = pas de créneaux
         return []
     cur = slots_of(_masks(params, SLOT_KEYS))
     cuts = slots_of(_masks(params, CUT_KEYS)) if params.get("ct_on", "1") == "1" else []
@@ -539,6 +539,8 @@ def slot_plan(rows: list[dict], vs: list[Variant], params: dict[str, str], d_to:
     """Retraits : créneaux actuels dont un objectif dépasse 80 % de drawdown (ou perd le compte) sur 60 j.
     Ajouts : heures testées seules, sous 80 % de drawdown, jamais de compte perdu, gain positif sur 60 j."""
     plan = SlotPlan()
+    if params.get(MODE_KEY) == "1":                        # Bot 3.6.5 : mode continu : créneaux ignorés, jamais modifiés
+        return plan
     cur = slots_of(_masks(params, SLOT_KEYS))
     by_slot: dict[str, list[dict]] = {}
     for d in rows:

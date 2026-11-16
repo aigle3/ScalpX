@@ -60,6 +60,15 @@ def test_cinq_categories_et_variantes():
     assert hours == [h for h in range(24) if h not in (2, 4, 6, 11, 20, 13, 21)]
     assert next(v for v in ob if v.hour == 3).opts == {"sm": f"{1 << 3},0,0,0"}
     assert optim.slot_candidates({**P, "sl_on": "0"}) == []
+
+
+def test_mode_continu_creneaux_ni_testes_ni_modifies():
+    """Bot 3.6.5 : en mode continu, les scénarios de créneau tourneraient en continu (= miroir) : aucun test, aucun changement."""
+    pc = {**P, "sl_cont": "1"}
+    assert optim.slot_candidates(pc) == []
+    assert not [v for v in optim.variants(pc, "objectif") if v.kind == "slot"]
+    plan = optim.slot_plan([], [], pc, 0)
+    assert plan.changes == {} and plan.added == [] and plan.removed == []
     assert optim.label_of("sl_pct", "0.5") == "Objectif : 0,5 %" and optim.value_text("f_vol", "1") == "activé"
     assert optim.value_text("sl_m00", str(SL00)) == "02:00, 04:00, 06:00, 11:00, 20:00"
 

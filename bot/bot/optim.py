@@ -628,7 +628,7 @@ Le <b>mode continu</b> n'est jamais modifié par l'optimiseur : c'est toi qui le
 
 <b>Les crans</b> : un cran est le pas d'un réglage (ex. 0,1 pour l'ATR de la grille). Chaque variante bouge un réglage d'<b>un cran</b>, seul ou combiné à un autre réglage de la même famille. La meilleure variante sûre est appliquée ; les nuits suivantes, il reteste autour de la nouvelle valeur. Après <b>3 passages sans changement</b> d'un réglage, il cherche <b>deux fois plus loin</b> (2 puis 4 crans), puis revient à 1 cran.
 
-<b>Les créneaux</b> (nuit 🎯) : un créneau est <b>retiré</b> s'il dépasse <b>80 % de drawdown</b> sur 60 jours ; chaque <b>heure pile libre</b> est testée seule et <b>ajoutée</b> si elle reste sous 80 %, ne perd jamais le compte et gagne de l'argent. Il ne retire jamais le dernier créneau. Les coupures ne sont jamais touchées.
+<b>Les créneaux</b> (nuit 🎯) : un créneau est <b>retiré</b> s'il dépasse <b>80 % de drawdown</b> sur 60 jours ; chaque <b>heure pile libre</b> est testée seule et <b>ajoutée</b> si elle reste sous 80 %, ne perd jamais le compte et gagne de l'argent. Il ne retire jamais le dernier créneau. Les coupures ne sont jamais touchées. En mode continu, les créneaux ne sont ni testés ni modifiés.
 
 <b>Ce que tu reçois</b> : un message par nuit avec l'ancienne valeur, la nouvelle, la raison, les meilleures variantes et un bouton <b>↩️ Annuler ce changement</b>. Le réglage est appliqué à tous les comptes lancés et à ton preset ⭐ de travail (ex. Martin, utilisé aussi pour les nouveaux comptes). Le preset « 🧩 Base avant optimisation » n'est jamais modifié : il sert au ♻️ reset.
 
