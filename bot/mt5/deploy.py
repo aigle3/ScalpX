@@ -1,4 +1,5 @@
-"""Déploiement d'une nouvelle version de l'EA : instance par instance (jamais deux à la fois).
+"""Déploiement d'une nouvelle version de l'EA. Plusieurs comptes (mise à jour immédiate, par défaut) : groupé, tous les
+terminaux fermés puis relancés (Bot 3.7.0). Un seul compte, ou attente de la fin de la série : instance par instance.
 
 Seul le .ex5 est copié depuis BASE : jamais le profil, le graphique, les paramètres ni le compte mémorisé.
 """
@@ -304,7 +305,8 @@ class DeployManager:
 
     # ---- série
     async def run(self, targets: list[str], progress: ProgressCb | None = None, dep_id: int | None = None) -> list[DeployOutcome]:
-        """Déploie séquentiellement ; au premier échec les suivants ne sont PAS déployés."""
+        """Déploie : groupé si plusieurs comptes en mise à jour immédiate (Bot 3.7.0), sinon séquentiellement (au premier échec
+        les suivants ne sont PAS déployés)."""
         self.running, self._cancel, self._abort = True, False, False
         version = basemod.read_version(self.cfg.paths.base)
         insts = [i for i in (self.db.get(t) for t in targets) if i]
@@ -321,6 +323,15 @@ class DeployManager:
         self._on_step = on_step
         log.info("déploiement de l'EA v%s : %d compte(s) (%s)", version, len(insts), ", ".join(i.label for i in insts))
         try:
+            if not self.cfg.timing.deploy_wait_flat and len(insts) > 1:
+                # Bot 3.7.0 : mise à jour groupée. Tous les terminaux sont fermés d'abord, puis le nouvel EA est copié partout
+                # et ils sont relancés. Un par un, le VPS restait à ~99 % (les autres terminaux tournent) : relance trop lente.
+                outcomes = await self._run_batch(insts, version, view, progress)
+                for o in outcomes:
+                    if o.status == "ok" and o.iid in pending:
+                        pending.remove(o.iid)
+                self.db.update_deployment(dep_id, pending=",".join(pending))
+                insts = []
             for inst in insts:
                 if self._cancel:
                     view[inst.id] = (WAITING, "annulé")
@@ -360,6 +371,141 @@ class DeployManager:
             self._on_step = None
             log.info("déploiement de l'EA v%s terminé : %s", version, status)
         return outcomes
+
+    # ---- mise à jour groupée (Bot 3.7.0)
+    async def _run_batch(self, insts: list[Instance], version: str, view: dict[str, tuple[str, str]],
+                         progress: ProgressCb | None) -> list[DeployOutcome]:
+        """1) maintenance + sauvegarde de l'ancien .ex5 partout ; 2) fermeture de TOUS les terminaux en même temps ;
+        3) nouvel .ex5 copié partout ; 4) relance échelonnée ; 5) attente du nouvel EA sur tous en parallèle.
+        Un compte dont le nouvel EA ne répond pas retrouve son ancien .ex5 (les autres gardent le nouveau)."""
+        t_start = time.monotonic()
+        self.phase = "installation"
+        n = len(insts)
+        pre: dict[str, tuple[str | None, int | None]] = {}
+        backups: dict[str, Path | None] = {}
+        outcomes: dict[str, DeployOutcome] = {}
+
+        async def show(iid: str, icon: str, text: str) -> None:
+            view[iid] = (icon, text)
+            if progress:
+                try:
+                    await progress(view)
+                except Exception:
+                    log.exception("affichage de la progression")
+
+        for inst in insts:
+            st = self.status.read(inst.id)
+            pre[inst.id] = (st.etat if st else None, st.cycle if st else None)
+            self.db.set_desired(inst.id, MAINTENANCE)                     # le watchdog ne relance pas pendant la mise à jour
+            backups[inst.id] = self.backup_ex5(inst)
+            npos = st.positions if st is not None else 0
+            log.info("déploiement groupé %s : maintenance, ancien EA sauvegardé (%d position(s) laissée(s) chez le broker)",
+                     inst.label, npos)
+            await show(inst.id, RUNNING, "🔧 mise à jour groupée" + (f" : {npos} position(s) laissée(s) chez le broker (TP en place)"
+                                                                        if npos else "") + " · 💾 ancien EA sauvegardé")
+        for inst in insts:
+            await show(inst.id, RUNNING, f"🔌 fermeture de tous les terminaux ({n})…")
+        log.info("déploiement groupé : fermeture de %d terminal(aux) en même temps", n)
+        t_stop = time.monotonic()
+        stops = await asyncio.gather(*(self.mgr.stop(i, force=False, set_desired=None) for i in insts), return_exceptions=True)
+        stopped: list[Instance] = []
+        for inst, r in zip(insts, stops):
+            if isinstance(r, Exception):
+                r = f"erreur : {r}"
+            if r == "attente_cloture":                                    # clôture 500 en cours : ce compte n'est pas touché
+                await self.cmdq.send_and_wait(inst.id, "MAINTENANCE_OFF", timeout=self.cfg.timing.ack_timeout_s)
+                self.db.set_desired(inst.id, DEMARRE)
+                outcomes[inst.id] = DeployOutcome(inst.id, "waiting", "clôture 500 en cours")
+                await show(inst.id, WAITING, "clôture 500 en cours : pas mis à jour")
+            elif r in ("propre", "kill", "deja_arrete"):
+                stopped.append(inst)
+            else:
+                self.db.set_desired(inst.id, DEMARRE)
+                outcomes[inst.id] = DeployOutcome(inst.id, "failed", f"arrêt du terminal : {r}")
+                await show(inst.id, FAILED, f"arrêt du terminal : {r}")
+        log.info("déploiement groupé : terminaux fermés en %d s", int(time.monotonic() - t_stop))
+        old_ts: dict[str, float] = {}
+        launched_at: dict[str, float] = {}
+        stagger = max(0, self.cfg.timing.launch_stagger_s)
+        for k, inst in enumerate(stopped):
+            try:
+                self.install_ex5(inst, self._base_ex5())
+                old = self.status.read(inst.id)
+                old_ts[inst.id] = old.ts if old is not None else 0
+                if k and stagger:
+                    await asyncio.sleep(stagger)
+                launched_at[inst.id] = time.time()
+                self.mgr.launch(inst)
+                await show(inst.id, RUNNING, f"📦 nouvel EA v{version} copié · 🚀 terminal relancé : attente du nouvel EA")
+            except Exception as exc:
+                outcomes[inst.id] = DeployOutcome(inst.id, "failed", f"erreur : {exc}")
+        waiting = [i for i in stopped if i.id not in outcomes]
+        deadline = time.monotonic() + self.cfg.timing.verify_deploy_s
+        last: dict[str, str] = {i.id: "aucun heartbeat" for i in waiting}
+        shown = time.monotonic()
+        while waiting and time.monotonic() < deadline:
+            for inst in list(waiting):
+                st = self.status.read(inst.id)
+                if st is None or st.ts <= old_ts.get(inst.id, 0) or st.ts < launched_at[inst.id] - 2:
+                    continue
+                last[inst.id] = f"version {st.version or '?'}" + ("" if st.connecte else ", terminal pas encore connecté au serveur")
+                if not st.connecte:
+                    continue
+                waiting.remove(inst)
+                pe, pc = pre[inst.id]
+                if pe is not None and (st.etat != pe or st.cycle != pc):
+                    outcomes[inst.id] = DeployOutcome(inst.id, "failed", f"état/cycle modifiés ({pe}/{pc} → {st.etat}/{st.cycle})")
+                    continue
+                v = st.version or version
+                self.sync_set(inst)
+                self.db.set_desired(inst.id, DEMARRE)
+                self.db.set_version(inst.id, v, "déploiement")
+                back = int(time.time() - launched_at[inst.id])
+                outcomes[inst.id] = DeployOutcome(inst.id, "ok", f"v{v} en ligne, connecté · terminal revenu en {back} s")
+                await show(inst.id, OK, outcomes[inst.id].message)
+            if waiting and time.monotonic() - shown >= 10:
+                shown = time.monotonic()
+                for inst in waiting:
+                    await show(inst.id, RUNNING, f"📡 attente du nouvel EA : {int(time.time() - launched_at[inst.id])} s "
+                                                 f"(dernier signe : {last[inst.id]})")
+            if waiting:
+                await asyncio.sleep(1.0)
+        for inst in waiting:
+            outcomes[inst.id] = DeployOutcome(inst.id, "failed", f"heartbeat du nouvel EA non reçu ({last[inst.id]})")
+        # échecs : ancien .ex5 restauré, terminal relancé
+        bad = [i for i in stopped if outcomes[i.id].status == "failed"]
+        for k, inst in enumerate(bad):
+            await show(inst.id, RUNNING, f"❌ {outcomes[inst.id].message} : restauration de l'ancien EA…")
+            await self.mgr.stop(inst, force=True, set_desired=None)
+            b = backups.get(inst.id)
+            if b and b.is_file():
+                try:
+                    self.install_ex5(inst, b)
+                except Exception as exc:
+                    log.error("restauration impossible pour %s : %s", inst.id, exc)
+            if k and stagger:
+                await asyncio.sleep(stagger)
+            self.mgr.launch(inst)
+            self.db.set_desired(inst.id, DEMARRE)
+            outcomes[inst.id].message += " — ancien .ex5 restauré"
+            await show(inst.id, FAILED, outcomes[inst.id].message)
+        dt = int(time.monotonic() - t_start)
+        res = [outcomes[i.id] for i in insts]
+        for o in res:
+            inst = next(i for i in insts if i.id == o.iid)
+            if o.status == "ok":
+                o.message += f" · groupe terminé en {dt // 60} min {dt % 60:02d} s"
+                view[o.iid] = (OK, o.message)
+                log.info("déploiement %s : ✅ %s", inst.label, o.message)
+            else:
+                log.warning("déploiement %s : %s %s", inst.label, "⏸" if o.status == "waiting" else "❌", o.message)
+            try:
+                self.db.add_action(o.iid, f"DÉPLOIEMENT EA v{version}", o.status == "ok", o.message or o.status)
+            except Exception:
+                log.exception("journal des actions")
+        if progress:
+            await progress(view)
+        return res
 
     # ---- reprise / annulation après interruption (redémarrage du VPS en plein déploiement)
     def interrupted(self):

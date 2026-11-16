@@ -423,11 +423,56 @@ async def test_deploiement_ex5_defectueux_restaure_et_stoppe(stack):
         out = await DeployManager(cfg, db, mgr, status, cmdq).run([a.id, b.id])
     finally:
         await ea.stop()
-    assert [o.status for o in out] == ["failed"]                      # le 2e compte n'est PAS déployé
+    assert [o.status for o in out] == ["failed", "failed"]            # Bot 3.7.0 : groupé, chaque compte restauré
     assert (Path(a.folder) / "MQL5" / "Experts" / "ScalpX_v5.ex5").read_text() == "5.0"      # ancien .ex5 restauré
     assert (Path(b.folder) / "MQL5" / "Experts" / "ScalpX_v5.ex5").read_text() == "5.0"
-    assert mgr.is_running(a) and db.get(a.id).desired_state == DEMARRE and db.get(a.id).ea_version == "5.0"
+    for i in (a, b):
+        assert mgr.is_running(i) and db.get(i.id).desired_state == DEMARRE and db.get(i.id).ea_version == "5.0"
+    assert all("restauré" in o.message for o in out)
     assert db.deployments(1)[0]["status"] == "ECHEC"
+
+
+@pytest.mark.asyncio
+async def test_deploiement_groupe_ferme_tout_puis_relance(stack):
+    """Bot 3.7.0 : plusieurs comptes → tous les terminaux fermés AVANT la première relance, puis nouvel EA partout."""
+    cfg, db, procs, status, cmdq, mgr, ea = stack
+    cfg.timing.launch_stagger_s = 0
+    insts = [seed(stack, k, "Demo-Server 1") for k in (1, 2, 3)]
+    ea.accounts[insts[1].id]["positions"] = 2
+    publish(cfg, "5.1")
+    ea.start()
+    await asyncio.sleep(0.3)
+    order = []
+    real_launch, real_stop = mgr.launch, mgr.stop
+
+    def launch(inst, ini=None):
+        order.append(("launch", inst.id))
+        return real_launch(inst, ini)
+
+    async def stop(inst, force=False, set_desired=None):
+        order.append(("stop", inst.id))
+        r = await real_stop(inst, force=force, set_desired=set_desired)
+        order.append(("stopped", inst.id))
+        return r
+    mgr.launch, mgr.stop = launch, stop
+    try:
+        steps = []
+
+        async def prog(view):
+            steps.append(dict(view))
+        out = await DeployManager(cfg, db, mgr, status, cmdq).run([i.id for i in insts], prog)
+    finally:
+        await ea.stop()
+    assert [o.status for o in out] == ["ok"] * 3, [o.message for o in out]
+    first_launch = next(k for k, e in enumerate(order) if e[0] == "launch")
+    assert all(e[0] != "stopped" for e in order[first_launch:])               # aucune fermeture après la 1re relance
+    assert sum(1 for e in order if e[0] == "stopped") == 3
+    for i in insts:
+        assert (Path(i.folder) / "MQL5" / "Experts" / "ScalpX_v5.ex5").read_text() == "5.1"
+        assert db.get(i.id).ea_version == "5.1" and db.get(i.id).desired_state == DEMARRE and mgr.is_running(i)
+    assert all("groupe terminé" in o.message for o in out)
+    assert any("fermeture de tous les terminaux (3)" in t for v in steps for _, t in v.values())
+    assert db.deployments(1)[0]["status"] == "OK" and len(db.actions_recent(5)) >= 3
 
 
 @pytest.mark.asyncio
