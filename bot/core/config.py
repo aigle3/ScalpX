@@ -96,6 +96,8 @@ class Update(BaseModel):
     source: str = r"C:\ScalpX\release"    # copie locale du paquet (téléchargée depuis GitHub)
     check_s: int = 60                      # vérification toutes les N secondes
     enabled: bool = True
+    cpu_free_pct: int = 70                 # Bot 3.7.2 : avant de redémarrer le bot, fermer des terminaux un par un jusqu'à
+    cpu_wait_s: int = 30                   # ce % de CPU libre (moyenne sur cpu_wait_s après chaque fermeture) ; 0 = jamais
 
 
 class Backup(BaseModel):

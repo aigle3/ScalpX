@@ -1337,6 +1337,21 @@ class Router:
         if mid:
             await self.sender.edit(self.chat_id, mid, "✅ <b>Mise à jour installée</b>\n" + "\n".join(out), None)
         if plan.bot_files or plan.bot_remove:
+            uc = self.ctx.cfg.update
+            if uc.cpu_free_pct > 0:                    # Bot 3.7.2 : assez de CPU libre pour que le nouveau bot démarre vite
+                from mt5 import cpufree
+                head = "✅ <b>Mise à jour installée</b>\n" + "\n".join(out[:-1]) + ("\n" if out[:-1] else "")
+
+                async def step(text: str) -> None:
+                    if mid:
+                        await self.sender.edit(self.chat_id, mid, head + "⏳ <b>Libération du CPU</b> : " + esc(text), None)
+                try:
+                    closed = await cpufree.free_cpu(self.ctx.db, self.ctx.mgr, target_free=float(uc.cpu_free_pct),
+                                                    wait_s=float(uc.cpu_wait_s), step=step)
+                    if closed:
+                        out.insert(len(out) - 1, f"🔌 {len(closed)} terminal(aux) fermé(s) pour libérer le CPU : relancés par le nouveau bot")
+                except Exception:
+                    log.exception("libération du CPU")
             self.note_restart(mid, "mise à jour", "✅ <b>Mise à jour installée</b>\n" + "\n".join(out))
             how = await asyncio.to_thread(upd.restart_bot, bot_root)
             log.warning("mise à jour du bot installée : redémarrage (%s)", how)

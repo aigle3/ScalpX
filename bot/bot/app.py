@@ -554,6 +554,10 @@ async def startup(app: Application) -> None:
     except Exception:
         log.exception("démarrage : nettoyage des créations refusées")
     try:
+        from mt5 import cpufree
+        back = cpufree.restore_after_restart(s.ctx.db)           # Bot 3.7.2 : fermés pour libérer le CPU avant le redémarrage
+        if back:
+            log.info("démarrage : %d terminal(aux) fermé(s) pour la mise à jour, à relancer", len(back))
         launched = await s.ctx.watchdog.startup_launch()
         await s.sender.reply_menu(s.chat_id, f"🤖 Bot {bot_version()} démarré · {len(launched)} terminal(aux) relancé(s).\n"
                                               f"Le bouton <b>{MENU_BUTTON}</b> (en bas) affiche le panneau.")

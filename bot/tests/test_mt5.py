@@ -669,3 +669,39 @@ async def test_deploiement_annule_en_retirant_la_maintenance(stack):
     assert db.get(a.id).desired_state == DEMARRE and not ea.accounts[a.id]["maintenance"]
     assert (Path(a.folder) / "MQL5" / "Experts" / "ScalpX_v5.ex5").read_text() != "5.1"   # ancien EA gardé
     assert not dm.running and dm.current_iid == "" and not dm.abort(a.id)
+
+
+# ---------------------------------------------------------------- Bot 3.7.2 : libération du CPU avant redémarrage
+@pytest.mark.asyncio
+async def test_liberation_cpu_ferme_un_par_un_jusqu_au_seuil(stack):
+    from mt5 import cpufree
+    cfg, db, procs, status, cmdq, mgr, ea = stack
+    insts = [seed(stack, k, "Demo-Server 1") for k in (1, 2, 3, 4)]
+    load = {"v": 95.0}
+
+    async def fake_stop(inst, force=False, set_desired=None):
+        procs.kill(Path(inst.folder) / "terminal64.exe")
+        load["v"] -= 30.0                                     # chaque terminal fermé libère 30 % de CPU
+        return "kill"
+    mgr.stop = fake_stop
+    steps = []
+
+    async def step(t):
+        steps.append(t)
+    closed = await cpufree.free_cpu(db, mgr, cpu_fn=lambda: load["v"], target_free=70, wait_s=0.05, sample_s=0.01, step=step)
+    assert len(closed) == 3                                   # 95 → 65 → 35 → 5 % : 3 fermetures suffisent
+    assert all(db.get(i).desired_state == MAINTENANCE for i in closed)
+    left = [i for i in insts if i.id not in closed]
+    assert len(left) == 1 and db.get(left[0].id).desired_state == DEMARRE and mgr.is_running(left[0])
+    assert any("redémarrage du bot" in t for t in steps)
+    back = cpufree.restore_after_restart(db)                  # nouveau bot : remis en DEMARRE, relancés
+    assert sorted(back) == sorted(closed) and all(db.get(i).desired_state == DEMARRE for i in closed)
+    assert cpufree.restore_after_restart(db) == []
+
+
+@pytest.mark.asyncio
+async def test_liberation_cpu_rien_a_fermer(stack):
+    from mt5 import cpufree
+    cfg, db, procs, status, cmdq, mgr, ea = stack
+    seed(stack)
+    assert await cpufree.free_cpu(db, mgr, cpu_fn=lambda: 20.0, target_free=70, wait_s=0.05, sample_s=0.01) == []
