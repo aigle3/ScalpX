@@ -1,7 +1,9 @@
 """Actions métier (sans Telegram) : commandes EA, lancer/arrêter/redémarrer, suppression, rapports."""
 from __future__ import annotations
 
+import asyncio
 import time
+from typing import Awaitable, Callable
 from dataclasses import dataclass, field
 
 from core.commands import CmdResult, CommandQueue
@@ -97,6 +99,24 @@ async def action_restart(ctx: Ctx, inst: Instance, force: bool = False) -> str:
     r = await ctx.mgr.restart(inst, force=force)
     journal(ctx, inst, "TERMINAL redémarrer" + (" (forcé)" if force else ""), r == "relance", r)
     return "🔄 Terminal relancé." if r == "relance" else "⏳ Clôture à 500 en cours : redémarrage reporté."
+
+
+async def wait_online(ctx: Ctx, inst: Instance, since: float, timeout: float,
+                      tick: "Callable[[int, str], Awaitable[None]] | None" = None) -> tuple[bool, str]:
+    """Bot 3.9.0 : attend que l'EA d'un terminal relancé réponde (heartbeat écrit après `since`) ET soit connecté au serveur."""
+    end = time.monotonic() + timeout
+    last, shown = "aucun signe de vie", time.monotonic()
+    while time.monotonic() < end:
+        st = ctx.status.read(inst.id)
+        if st is not None and st.ts >= since - 2:
+            if st.connecte:
+                return True, f"🟢 en ligne et connecté en {int(time.time() - since)} s"
+            last = "EA lancé, pas encore connecté au serveur"
+        if tick and time.monotonic() - shown >= 5:
+            shown = time.monotonic()
+            await tick(int(time.time() - since), last)
+        await asyncio.sleep(1.0)
+    return False, f"⚠️ pas de réponse en {int(timeout)} s ({last}) : je passe au suivant"
 
 
 async def action_delete(ctx: Ctx, inst: Instance) -> str:

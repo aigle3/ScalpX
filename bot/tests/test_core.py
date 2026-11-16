@@ -516,3 +516,19 @@ def test_plex_ecran_systeme(monkeypatch):
     monkeypatch.setattr(plex, "state", lambda exe="": plex.PlexState(True, 2, 5.0, 200, 0, "x"))
     text, kb = plex_screen(C, "✅ Plex lancé")
     assert text.startswith("✅ Plex lancé") and kb[0][0] == ("⏹ Éteindre Plex", "d:plexoff")
+
+
+# ---------------------------------------------------------------- Bot 3.9.0 : relance un par un, attente du vert
+@pytest.mark.asyncio
+async def test_wait_online_attend_heartbeat_connecte():
+    import time as _t
+    from types import SimpleNamespace as NS
+    from bot import actions as act
+    t0 = _t.time()
+    seq = [None, NS(ts=t0 - 100, connecte=True), NS(ts=t0 + 1, connecte=False), NS(ts=t0 + 2, connecte=True)]
+    ctx = NS(status=NS(read=lambda iid: seq.pop(0) if len(seq) > 1 else seq[0]))
+    ok, msg = await act.wait_online(ctx, NS(id="a"), t0, timeout=10)
+    assert ok and "connecté" in msg
+    ctx2 = NS(status=NS(read=lambda iid: NS(ts=t0 + 1, connecte=False)))
+    ok, msg = await act.wait_online(ctx2, NS(id="a"), t0, timeout=1.5)
+    assert not ok and "pas encore connecté" in msg

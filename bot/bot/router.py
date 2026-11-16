@@ -125,6 +125,7 @@ class Router:
             else:
                 what = {"rst": "🔄 Redémarrer", "start": "🚀 Lancer", "stop": "🛑 Arrêter"}[verb]
                 extra = "\nFermeture propre ; les positions restent ouvertes chez le broker." if verb != "start" else ""
+                extra += "\nUn par un : le suivant attend que le précédent soit en ligne (vert)." if verb != "stop" else "\nUn par un."
                 return await self._ask(f"<b>{what} {len(targets)} terminal(aux) ?</b>\n{esc(', '.join(i.label for i in targets[:15]))}{extra}",
                                        lambda: self._terminals(targets, verb), ("gterm",), what)
         elif sub == "flt":
@@ -801,20 +802,42 @@ class Router:
         await self.sender.send(self.chat_id, "📋 <b>Positions</b>\n\n" + "\n\n".join(parts)[:3900], [[("✖ Fermer", "d:close")]], True)
 
     async def _terminals(self, insts, verb: str) -> None:
-        """Redémarrer / lancer / arrêter plusieurs terminaux en parallèle ; un seul message de résultat."""
+        """Bot 3.9.0 : redémarrer / lancer / arrêter plusieurs terminaux UN PAR UN. Pour lancer / redémarrer, le suivant
+        n'est lancé qu'une fois le précédent en ligne et connecté (vert), ou après le délai (verify_deploy_s)."""
         label = {"rst": "Redémarrage", "start": "Lancement", "stop": "Arrêt"}[verb]
-        mid = await self.sender.send(self.chat_id, f"⏳ <b>{label}</b> de {len(insts)} terminal(aux)…", None, True)
-        fn = {"rst": act.action_restart, "start": act.action_start, "stop": act.action_stop}[verb]
+        n = len(insts)
+        done: list[str] = []
+        mid = await self.sender.send(self.chat_id, f"⏳ <b>{label}</b> de {n} terminal(aux), un par un…", None, True)
 
-        async def one(i):
+        async def show(cur: str = "") -> None:
+            txt = f"⏳ <b>{label}</b> · {len(done)}/{n}\n" + "\n".join(done) + (("\n" + cur) if cur else "")
             try:
-                return i, await fn(self.ctx, i)
-            except Exception as exc:
-                return i, f"❌ {exc}"
+                await self.sender.edit(self.chat_id, mid, txt[-3900:], None)
+            except Exception:
+                log.debug("progression des terminaux", exc_info=True)
 
-        res = await asyncio.gather(*[one(i) for i in insts])
-        lines = [f"<b>{esc(i.label)}</b> : {esc(str(r))[:150]}" for i, r in res]
-        await self.sender.edit(self.chat_id, mid, f"🖥 <b>{label}</b>\n" + "\n".join(lines), [[("✖ Fermer", "d:close")]])
+        timeout = float(self.ctx.cfg.timing.verify_deploy_s)
+        for k, i in enumerate(insts, 1):
+            name = f"<b>{esc(i.label)}</b>"
+            await show(f"{name} ({k}/{n}) : {'arrêt' if verb == 'stop' else 'lancement'}…")
+            t0 = time.time()
+            try:
+                if verb == "stop":
+                    r = await act.action_stop(self.ctx, i)
+                else:
+                    r = await (act.action_restart if verb == "rst" else act.action_start)(self.ctx, i)
+                    if r.startswith(("🔄", "🚀")):
+                        async def tick(sec: int, last: str, name=name, k=k) -> None:
+                            await show(f"{name} ({k}/{n}) : attente de l'EA {sec} s ({esc(last)})…")
+                        ok, msg = await act.wait_online(self.ctx, i, t0, timeout, tick)
+                        r = msg
+            except Exception as exc:
+                log.exception("terminal %s", i.label)
+                r = f"❌ {exc}"
+            done.append(f"{name} : {esc(str(r))[:150]}")
+            await show()
+        await self.sender.edit(self.chat_id, mid, f"🖥 <b>{label}</b> terminé · {n} terminal(aux)\n" + "\n".join(done),
+                               [[("✖ Fermer", "d:close")]])
         await self.dash.refresh(force=True)
 
     # ------------------------------------------------------------------ 💾 presets centraux
