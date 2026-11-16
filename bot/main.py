@@ -218,16 +218,30 @@ def main() -> int:
     setup_logging(cfg, console)
     log = logging.getLogger("main")
     log.info("démarrage du processus (pid %d)", os.getpid())
+    # Bot 3.7.1 : démarrage resté bloqué sans aucune trace (VPS à 99 %) : si le bot n'est pas prêt au bout de 60 s,
+    # la pile de chaque fil est écrite dans data\logs\startup_trace.log (toutes les 60 s) pour voir où il attend.
+    import faulthandler
+    trace_f = None
+    try:
+        trace_f = open(cfg.paths.data / "logs" / "startup_trace.log", "a", encoding="utf-8")
+        trace_f.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} démarrage pid {os.getpid()} ===\n")
+        trace_f.flush()
+        faulthandler.dump_traceback_later(60, repeat=True, file=trace_f)
+    except OSError:
+        trace_f = None
     if not cfg.token or not cfg.allowed_chats:
         log.critical("TELEGRAM_TOKEN ou ALLOWED_CHAT_IDS manquant dans .env")
         return 2
+    log.info("démarrage : verrou d'instance unique…")
     lock = acquire_lock(cfg.runtime.lock_port)
     if lock is None:
         log.critical("Un autre bot tourne déjà (verrou %s). Arrêt.", cfg.runtime.lock_port)
         return 3
     from core.selfwatch import clear_restarting
     clear_restarting(ROOT)                          # redémarrage voulu terminé : la surveillance reprend normalement
+    log.info("démarrage : verrou obtenu en %.1f s, chargement des modules…", time.monotonic() - t_start)
     from bot.app import JOB_KW, build_application
+    log.info("démarrage : modules chargés en %.1f s, préparation (base, terminaux)…", time.monotonic() - t_start)
     app = build_application(cfg, lambda: make_ctx(cfg))
     quit_l = QuitListener(lock)
     stopping = STOPPING
@@ -244,6 +258,11 @@ def main() -> int:
 
     app.job_queue.run_repeating(j_quit, interval=1, first=1, job_kwargs=JOB_KW)
     log.info("ScalpX central démarré (%d chat autorisé) en %.1f s", len(cfg.allowed_chats), time.monotonic() - t_start)
+
+    async def j_ready(context) -> None:                    # premier tour de boucle : Telegram joint, plus de trace
+        faulthandler.cancel_dump_traceback_later()
+        log.info("démarrage : connecté à Telegram en %.1f s", time.monotonic() - t_start)
+    app.job_queue.run_once(j_ready, 0)
     try:
         app.run_polling(allowed_updates=["message", "callback_query"], drop_pending_updates=False,
                         bootstrap_retries=-1)      # Telegram injoignable au démarrage : on réessaie au lieu de s'arrêter
