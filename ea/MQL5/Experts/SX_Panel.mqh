@@ -375,7 +375,7 @@ bool PanelOnClick(string name) { return StringFind(name, PNM("")) == 0; }
 //| Renvoient le y sous la carte. La hauteur de la carte vient de la |
 //| passe de mesure (tableau g_cardH, une case par section).         |
 //+------------------------------------------------------------------+
-int g_cardH[7] = { 120, 90, 150, 80, 150, 300, 40 };
+int g_cardH[8] = { 120, 90, 150, 80, 150, 300, 40, 150 };   // [ARCHI] 7.10.0 : + statistiques
 
 int CardBegin(int k, int x, int y, int w) { CvCard(x, y, w, g_cardH[k], PC_CARD, PC_BORDER); return y + 10; }
 int CardEnd(int k, int y0, int y)        { y += 4; g_cardH[k] = y - y0; return y; }
@@ -681,6 +681,84 @@ int PanelWidth()
    return MathMax(740, MathMin(2400, cw));                                  // toute la largeur utile
 }
 
+// [ARCHI] début 7.10.0 : statistiques des trades de l'EA (historique du broker), par période
+#define ST_NP 5
+int    g_stTrades[ST_NP], g_stLong[ST_NP], g_stShort[ST_NP], g_stWon[ST_NP], g_stLost[ST_NP];
+double g_stNet[ST_NP];
+datetime g_stCalcAt = 0;
+int    g_stDeals = -1;
+
+string StatsLabel(int k) { static string l[ST_NP] = { "24 h", "48 h", "7 jours", "30 jours", "3 mois" }; return l[k]; }
+int    StatsSecs(int k)  { static int d[ST_NP] = { 86400, 172800, 604800, 2592000, 7776000 }; return d[k]; }
+
+// Recalcul toutes les 60 s, ou dès que le nombre de positions ouvertes change : un trade = une position de l'EA fermée sur ce symbole.
+void StatsRefresh()
+{
+   datetime now = TimeCurrent();
+   if(now <= 0) now = TimeTradeServer();
+   if(st_posCount == g_stDeals && now - g_stCalcAt < 60) return;   // (g_stDeals : nombre de positions au dernier calcul)
+   if(!HistorySelect(now - StatsSecs(ST_NP - 1) - 3600, now + 3600)) return;
+   int nd = HistoryDealsTotal();
+   g_stDeals = st_posCount;
+   g_stCalcAt = now;
+   for(int k = 0; k < ST_NP; k++) { g_stTrades[k] = g_stLong[k] = g_stShort[k] = g_stWon[k] = g_stLost[k] = 0; g_stNet[k] = 0; }
+   for(int i = 0; i < nd; i++)
+   {
+      ulong t = HistoryDealGetTicket(i);
+      if(t == 0) continue;
+      if(HistoryDealGetInteger(t, DEAL_MAGIC) != MagicNumber || HistoryDealGetString(t, DEAL_SYMBOL) != _Symbol) continue;
+      long typ = HistoryDealGetInteger(t, DEAL_TYPE);
+      if(typ != DEAL_TYPE_BUY && typ != DEAL_TYPE_SELL) continue;
+      long ent = HistoryDealGetInteger(t, DEAL_ENTRY);
+      double net = HistoryDealGetDouble(t, DEAL_PROFIT) + HistoryDealGetDouble(t, DEAL_SWAP) + HistoryDealGetDouble(t, DEAL_COMMISSION);
+      long age = (long)(now - (datetime)HistoryDealGetInteger(t, DEAL_TIME));
+      bool out = (ent == DEAL_ENTRY_OUT || ent == DEAL_ENTRY_INOUT || ent == DEAL_ENTRY_OUT_BY);
+      for(int k = 0; k < ST_NP; k++)
+      {
+         if(age > StatsSecs(k)) continue;
+         g_stNet[k] += net;                                      // commissions d'entrée comprises
+         if(!out) continue;
+         g_stTrades[k]++;
+         if(typ == DEAL_TYPE_SELL) g_stLong[k]++; else g_stShort[k]++;   // une vente ferme un achat (long)
+         if(net >= 0) g_stWon[k]++; else g_stLost[k]++;
+      }
+   }
+}
+
+int DrawStats(int x, int w, int y0)
+{
+   StatsRefresh();
+   int cx = x + 12, cw = w - 24;
+   int y = CardBegin(7, x, y0, w);
+   CvSection(cx, y, "STATISTIQUES DES TRADES");
+   CvText(x + w - 12, y, "positions de l'EA fermées · " + _Symbol, PC_DIM, 8, 1);
+   y += 20;
+   string head[8] = { "Période", "Trades", "Longs", "Courts", "Gagnés", "Perdus", "Réussite", "Résultat" };
+   int col[8];
+   int first = cw * 16 / 100, rest = (cw - first) / 7;
+   col[0] = cx;
+   for(int c = 1; c < 8; c++) col[c] = cx + first + rest * c;     // colonnes alignées à droite
+   for(int c = 0; c < 8; c++) CvText(col[c], y, head[c], PC_DIM, 8, c == 0 ? 0 : 1, true);
+   y += 16;
+   CvRect(cx, y, cx + cw, y, A(PC_BORDER));
+   y += 6;
+   for(int k = 0; k < ST_NP; k++)
+   {
+      int n = g_stTrades[k];
+      CvText(col[0], y, StatsLabel(k), PC_TEXT, 9, 0, true);
+      CvText(col[1], y, IntegerToString(n), PC_TEXT, 9, 1, true);
+      CvText(col[2], y, IntegerToString(g_stLong[k]), PC_TEXT, 9, 1);
+      CvText(col[3], y, IntegerToString(g_stShort[k]), PC_TEXT, 9, 1);
+      CvText(col[4], y, IntegerToString(g_stWon[k]), PC_GREEN, 9, 1);
+      CvText(col[5], y, IntegerToString(g_stLost[k]), g_stLost[k] > 0 ? PC_RED : PC_DIM, 9, 1);
+      CvText(col[6], y, n > 0 ? F0((double)g_stWon[k] / n * 100.0) + " %" : "—", PC_TEXT, 9, 1);
+      CvText(col[7], y, Sgn(g_stNet[k]) + " " + Cur(), g_stNet[k] >= 0 ? PC_GREEN : PC_RED, 9, 1, true);
+      y += 18;
+   }
+   return CardEnd(7, y0, y);
+}
+// [ARCHI] fin
+
 int PanelDraw()
 {
    int W = PanelWidth(), pad = 14;
@@ -756,6 +834,7 @@ int PanelDraw()
       yb = DrawFilters(xb, cw, yb, false) + 10;
       y = MathMax(ya, yb);
    }
+   if(!g_panelCompact) y = DrawStats(xl, iw, y) + 10;   // [ARCHI] 7.10.0 : statistiques (toute la largeur)
    if(!g_panelCompact)
    {
       //--- Session (toute la largeur)

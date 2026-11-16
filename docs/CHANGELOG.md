@@ -6,6 +6,7 @@ Les numéros de ligne sont ceux des fichiers v5.
 ## Versions
 | Version | Date | Changement |
 |---|---|---|
+| 7.10.0 | 2026-11-16 | Panneau : nouvelle carte **Statistiques des trades** (toute la largeur) sur 24 h, 48 h, 7 jours, 30 jours et 3 mois : trades, longs, courts, gagnés, perdus, % de réussite, résultat net (swap et commissions compris). Lu dans l'historique du broker (positions de l'EA sur ce symbole), recalculé toutes les 60 s ou quand une position se ferme. Trading inchangé. |
 | 7.9.0 | 2026-11-16 | **Graphique des prix masqué** (`CHART_SHOW` = faux) : plus de bougies, d'échelles, d'EMA ni de lignes TP / grille dessinées (moins de CPU) ; seul le panneau d'informations reste, sur toute la largeur. Graphique rendu si l'EA est retiré. Calculs et trading inchangés. |
 | 7.8.6 | 2026-11-16 | Panneau du graphique en **mode continu** : plus de créneaux ni de compte à rebours ; le planning affiche « mode continu » et le déclenchement (attente des filtres / clôture M5 dans N s / objectif en cours) ; messages d'attente adaptés. Affichage seul, trading inchangé. |
 | 7.8.5 | 2026-11-16 | Reprise après retrait sans tick (7.8.4) réécrite : petite fonction dédiée `RepriseRetraitTimer()` appelée par le timer, au lieu d'appeler `Seuil500Tick()` à deux endroits ; le bloc de reprise est partagé (`RepriseApresRetrait()`). La compilation de la 7.8.4 restait bloquée à 95 % sur le VPS. Comportement identique, trading inchangé. |
