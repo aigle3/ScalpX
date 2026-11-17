@@ -133,3 +133,24 @@ def test_menu_systeme_sans_options_windows():
     assert "d:vpo" not in cbs and "d:plex" not in cbs and "d:win" not in cbs and "d:rst" in cbs
     assert "d:rup" in cbs and "d:rz" not in cbs                       # Bot 3.19.0 : ♻️ dans 🖥 Serveur, 🔧 ici
     assert any(t.startswith("🔔 🔧") for row in system_kb(False, windows=False, install=True) for t, _ in row)
+
+
+def test_webview2_coupe_et_processus_annexes(monkeypatch, tmp_path):
+    """Bot 3.21.0 : WebView2 coupé par défaut ; les processus Edge d'un terminal sont tués avec lui."""
+    assert "WEBVIEW2_BROWSER_EXECUTABLE_FOLDER" in w.env(w.WineOptions(prefix=tmp_path))
+    assert "WEBVIEW2_BROWSER_EXECUTABLE_FOLDER" not in w.env(w.WineOptions(prefix=tmp_path, webview=True))
+    exe = tmp_path / "instances" / "5203_X" / "terminal64.exe"
+    edge = FakeProc(30, "CrRendererMain", ["C:\\Program Files (x86)\\Microsoft\\EdgeWebView\\msedgewebview2.exe",
+                                           "--type=renderer", f"--user-data-dir={w.to_win(exe.parent)}\\temp\\EBWebView"])
+    other = FakeProc(31, "CrRendererMain", ["C:\\…\\msedgewebview2.exe", f"--user-data-dir={w.to_win(tmp_path / 'autre')}\\temp"])
+    term = FakeProc(10, "main", [str(exe), "/portable"])
+    killed = []
+    for p in (edge, other, term):
+        p.info["cmdline"] = p._cmd
+        p.kill = (lambda q: lambda: killed.append(q.pid))(p)
+    import psutil
+    monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: iter([edge, other, term]))
+    monkeypatch.setattr(psutil, "wait_procs", lambda procs, timeout=None: ([], []))
+    pp = PsutilProcesses(wine=w.WineOptions(prefix=tmp_path / "pfx"))
+    assert 30 in [p.pid for p in pp.companions(exe)] and 31 not in [p.pid for p in pp.companions(exe)]
+    assert pp.kill(exe) == 2 and sorted(killed) == [10, 30]

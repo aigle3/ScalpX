@@ -145,10 +145,11 @@ class Wine(BaseModel):
     prefix: Path | None = None             # préfixe Wine (None → $WINEPREFIX, sinon ~/.wine)
     display: str = ":99"                   # écran virtuel Xvfb (service scalpx-xvfb)
     debug: str = "-all"                    # WINEDEBUG
+    webview: bool = False                  # Bot 3.21.0 : pages web intégrées de MT5 (WebView2) ; coupées = ≈ 300 Mo de RAM gagnés par terminal
 
     def options(self):
         from mt5.wine import WineOptions
-        return WineOptions(cmd=self.cmd, prefix=self.prefix, display=self.display, debug=self.debug)
+        return WineOptions(cmd=self.cmd, prefix=self.prefix, display=self.display, debug=self.debug, webview=self.webview)
 
 
 class Config(BaseModel):

@@ -76,8 +76,11 @@ def system_text(ctx: Ctx, vps: dict[str, float]) -> str:
         err, ts = db.meta_get("ghb_err"), int(float(db.meta_get("ghb_ts") or 0))
         lines.append(f"☁️ Presets sauvegardés sur GitHub ({esc(rp)}) : "
                      + (f"⚠️ {esc(err)}" if err else (f"il y a {render.ago(now - ts)}" if ts else "en attente")))
+        fe, fts = db.meta_get("fbk_err"), int(float(db.meta_get("fbk_ts") or 0))
+        lines.append("☁️ Sauvegarde complète (historique, optimiseur, presets) : "
+                     + (f"⚠️ {esc(fe)}" if fe else (f"il y a {render.ago(now - fts)}" if fts else "chaque jour, pas encore faite")))
     else:
-        lines.append("☁️ Sauvegarde GitHub des presets : non configurée (BACKUP_TOKEN dans .env)")
+        lines.append("☁️ Sauvegarde GitHub : non configurée (🔑 Clés et jetons → BACKUP_TOKEN)")
     if cfg.healthcheck_url:
         hc = db.meta_get("health_ok")
         lines.append("📡 Surveillance externe : " + ("✅ active" if hc == "1" else "⏳ en attente" if hc == "" else "❌ ping refusé (URL ?)"))
@@ -147,6 +150,7 @@ def system_kb(pending: bool, previous: str = "", windows: bool = os.name == "nt"
            [("📊 Remettre le bouton du bas", "d:menu")]]),
         [("🔄 Redémarrer le bot", "d:rst"), ("🔃", "d:sys")],
         [("🔑 Clés et jetons", "d:key")] + ([("♻️ Réinitialiser", "d:rz")] if windows else []),   # Linux : dans 🖥 Serveur
+        [("☁️ Sauvegarder", "d:fbk"), ("☁️ Restaurer", "d:frs")],                    # Bot 3.21.0 : sauvegarde complète
         [("⬅ Accueil", "d:home")],
     ]
 

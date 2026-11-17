@@ -193,10 +193,28 @@ class PsutilProcesses:
         from .window import ensure_arranged
         return ensure_arranged(self.win_api, lambda: {p.pid for p in self.find(exe)}, self.window_opts, Path(exe).parent.name)
 
+    def companions(self, exe: Path) -> list[psutil.Process]:
+        """Bot 3.21.0 (Wine) : processus annexes d'un terminal (WebView2 / Edge…) qui citent son dossier. Sous Wine ils
+        survivent au terminal (et peuvent même l'empêcher de se fermer)."""
+        if self.wine is None:
+            return []
+        from .wine import mentions
+        folder = Path(exe).parent
+        out = []
+        for p in psutil.process_iter(["cmdline"]):
+            try:
+                if mentions(p.info.get("cmdline") or [], folder):
+                    out.append(p)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return out
+
     def kill(self, exe: Path) -> int:
-        """Termine tous les processus de CET exécutable ; renvoie le nombre tué."""
+        """Termine tous les processus de CET exécutable (et, sous Wine, ses processus annexes) ; renvoie le nombre tué."""
         n = 0
         procs = self.find(exe)
+        seen = {p.pid for p in procs}
+        procs += [p for p in self.companions(exe) if p.pid not in seen]
         for p in procs:
             try:
                 p.kill()

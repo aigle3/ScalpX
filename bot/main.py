@@ -147,7 +147,15 @@ class QuitListener:
 
 def make_ctx(cfg: Config) -> "Ctx":
     from bot.actions import Ctx
+    from core import fullbackup                                       # Bot 3.21.0 : ☁️ restauration posée → appliquée base fermée
+    restored = fullbackup.apply_pending(cfg.paths.data)
     db = Database(cfg.paths.data / "scalpx.db")
+    if restored:
+        if not restored.startswith("ÉCHEC"):
+            gone = fullbackup.archive_missing(db, cfg.paths.instances)
+            if gone:
+                restored += f" ; {len(gone)} compte(s) sans terminal sur ce serveur archivés (📄 / ➕ pour les recréer)"
+        db.meta_set("restore_note", restored)
     common = cfg.paths.common()
     common.mkdir(parents=True, exist_ok=True)
     status = StatusReader(common)

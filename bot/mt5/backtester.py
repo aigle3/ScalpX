@@ -221,6 +221,7 @@ class BacktestManager:
         last_change = time.monotonic()
         last_sig = ""
         seen_proc = False
+        fin_since = 0.0
         t0 = time.monotonic()
         while True:
             await asyncio.sleep(poll_s)
@@ -260,6 +261,14 @@ class BacktestManager:
             await notify(run)
             if not running and (seen_proc or time.monotonic() - t0 > 60):
                 return                                              # fin du test (ShutdownTerminal=1) ou échec
+            # Bot 3.21.0 : sous Wine, le terminal peut rester ouvert après « shutdown » (processus WebView2 annexes) :
+            # l'EA a écrit son résultat final → 30 s pour se fermer seul, puis fermeture forcée.
+            if files["fin"].is_file() and bt.read_json(files["fin"]) is not None:
+                fin_since = fin_since or time.monotonic()
+                if time.monotonic() - fin_since > 30:
+                    log.info("backtest #%s : résultat écrit, terminal toujours ouvert : fermeture", run.rid)
+                    await self._kill()
+                    return
             if time.monotonic() - last_change > stall_s:
                 run.error = f"Aucun progrès depuis {mins} min" + (f" (MT5 : {line})" if line else "") + "."
                 await self._kill()

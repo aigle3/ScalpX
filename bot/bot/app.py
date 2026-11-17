@@ -578,6 +578,7 @@ async def j_backup(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         dest = await asyncio.get_running_loop().run_in_executor(None, backup.run_backup, s.ctx.cfg, s.ctx.db)
         log.info("historique sauvegardé : %s", dest)
+        await s.router.full_backup(quiet=True)                      # Bot 3.21.0 : ☁️ copie complète sur GitHub
     except Exception as exc:
         log.warning("sauvegarde de l'historique impossible : %s", exc)
         await s.sender.send(s.chat_id, f"⚠️ Sauvegarde de l'historique impossible : {render.esc(str(exc))}", None, True)
@@ -591,6 +592,14 @@ async def startup(app: Application) -> None:
     """Après le démarrage : relance échelonnée des instances DEMARRE, reprise d'un déploiement interrompu."""
     s: Services = app.bot_data["svc"]
     s.router.sync_base_set()                                        # preset ⭐ actif → .set de BASE
+    note = s.ctx.db.meta_get("restore_note")                        # Bot 3.21.0 : ☁️ restauration appliquée au démarrage
+    if note:
+        s.ctx.db.meta_set("restore_note", "")
+        await s.sender.send(s.chat_id, ("❌ <b>Restauration impossible</b> : " if note.startswith("ÉCHEC") else
+                                        "☁️ <b>Restauration terminée</b> : ") + render.esc(note.removeprefix("ÉCHEC : ")), None, False)
+    w = getattr(s.ctx.mgr.procs, "wine", None)                      # Bot 3.21.0 : choix WebView2 fait dans 🖥 Serveur
+    if w is not None and s.ctx.db.meta_get("webview"):
+        w.webview = s.ctx.db.meta_get("webview") == "on"
     try:                                                            # Bot 3.19.0 : jetons manquants demandés dans Telegram
         await s.router.ask_missing_keys()
     except Exception:

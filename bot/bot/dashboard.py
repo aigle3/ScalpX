@@ -166,7 +166,8 @@ class Dashboard:
         if kind == "srv":                                   # Bot 3.18.0 : 🖥 Serveur (Linux)
             from . import server_ui as sui
             st, auto, sudo = getattr(self, "srv", (None, {}, True))
-            return sui.server_screen(st, auto, sudo, self._flash_text())
+            w = getattr(self.ctx.mgr.procs, "wine", None)
+            return sui.server_screen(st, auto, sudo, self._flash_text(), bool(w and w.webview))
         if kind == "plex":                                  # Bot 3.8.0
             from .system import plex_screen
             return plex_screen(self.ctx, self._flash_text())

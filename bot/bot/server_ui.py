@@ -11,7 +11,8 @@ def _bar(pct: float) -> str:
     return "▓" * n + "░" * (10 - n)
 
 
-def server_screen(st: sv.Stats | None, auto: dict[str, str], sudo: bool, flash: str = "") -> tuple[str, Keyboard]:
+def server_screen(st: sv.Stats | None, auto: dict[str, str], sudo: bool, flash: str = "",
+                  webview: bool = False) -> tuple[str, Keyboard]:
     lines = ["🖥 <b>Serveur</b>", ""]
     if st is None:
         lines.append("⏳ Mesure en cours…")
@@ -34,8 +35,10 @@ def server_screen(st: sv.Stats | None, auto: dict[str, str], sudo: bool, flash: 
     if not sudo:
         lines.append("⚠️ Droits administrateur du bot absents : relance <code>sudo bash linux/install.sh</code> "
                      "(services, redémarrage et désinstallation sans effet d'ici là)")
+    lines.append("🧩 Pages web de MT5 (WebView2) : " + ("<b>actives</b> (≈ 300 Mo de RAM par terminal)" if webview else
+                 "<b>coupées</b> (RAM économisée ; trading et EA non concernés)") + " — pris en compte au prochain lancement de chaque terminal")
     kb: Keyboard = [
-        [("🔃 Actualiser", "d:srv")],
+        [("🔃 Actualiser", "d:srv"), ("🧩 " + ("Couper" if webview else "Réactiver") + " WebView2", "d:wvw")],
         [("✅ Démarrage auto", "d:sva")] if bad else [],
         [("🔁 Redémarrer le VPS", "d:rbt"), ("♻️ Réinitialiser", "d:rz")],
         [("🧨 Tout désinstaller", "d:uni")],

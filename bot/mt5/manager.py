@@ -103,6 +103,10 @@ class InstanceManager:
             self.cmdq.send(inst.id, "FERMER_TERMINAL")
             wait = self.cfg.timing.kill_after_s or self.cfg.timing.stop_wait_s      # Bot 3.12.0 : 10 s (avant 30)
             if await self.wait_exit(inst, wait):
+                if hasattr(self.procs, "companions"):          # Bot 3.21.0 : processus annexes restés sous Wine
+                    rest = await asyncio.to_thread(self.procs.companions, self.exe(inst))
+                    if rest:
+                        await asyncio.to_thread(self.procs.kill, self.exe(inst))
                 return "propre"
         n = await asyncio.to_thread(self.procs.kill, self.exe(inst))   # attente de fin (jusqu'à 10 s) hors de la boucle du bot
         log.warning("terminal %s arrêté de force (%d processus)", inst.id, n or 0)

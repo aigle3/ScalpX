@@ -25,6 +25,7 @@ class WineOptions:
     prefix: Path | None = None           # préfixe Wine ; None → $WINEPREFIX, sinon ~/.wine
     display: str = ":99"                 # écran virtuel Xvfb
     debug: str = "-all"                  # WINEDEBUG : aucun message de débogage (moins de CPU et de journaux)
+    webview: bool = False                # Bot 3.21.0 : pages web intégrées de MT5 (WebView2 / Edge, ≈ 300 Mo par terminal)
 
     def prefix_path(self) -> Path:
         if self.prefix:
@@ -63,7 +64,21 @@ def env(opts: WineOptions) -> dict[str, str]:
     e["DISPLAY"] = opts.display or e.get("DISPLAY", ":99")
     e["WINEDEBUG"] = opts.debug
     e.setdefault("WINEDLLOVERRIDES", "mscoree,mshtml=")   # pas d'assistant Mono / Gecko au premier lancement
+    if not opts.webview:
+        # Bot 3.21.0 : MT5 ne trouve pas de moteur WebView2 → pas de processus Edge (4 par terminal, ≈ 300 Mo) ; seules
+        # les pages web intégrées (Market, actualités, signaux) manquent, le trading et l'EA ne sont pas concernés.
+        e["WEBVIEW2_BROWSER_EXECUTABLE_FOLDER"] = "C:\\scalpx-sans-webview"
+    else:
+        e.pop("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", None)
     return e
+
+
+def mentions(cmdline: list[str], folder: Path) -> bool:
+    """La ligne de commande cite-t-elle ce dossier (chemin Linux ou Z:\\…) ? Sert à retrouver les processus annexes
+    d'un terminal (WebView2 : --user-data-dir=Z:\\…\\<instance>\\temp\\EBWebView)."""
+    joined = " ".join(cmdline or []).lower()
+    f = str(Path(folder)).rstrip("/").lower()
+    return bool(f) and (f + "/" in joined or to_win(f).lower() + "\\" in joined)
 
 
 def common_files(opts: WineOptions, user: str | None = None) -> Path:

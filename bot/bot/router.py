@@ -214,8 +214,16 @@ class Router:
             return await self._bulk_cb(sub, p)
         elif sub in ("unigo", "unino"):                         # Bot 3.18.3 : dernière confirmation (compte à rebours)
             return await self._uninstall_cb(sub, p)
-        elif sub in ("srv", "sva", "rbt", "uni", "rup"):        # Bot 3.18.0 : 🖥 Serveur (Linux)
+        elif sub in ("srv", "sva", "rbt", "uni", "rup", "wvw"):  # Bot 3.18.0 : 🖥 Serveur (Linux)
             return await self._server_cb(sub, p)
+        elif sub == "fbk":                                      # Bot 3.21.0 : ☁️ sauvegarder maintenant
+            self.dash.flash("⏳ Sauvegarde complète en cours…")
+            await self.dash.refresh(force=True)
+            err = await self.full_backup()
+            self.dash.flash("✅ Sauvegarde complète envoyée sur GitHub." if not err else f"❌ {esc(err)}")
+        elif sub == "frs":                                      # Bot 3.21.0 : ☁️ restaurer la sauvegarde complète
+            self._bg(self._full_restore_ask())
+            return ""
         elif sub == "key":                                      # Bot 3.18.0 : 🔑 clés et jetons (saisis ici, jamais sur le VPS)
             self.dash.goto("key")
         elif sub in ("kset", "bkt") and (sub == "bkt" or (len(p) > 2 and p[2] in SECRETS)):
@@ -1232,6 +1240,15 @@ class Router:
             ok, msg = await asyncio.to_thread(sv.enable_own)
             dash.flash("✅ Bot et écran virtuel relancés au démarrage du VPS." if ok else "❌ " + esc(msg))
             return await self._server_cb("srv", ["d", "srv"])
+        elif sub == "wvw":                                       # Bot 3.21.0 : WebView2 des terminaux
+            w = getattr(self.ctx.mgr.procs, "wine", None)
+            if w is not None:
+                w.webview = not w.webview
+                self.ctx.db.meta_set("webview", "on" if w.webview else "off")
+                self.ctx.db.add_action("", f"WEBVIEW2 {'ACTIVÉ' if w.webview else 'COUPÉ'}", True, "")
+                dash.flash(("🧩 WebView2 réactivé" if w.webview else "🧩 WebView2 coupé")
+                           + " : pris en compte au prochain redémarrage de chaque terminal (🔄 sur un compte, ou ⚡ Actions → redémarrer tous).")
+            dash.goto("srv")
         elif sub == "rbt":
             return await self._ask("🔁 <b>Redémarrer le VPS ?</b>\nTerminaux et bot coupés ≈ 1 à 3 min ; au retour, le bot et les "
                                    "terminaux repartent seuls. Positions et ordres restent chez le broker.",
@@ -1377,6 +1394,59 @@ class Router:
         from .system import BOT_ROOT
         await asyncio.to_thread(upd.restart_bot, BOT_ROOT)
         upd.STOP.set()
+
+    # ---- Bot 3.21.0 : ☁️ sauvegarde complète (base + presets) et restauration
+    async def full_backup(self, quiet: bool = False) -> str:
+        from core import fullbackup, ghbackup
+        from core.version import bot_version
+        cfg, db = self.ctx.cfg, self.ctx.db
+        if not ghbackup.repo(cfg):
+            return "sauvegarde GitHub non configurée : 🔑 Clés et jetons → BACKUP_TOKEN"
+        try:
+            data = await asyncio.to_thread(fullbackup.build, db, cfg.paths.data, bot_version())
+            err = await asyncio.to_thread(fullbackup.push, cfg, data)
+        except Exception as exc:
+            log.exception("sauvegarde complète")
+            err = str(exc)
+        if err:
+            if not quiet or err != db.meta_get("fbk_err"):
+                await self.sender.send(self.chat_id, f"⚠️ Sauvegarde complète sur GitHub : {esc(err)}", None, True)
+            db.meta_set("fbk_err", err)
+            return err
+        db.meta_set("fbk_err", "")
+        db.meta_set("fbk_ts", str(int(time.time())))
+        db.meta_set("fbk_size", str(len(data)))
+        log.info("sauvegarde complète envoyée sur GitHub (%d Ko)", len(data) // 1024)
+        return ""
+
+    async def _full_restore_ask(self) -> None:
+        from core import fullbackup
+        self.dash.goto("sys")
+        self.dash.flash("⏳ Téléchargement de la sauvegarde complète…")
+        await self.dash.refresh(force=True)
+        data, err = await asyncio.to_thread(fullbackup.fetch, self.ctx.cfg)
+        man = {}
+        if not err:
+            try:
+                man = await asyncio.to_thread(fullbackup.check, data)
+            except ValueError as exc:
+                err = str(exc)
+        if err:
+            self.dash.flash(f"❌ {esc(err)}")
+            await self.dash.refresh(force=True)
+            return
+        when = time.strftime("%d/%m/%Y %H:%M", time.localtime(int(man.get("date", 0)))) if man.get("date") else "?"
+
+        async def go() -> None:
+            await asyncio.to_thread(fullbackup.stage, self.ctx.cfg.paths.data, data)
+            self.ctx.db.add_action("", "RESTAURATION COMPLÈTE", True, when)
+            await self.sender.send(self.chat_id, "☁️ Restauration posée : le bot redémarre et l'applique (≈ 15 s).", None, True)
+            await self.restart_bot()
+        await self._ask(f"☁️ <b>Restaurer la sauvegarde du {esc(when)} ?</b>\nServeur {esc(str(man.get('serveur', '?')))}, "
+                        f"bot {esc(str(man.get('version_bot', '?')))}, {man.get('comptes', 0)} compte(s).\n"
+                        "Remplace l'historique, l'état de l'optimiseur et les presets de ce serveur (les actuels sont gardés "
+                        "à côté). Les comptes sans terminal ici seront archivés : recrée-les avec 📄 ou ➕ (historique repris).",
+                        go, ("sys",), "☁️ Restaurer")
 
     async def preset_restore_github(self) -> None:
         from core import ghbackup
