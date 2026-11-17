@@ -91,8 +91,9 @@ if [ ! -f "$PFX/system.reg" ]; then
     as_u wineboot -i >/dev/null 2>&1 || true
     as_u wineserver -w || true
 fi
-as_u winecfg -v=win11 >/dev/null 2>&1 || true                 # comme le script Linux officiel de MetaQuotes
-as_u wineserver -w || true
+# comme le script Linux officiel de MetaQuotes. Pas de « wineserver -w » ici : à une relance, les terminaux MT5 tournent
+# et il attendrait leur fermeture sans fin (blocage à l'étape 3).
+as_u timeout 120 winecfg -v=win11 >/dev/null 2>&1 || true
 [ -f "$PFX/system.reg" ] || die "préfixe Wine non créé"
 ok "préfixe prêt (Windows 11)"
 # L'installeur MT5 exige WebView2 (sinon il s'arrête aussitôt sur une erreur invisible : NtRaiseHardError)
@@ -100,7 +101,7 @@ if ! ls -d "$PFX/drive_c/Program Files (x86)/Microsoft/EdgeWebView" >/dev/null 2
     echo "  Installation de Microsoft WebView2 (requis par l'installeur MT5)…"
     as_u curl -fsSL -o /tmp/webview2.exe "https://go.microsoft.com/fwlink/p/?LinkId=2124703" || die "téléchargement de WebView2 impossible"
     as_u timeout 600 wine /tmp/webview2.exe /silent /install >/dev/null 2>&1 || true
-    as_u wineserver -k || true                         # services Edge restés lancés : « wineserver -w » attendrait sans fin
+    pkill -u "$U" -i -f 'msedge|edgeupdate' || true      # services Edge restés lancés (sans toucher aux terminaux MT5)
     sleep 3
 fi
 ls -d "$PFX/drive_c/Program Files (x86)/Microsoft/EdgeWebView" >/dev/null 2>&1 && ok "WebView2 installé" || warn "WebView2 non détecté : l'installation de MT5 risque d'échouer"
