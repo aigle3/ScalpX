@@ -89,3 +89,17 @@ def test_statut_garde_en_cache_tant_que_le_fichier_ne_change_pas(tmp_path, monke
 def test_bouton_optimiser_dans_systeme():
     from bot.system import system_kb
     assert ("⚡ Optimiser le VPS", "d:vpo") in [b for row in system_kb(False) for b in row]
+
+
+def test_preset_actif_recopie_pour_le_testeur(tmp_path):
+    """Bot 3.14.0 : preset ⭐ actif → Common\\Files\\scalpx_preset.cfg à chaque modification (testeur MT5 à la main)."""
+    from core.presets import EXPORT_NAME, PresetStore
+    common = tmp_path / "Common"
+    st = PresetStore(tmp_path / "presets.json", common)
+    st.put("Martin", {"fast": "10", "sl_cont": "1"})
+    assert not (common / EXPORT_NAME).exists()                     # pas encore ⭐
+    st.set_active("Martin")
+    assert (common / EXPORT_NAME).read_text() == "# preset=Martin\nfast=10\nsl_cont=1\n"
+    st.set_value("Martin", "fast", "12")                            # modification (toi ou l'optimiseur)
+    assert "fast=12" in (common / EXPORT_NAME).read_text()
+    assert PresetStore(tmp_path / "presets.json").export() is None  # sans dossier d'export : rien

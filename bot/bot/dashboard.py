@@ -37,7 +37,8 @@ class Dashboard:
     def __init__(self, ctx: Ctx, sender: Sender, chat_id: int, confirmations: Confirmations, vps=vps_load) -> None:
         self.ctx, self.sender, self.chat_id, self.conf = ctx, sender, chat_id, confirmations
         self.vps = vps
-        self.store = PresetStore(ctx.cfg.paths.data / "presets.json")   # 💾 presets centraux
+        self.store = PresetStore(ctx.cfg.paths.data / "presets.json", ctx.cfg.paths.common())   # 💾 presets centraux
+        self.store.export()                              # Bot 3.14.0 : preset ⭐ pour le testeur MT5 (au démarrage aussi)
         self.preset_check: pui.Check | None = None          # dernier contrôle des robots / preset actif
         self.params = ParamsUI(ctx, self.store)
         self.filters: tuple[float, str, str] | None = None  # (heure, compte de référence, texte FILTRES de l'EA)

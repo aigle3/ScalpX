@@ -74,9 +74,13 @@ def differences(preset: dict[str, str], current_raw: dict[str, str]) -> dict[str
     return {k: v for k, v in preset.items() if k in BY_KEY and current_raw.get(k) != v}
 
 
+EXPORT_NAME = "scalpx_preset.cfg"
+
+
 class PresetStore:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, export_dir: Path | None = None) -> None:
         self.path = Path(path)
+        self.export_dir = Path(export_dir) if export_dir else None   # Bot 3.14.0 : Common\Files (testeur MT5 à la main)
         self.presets: dict[str, dict[str, str]] = {}
         self.active = ""                                   # preset appliqué à tous les robots (référence)
         self.load()
@@ -96,6 +100,27 @@ class PresetStore:
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps({"active": self.active, "presets": self.presets}, ensure_ascii=False, indent=1), encoding="utf-8")
         os.replace(tmp, self.path)
+        self.export()
+
+    def export(self) -> Path | None:
+        """Bot 3.14.0 : preset ⭐ actif (ex. Martin) copié dans Common\Files\scalpx_preset.cfg à chaque modification (toi,
+        l'optimiseur, ⭐) : l'EA lancé à la main dans le testeur MT5 de n'importe quel terminal du VPS le charge tout seul.
+        Format « clé=valeur » des backtests du bot (TOUS les réglages, news et créneaux compris)."""
+        if self.export_dir is None or not self.active or self.active not in self.presets:
+            return None
+        try:
+            dst = self.export_dir / EXPORT_NAME
+            body = f"# preset={self.active}\n" + "".join(f"{k}={v}\n" for k, v in self.presets[self.active].items()
+                                                       if k and v not in ("", None))
+            if dst.is_file() and dst.read_text(encoding="ascii", errors="replace") == body.encode("ascii", "replace").decode("ascii"):
+                return dst
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            tmp = dst.with_suffix(".tmp")
+            tmp.write_bytes(body.encode("ascii", "replace"))         # l'EA lit en ANSI ; nom du preset : « ? » si accent
+            os.replace(tmp, dst)
+            return dst
+        except OSError:
+            return None
 
     def names(self) -> list[str]:
         return sorted(self.presets, key=str.lower)
