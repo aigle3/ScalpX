@@ -56,7 +56,17 @@ class PsutilProcesses:
                 return None
             from .wine import cmdline_exe
             try:
-                return cmdline_exe(p.cmdline(), self.wine.prefix_path())
+                cwd = None
+                try:
+                    cwd = p.cwd()
+                except (psutil.AccessDenied, OSError):
+                    pass
+                found = cmdline_exe(p.cmdline(), self.wine.prefix_path(), cwd)
+                if found is None and cwd and name:          # Bot 3.15.1 : ligne de commande illisible → dossier courant
+                    for n in names:                          # (le terminal est lancé dans le dossier de l'instance)
+                        if (n[:COMM_LEN] == name[:COMM_LEN] or name.startswith("wine")) and (Path(cwd) / n).is_file():
+                            return str(Path(cwd) / n)
+                return found
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
                 return None
         try:

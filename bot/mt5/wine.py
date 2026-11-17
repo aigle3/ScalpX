@@ -73,14 +73,28 @@ def common_files(opts: WineOptions, user: str | None = None) -> Path:
             / "Common" / "Files")
 
 
-def cmdline_exe(cmdline: list[str], prefix: Path | None = None) -> str | None:
+_RE_EXE = re.compile(r'^\s*"?((?:[A-Za-z]:[\\/]|/)?[^"]*?\.exe)(?="|\s|$)', re.I)
+_WINE_NAMES = ("wine", "wine64", "wine.exe", "start.exe", "wine64-preloader", "wine-preloader", "wineserver")
+
+
+def cmdline_exe(cmdline: list[str], prefix: Path | None = None, cwd: str | None = None) -> str | None:
     """Chemin Linux de l'exécutable Windows d'un processus Wine, d'après sa ligne de commande.
-    Formes vues : ["Z:\\…\\terminal64.exe", "/portable", …] ou ["wine", "/home/…/terminal64.exe", …]."""
+    Formes vues : ["Z:\\…\\terminal64.exe", "/portable", …], ["wine", "/home/…/terminal64.exe", …],
+    ligne Windows entière dans un seul argument (« C:\\…\\terminal64.exe /portable /config:… », chemin entre
+    guillemets s'il contient des espaces), ou nom seul (« terminal64.exe », relatif au dossier courant `cwd`)."""
     for arg in (cmdline or [])[:3]:
-        if not arg.lower().endswith(".exe"):
+        m = _RE_EXE.match(arg or "")
+        if not m:
             continue
-        name = PurePosixPath(arg.replace("\\", "/")).name.lower()
-        if name in ("wine", "wine64", "wine.exe", "start.exe", "wine64-preloader", "wine-preloader"):
+        path = m.group(1)
+        name = PurePosixPath(path.replace("\\", "/")).name.lower()
+        if name in _WINE_NAMES:
             continue
-        return from_win(arg, prefix) if _RE_DRIVE.match(arg) else os.path.abspath(arg)
+        if _RE_DRIVE.match(path):
+            return from_win(path, prefix)
+        if path.startswith("/"):
+            return os.path.abspath(path)
+        if cwd:
+            return os.path.abspath(os.path.join(cwd, path.replace("\\", "/")))
+        return None
     return None

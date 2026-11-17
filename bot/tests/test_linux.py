@@ -20,6 +20,25 @@ def test_chemins_wine_aller_retour(tmp_path):
     assert w.from_win("/deja/linux") == "/deja/linux"
 
 
+def test_exe_ligne_windows_entiere_ou_nom_seul():
+    """Bot 3.15.1 : formes réelles sous Wine (ligne entière dans un argument, chemin entre guillemets, nom seul)."""
+    assert w.cmdline_exe(["Z:\\home\\s\\i1\\terminal64.exe /portable /config:Z:\\x.ini"]) == "/home/s/i1/terminal64.exe"
+    assert w.cmdline_exe(['"C:\\Program Files\\MT5\\terminal64.exe" /portable'], Path("/p")) == \
+        "/p/drive_c/Program Files/MT5/terminal64.exe"
+    assert w.cmdline_exe(["terminal64.exe", "/portable"], cwd="/home/s/i1") == "/home/s/i1/terminal64.exe"
+
+
+def test_terminal_reconnu_par_son_dossier(monkeypatch, tmp_path):
+    exe = tmp_path / "i1" / "terminal64.exe"
+    exe.parent.mkdir()
+    exe.write_bytes(b"MZ")
+    pr = FakeProc(20, "terminal64.exe", [])                     # ligne de commande vide
+    pr._cwd = str(exe.parent)
+    import psutil
+    monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: iter([pr]))
+    assert PsutilProcesses(wine=w.WineOptions(prefix=tmp_path / "pfx")).is_running(exe)
+
+
 def test_exe_lu_dans_la_ligne_de_commande():
     assert w.cmdline_exe(["Z:\\home\\scalpx\\mt5\\i1\\terminal64.exe", "/portable"]) == "/home/scalpx/mt5/i1/terminal64.exe"
     assert w.cmdline_exe(["wine", "/home/scalpx/mt5/i1/terminal64.exe", "/portable"]) == "/home/scalpx/mt5/i1/terminal64.exe"
@@ -44,6 +63,9 @@ class FakeProc:
 
     def exe(self):
         return "/usr/lib/wine/wine64-preloader"
+
+    def cwd(self):
+        return getattr(self, "_cwd", "/")
 
 
 def test_terminal_reconnu_sous_wine(monkeypatch, tmp_path):
