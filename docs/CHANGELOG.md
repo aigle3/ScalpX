@@ -6,6 +6,7 @@ Les numéros de ligne sont ceux des fichiers v5.
 ## Versions
 | Version | Date | Changement |
 |---|---|---|
+| 7.11.0 | 2026-11-17 | **Moins de CPU** (11 terminaux sur le VPS). **Market Watch réduit** au symbole du robot au démarrage de l'EA (chaque symbole affiché reçoit ses cotations en continu ; un symbole encore utilisé par MT5 reste, sans erreur ; réel seulement). **Panneau** : mis à jour 1 fois par seconde (avant 2) et, si rien n'a changé depuis le dernier dessin (même contenu, même taille), plus aucun pixel redessiné. Trading, filtres et statut pour le bot inchangés. |
 | 7.10.1 | 2026-11-16 | Carte **Statistiques des trades** déplacée dans la colonne de gauche, sous « Série en cours » : placée en bas du panneau, sous la longue colonne des filtres, elle sortait de l'écran. Colonne résultat en devise du compte. Affichage seul. |
 | 7.10.0 | 2026-11-16 | Panneau : nouvelle carte **Statistiques des trades** (toute la largeur) sur 24 h, 48 h, 7 jours, 30 jours et 3 mois : trades, longs, courts, gagnés, perdus, % de réussite, résultat net (swap et commissions compris). Lu dans l'historique du broker (positions de l'EA sur ce symbole), recalculé toutes les 60 s ou quand une position se ferme. Trading inchangé. |
 | 7.9.0 | 2026-11-16 | **Graphique des prix masqué** (`CHART_SHOW` = faux) : plus de bougies, d'échelles, d'EMA ni de lignes TP / grille dessinées (moins de CPU) ; seul le panneau d'informations reste, sur toute la largeur. Graphique rendu si l'EA est retiré. Calculs et trading inchangés. |

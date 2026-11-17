@@ -1332,9 +1332,28 @@ void CloseOtherCharts()
    if(closed > 0) Log("Autres graphiques fermés : " + IntegerToString(closed) + " (un compte = un graphique)");
 }
 
+// [ARCHI] début : 7.11.0 : Market Watch réduit au symbole du robot. Chaque symbole affiché reçoit ses cotations en continu
+// (calcul et réseau inutiles, multipliés par le nombre de terminaux). Un symbole encore utilisé par MT5 (position, conversion
+// de devise, graphique) refuse d'être masqué : il reste, sans erreur. Réel seulement (jamais dans le testeur).
+void TrimMarketWatch()
+{
+   if(MQLInfoInteger(MQL_TESTER)) return;
+   int hidden = 0;
+   for(int i = SymbolsTotal(true) - 1; i >= 0; i--)
+   {
+      string s = SymbolName(i, true);
+      if(s == "" || s == _Symbol) continue;
+      if(SymbolSelect(s, false)) hidden++;
+   }
+   ResetLastError();
+   if(hidden > 0) Log("Market Watch : " + IntegerToString(hidden) + " symbole(s) masqué(s), seul " + _Symbol + " reste (moins de CPU)");
+}
+// [ARCHI] fin
+
 void ArchiInit()
 {
    if(!g_archiOn) return;
+   TrimMarketWatch();                 // [ARCHI] 7.11.0
    StateLoad();
    StateSave();
    // 6.2.0 : fenêtre de lancement portée de 5 à 10 min. Une seule fois par compte : l'ancienne valeur par défaut (5) passe à 10 ;

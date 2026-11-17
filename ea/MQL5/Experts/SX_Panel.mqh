@@ -81,6 +81,7 @@ bool    g_cvOk   = false;
 bool    g_meas   = false;          // passe de mesure (aucun dessin) : donne la hauteur du panneau
 string  g_cvSig  = "";             // contenu dessiné : le bitmap n'est renvoyé au graphique que s'il a changé
 string  g_cvCur  = "";
+string  g_cvMeasSig = "";          // [ARCHI] 7.11.0 : signature de la dernière passe de mesure (rien changé → pas de redessin)
 int     g_hit[3][4];               // zones cliquables : 0 réduire, 1 pause/démarrer, 2 tout fermer (x1,y1,x2,y2)
 
 string PNM(string id) { return SX_PREFIX + "P_" + id; }
@@ -232,6 +233,7 @@ void PanelClear()
 {
    if(g_cvOk) { ObjectDelete(0, PNM("cv")); ResourceFree(PN_RES); g_cvOk = false; }
    g_cvSig = "";
+   g_cvMeasSig = "";
    ObjectsDeleteAll(0, PNM(""));                         // anciens objets du panneau (versions < 6.4.0)
 }
 
@@ -889,7 +891,7 @@ void PanelUpdate()
 {
    if(!PBool(P_CH_PANEL)) return;
    ulong now = GetTickCount64();
-   if(now - g_panelMs < 500) return;
+   if(now - g_panelMs < 1000) return;          // [ARCHI] 7.11.0 : 1 fois par seconde (avant 2) : moins de CPU sur 11 terminaux
    g_panelMs = now;
    if(g_btnCloseArmed && now - g_btnCloseMs > 4000) g_btnCloseArmed = false;
 
@@ -910,6 +912,7 @@ void PanelUpdate()
       ObjectSetInteger(0, PNM("cv"), OBJPROP_BACK, false);
       g_cvOk = true;
       g_cvSig = "";
+      g_cvMeasSig = "";
    }
    if(ObjectFind(0, PNM("cv")) < 0) { g_cvOk = false; ResourceFree(PN_RES); return; }   // supprimé de l'extérieur : recréé au tour suivant
 
@@ -918,6 +921,11 @@ void PanelUpdate()
    g_cvCur = "";
    int h = PanelDraw();
    g_meas = false;
+   // [ARCHI] début : 7.11.0 : même contenu, même hauteur, même largeur qu'au dernier dessin → aucun dessin des pixels
+   string meas = IntegerToString(h) + "|" + IntegerToString(PanelWidth()) + "|" + g_cvCur;
+   if(meas == g_cvMeasSig && h == g_cvH && g_cvW == PanelWidth()) return;
+   g_cvMeasSig = meas;
+   // [ARCHI] fin
    if(h != g_cvH || g_cvW != PanelWidth())
    {
       g_cvH = h;
