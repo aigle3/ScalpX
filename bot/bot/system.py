@@ -1,6 +1,7 @@
 """Écran « 🛠 Système » : état du bot, du VPS, de BASE et des mises à jour — utile même sans aucun compte."""
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
@@ -120,14 +121,17 @@ def system_text(ctx: Ctx, vps: dict[str, float]) -> str:
     return "\n".join(lines)
 
 
-def system_kb(pending: bool, previous: str = "") -> Keyboard:
+def system_kb(pending: bool, previous: str = "", windows: bool = os.name == "nt") -> Keyboard:
     extra: Keyboard = [[(f"⏪ Revenir au bot {previous}", "d:rbk")]] if previous else []
     return extra + [
         [(("🔔 " if pending else "") + "⬆ Mises à jour", "d:upd"), ("🔨 Compiler l'EA", "d:bld")],
-        [("📜 Journaux", "d:logs"), ("🪟 Réduire les terminaux", "d:win")],
-        [("🏓 Ping", "d:png"), ("🧾 Journal des actions", "d:jra")],
-        [("📊 Remettre le bouton du bas", "d:menu"), ("🎬 Plex", "d:plex")],
-        [("⚡ Optimiser le VPS", "d:vpo")],
+        *([[("📜 Journaux", "d:logs"), ("🪟 Réduire les terminaux", "d:win")],
+           [("🏓 Ping", "d:png"), ("🧾 Journal des actions", "d:jra")],
+           [("📊 Remettre le bouton du bas", "d:menu"), ("🎬 Plex", "d:plex")],
+           [("⚡ Optimiser le VPS", "d:vpo")]] if windows else
+          # Bot 3.14.0 : Linux → pas de fenêtres à réduire (écran virtuel), Plex et optimisation propres à Windows
+          [[("📜 Journaux", "d:logs"), ("🏓 Ping", "d:png")],
+           [("🧾 Journal des actions", "d:jra"), ("📊 Remettre le bouton du bas", "d:menu")]]),
         [("🔄 Redémarrer le bot", "d:rst"), ("🔃", "d:sys")],
         [("⬅ Accueil", "d:home")],
     ]

@@ -88,4 +88,4 @@ def test_statut_garde_en_cache_tant_que_le_fichier_ne_change_pas(tmp_path, monke
 
 def test_bouton_optimiser_dans_systeme():
     from bot.system import system_kb
-    assert ("⚡ Optimiser le VPS", "d:vpo") in [b for row in system_kb(False) for b in row]
+    assert ("⚡ Optimiser le VPS", "d:vpo") in [b for row in system_kb(False, windows=True) for b in row]

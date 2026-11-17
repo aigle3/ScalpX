@@ -13,6 +13,7 @@ import psutil
 
 log = logging.getLogger(__name__)
 FAST_NAMES = os.name == "nt"        # ailleurs (Linux) le nom peut être tronqué : chemin lu pour chaque processus
+COMM_LEN = 15                       # Linux : nom de processus tronqué à 15 caractères (metatester64.exe → metatester64.ex)
 
 
 def norm_path(p: str | Path) -> str:
@@ -31,22 +32,33 @@ class PsutilProcesses:
 
     CACHE_S = 2.0                     # le tableau de bord interroge chaque compte : un seul parcours des processus
 
-    def __init__(self, window_opts=None, win_api=None) -> None:
+    def __init__(self, window_opts=None, win_api=None, wine=None) -> None:
         self._running: set[str] = set()
         self._running_at = 0.0
         self._names: set[str] = set()                 # noms d'exécutables suivis (terminal64.exe)
         self._pid_exe: dict[tuple[int, str], str | None] = {}   # Bot 3.10.0 : (pid, nom) → chemin déjà lu (pas rouvert à chaque parcours)
         self.window_opts = window_opts                # mt5.window.WindowOptions : rangement de la fenêtre à l'ouverture
         self.win_api = win_api
+        self.wine = wine                              # Bot 3.14.0 : mt5.wine.WineOptions → terminaux lancés par Wine (Linux)
 
-    @staticmethod
-    def _exe_of(p: psutil.Process, names: set[str]) -> str | None:
+    def _exe_of(self, p: psutil.Process, names: set[str]) -> str | None:
         """Chemin de l'exécutable si le NOM du processus est suivi. Le nom est quasi gratuit sous Windows, alors que lire
         le chemin ouvre chaque processus : on ne le lit plus que pour les terminaux (même résultat, parcours bien plus rapide).
-        Nom illisible : chemin lu comme avant."""
+        Nom illisible : chemin lu comme avant.
+        Wine (Linux) : seuls les processus nommés comme un exécutable suivi (nom tronqué) ou « wine… » sont examinés ;
+        le chemin vient de la ligne de commande (chemin Windows reconverti), pas du chargeur Wine."""
         name = (p.info.get("name") or "").lower()
         if FAST_NAMES and name and name not in names:              # Windows : nom du processus = nom de l'exécutable
             return None
+        if self.wine is not None:
+            short = {n[:COMM_LEN] for n in names}
+            if name and name[:COMM_LEN] not in short and not name.startswith("wine"):
+                return None
+            from .wine import cmdline_exe
+            try:
+                return cmdline_exe(p.cmdline(), self.wine.prefix_path())
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
+                return None
         try:
             return p.exe() or None
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
@@ -68,7 +80,7 @@ class PsutilProcesses:
                         pe = self._pid_exe[key]
                     else:
                         pe = self._exe_of(p, self._names)
-                        if pe is None and FAST_NAMES and key[1] and key[1] not in self._names:
+                        if pe is None and (FAST_NAMES or self.wine is not None) and key[1] and key[1] not in self._names:
                             continue                           # processus non suivi : rien à retenir
                     if key[0] is not None:
                         seen[key] = pe
@@ -126,20 +138,33 @@ class PsutilProcesses:
         return norm_path(exe) in self._running_exes(Path(exe).name.lower())
 
     def launch(self, exe: Path, ini: Path | None = None) -> int:
-        """Lance `terminal64.exe /portable [/config:ini]` détaché, dans le dossier de l'instance."""
-        args = [str(exe), "/portable"]
-        if ini is not None:
-            args.append(f"/config:{ini}")
-        flags = 0
-        if sys.platform == "win32":
-            flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
-        proc = subprocess.Popen(args, cwd=str(Path(exe).parent), creationflags=flags,
+        """Lance `terminal64.exe /portable [/config:ini]` détaché, dans le dossier de l'instance.
+        Linux (Bot 3.14.0) : `wine <exe> /portable /config:Z:\\…` avec le préfixe et l'écran virtuel, dans sa propre session."""
+        args, env, extra = self.command(exe, ["/portable"] + ([f"/config:{ini}"] if ini is not None else []))
+        proc = subprocess.Popen(args, cwd=str(Path(exe).parent), env=env,
                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                close_fds=True)
+                                close_fds=True, **extra)
         log.info("terminal lancé : %s (pid %s)%s", Path(exe).parent.name, proc.pid, " avec /config" if ini else "")
         self._invalidate()
         self.rearrange(exe, extra_pid=proc.pid)
         return proc.pid
+
+    def command(self, exe: Path, args: list[str]) -> tuple[list[str], dict | None, dict]:
+        """(ligne de commande, environnement, options Popen) pour lancer un exécutable MT5 détaché.
+        Arguments `/clé:chemin` convertis en chemins Wine sous Linux."""
+        if self.wine is None:
+            flags = 0
+            if sys.platform == "win32":
+                flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+            return [str(exe), *args], None, {"creationflags": flags}
+        from . import wine as w
+        conv = []
+        for a in args:
+            if a.startswith("/") and ":" in a[1:]:
+                k, v = a.split(":", 1)
+                a = f"{k}:{w.to_win(v)}"
+            conv.append(a)
+        return [self.wine.cmd, str(exe), *conv], w.env(self.wine), {"start_new_session": True}
 
     def rearrange(self, exe: Path, extra_pid: int | None = None, settle: bool = True) -> None:
         """Panneaux masqués, graphique agrandi, fenêtre réduite (en arrière-plan ; Windows seulement)."""

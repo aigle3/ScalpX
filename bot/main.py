@@ -154,7 +154,8 @@ def make_ctx(cfg: Config) -> "Ctx":
     cmdq = CommandQueue(common)
     from mt5.window import WindowOptions, default_api
     wopts = WindowOptions(minimize=cfg.mt5.minimize, hide_panels=cfg.mt5.hide_panels, maximize_chart=cfg.mt5.maximize_chart)
-    mgr = InstanceManager(cfg, db, PsutilProcesses(wopts, default_api()), status, cmdq)
+    wine = None if os.name == "nt" else cfg.wine.options()         # Bot 3.14.0 : Linux → terminaux lancés par Wine
+    mgr = InstanceManager(cfg, db, PsutilProcesses(wopts, default_api(), wine=wine), status, cmdq)
     creator = InstanceCreator(cfg, db, mgr, status)
     deploy = DeployManager(cfg, db, mgr, status, cmdq)
     watchdog = Watchdog(cfg, db, mgr, status, _noop_alert)          # remplacé par le routeur au démarrage

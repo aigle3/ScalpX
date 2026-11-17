@@ -1,0 +1,19 @@
+[Unit]
+Description=ScalpX - bot Telegram central (pilote les terminaux MT5 sous Wine)
+Wants=network-online.target scalpx-xvfb.service
+After=network-online.target scalpx-xvfb.service
+
+[Service]
+User=@USER@
+WorkingDirectory=@BOT@
+Environment=PYTHONUNBUFFERED=1 WINEPREFIX=@PFX@ DISPLAY=@DISP@ WINEDEBUG=-all
+ExecStart=@BOT@/.venv/bin/python main.py
+# Mise à jour ou bouton « Redémarrer » : le bot s'arrête, systemd le relance avec le nouveau code.
+Restart=always
+RestartSec=5
+# Seul le bot est arrêté / relancé : les terminaux MT5 (et wineserver) qu'il a lancés continuent de tourner.
+KillMode=process
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

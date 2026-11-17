@@ -31,6 +31,10 @@ Voir `LISEZMOI.txt` à la racine du dépôt : `INSTALL.bat` installe tout (BASE 
 - Production : la tâche planifiée lance `pythonw.exe main.py` à l'ouverture de session (session Windows à garder ouverte).
   Débogage : `.venv\Scripts\python.exe main.py --console`. Journaux : `data\logs\bot.log`, `compile.log`, `crash.log`.
 
+Ubuntu (Bot 3.14.0) : voir `linux/LISEZMOI.md` (`sudo bash linux/install.sh`). MT5, MetaEditor et le testeur passent
+par Wine (section `[wine]` de `config.toml` : préfixe, écran Xvfb `:99`) ; le bot tourne en service systemd `scalpx-bot`
+(relancé par systemd après une mise à jour ; `KillMode=process` : les terminaux continuent de tourner).
+
 ## Utilisation (tout par boutons, aucune commande « / »)
 
 - **Accueil** (un message édité en place ; **📊 Tableau de bord** ou tout message le ramène en bas). Mis à jour toutes
