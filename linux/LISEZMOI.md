@@ -20,8 +20,8 @@ comme sous Windows.
    sudo bash linux/install.sh
    ```
    Le script installe Wine (WineHQ stable), Xvfb et Python, crée l'utilisateur `scalpx` (sans sudo), le préfixe Wine,
-   installe MT5 de RoboForex dans `BASE`, copie l'EA et le bot, puis demande le token Telegram, ton chat_id, le jeton
-   GitHub et l'URL healthchecks.io. Autre broker : `sudo MT5_SETUP_URL=https://…/setup.exe bash linux/install.sh`.
+   installe MT5 (installeur MetaQuotes, qui se connecte aux serveurs RoboForex) dans `BASE`, copie l'EA et le bot, puis demande le token Telegram, ton chat_id, le jeton
+   GitHub et l'URL healthchecks.io. Autre installeur MT5 : `sudo MT5_SETUP_URL=https://…/setup.exe bash linux/install.sh`.
 3. Dans Telegram, recrée tes comptes (bouton ➕), comme sous Windows.
 
 ⚠️ **Un compte ne doit jamais tourner sur les deux VPS en même temps** (deux EA = ordres en double). Avant d'ajouter

@@ -16,7 +16,8 @@ MT="$H/mt5"
 BASE="$MT/BASE"
 PFX="$H/.wine"
 DISP=":99"
-SETUP_URL="${MT5_SETUP_URL:-https://download.mql5.com/cdn/web/robo.forex.ltd/mt5/roboforex5setup.exe}"
+# Installeur MT5 : celui de MetaQuotes (il se connecte aux serveurs RoboForex). Autre installeur : MT5_SETUP_URL=…
+SETUP_URLS="${MT5_SETUP_URL:-https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe https://download.terminal.free/cdn/web/metaquotes.ltd/mt5/mt5setup.exe}"
 PKG="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"          # racine du paquet (dossiers bot/, ea/, linux/)
 
 step() { echo; echo -e "\e[36m=== $*\e[0m"; }
@@ -92,8 +93,12 @@ step "4/7  MetaTrader 5 : dossier BASE ($BASE)"
 if [ ! -f "$BASE/terminal64.exe" ]; then
     src=$(ls -d "$PFX/drive_c/Program Files/"*/ 2>/dev/null | while read -r d; do [ -f "$d/terminal64.exe" ] && echo "${d%/}"; done | head -1 || true)
     if [ -z "$src" ]; then
-        echo "  Téléchargement de l'installeur MT5 : $SETUP_URL"
-        as_u curl -fsSL -o /tmp/mt5setup.exe "$SETUP_URL" || die "téléchargement impossible (MT5_SETUP_URL=…)"
+        got=""
+        for url in $SETUP_URLS; do
+            echo "  Téléchargement de l'installeur MT5 : $url"
+            if as_u curl -fsSL -o /tmp/mt5setup.exe "$url"; then got=1; break; fi
+        done
+        [ -n "$got" ] || die "installeur MT5 introuvable : relance avec MT5_SETUP_URL=<lien de l'installeur> sudo -E bash linux/install.sh"
         echo "  Installation de MT5 dans Wine (plusieurs minutes)…"
         as_u wine /tmp/mt5setup.exe /auto >/dev/null 2>&1 &
         for _ in $(seq 1 120); do
