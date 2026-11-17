@@ -9,6 +9,8 @@ from __future__ import annotations
 import io
 import json
 import logging
+import os
+import re
 import shutil
 import time
 import zipfile
@@ -35,6 +37,28 @@ class FetchResult:
     token_expires: str = ""                     # date d'expiration du jeton (AAAA-MM-JJ), si GitHub l'indique
     waiting: bool = False                       # nouveau commit vu, en attente du délai de stabilité
     remaining: int = 0                          # publications suivantes, proposées ensuite une par une
+
+
+# Bot 3.13.0 : publication réservée à une plateforme. Étiquette dans la 1re ligne du message de commit :
+# « [linux] » ou « [windows] ». Sans étiquette : les deux. Un VPS ne se voit proposer que ce qui le concerne ; le code
+# d'une publication sautée arrive quand même avec la publication suivante qui le concerne (paquet complet à chaque fois).
+PLATFORM = "windows" if os.name == "nt" else "linux"
+_RE_TAG = re.compile(r"\[(linux|windows)\]", re.I)
+
+
+def platforms(message: str) -> set[str]:
+    """Plateformes visées par une publication (1re ligne du message) ; aucune étiquette : toutes."""
+    first = (message or "").strip().splitlines()[0] if (message or "").strip() else ""
+    tags = {t.lower() for t in _RE_TAG.findall(first)}
+    return tags or {"linux", "windows"}
+
+
+def concerns(message: str, platform: str = "") -> bool:
+    return (platform or PLATFORM) in platforms(message)
+
+
+def _msg(c: dict) -> str:
+    return (c.get("commit", {}).get("message") or "").strip()
 
 
 def _headers(cfg: Config) -> dict[str, str]:
@@ -128,13 +152,14 @@ _SEEN = {"sha": "", "since": 0.0}             # dernier commit vu sur la branche
 
 
 def fetch(cfg: Config, http: Http | None = None, force: bool = False, now: float | None = None,
-          installed: str = "", latest: bool = False) -> FetchResult:
+          installed: str = "", latest: bool = False, platform: str = "") -> FetchResult:
     """Met à jour la copie locale du paquet si la branche a un nouveau commit, resté inchangé depuis
     [update] settle_min minutes (évite de proposer une publication en cours). force=True : sans attente.
 
     Plusieurs publications d'affilée : elles sont proposées DANS L'ORDRE, une par une. `installed` = commit installé ;
     le paquet téléchargé est la publication qui le suit, et rien de plus n'est téléchargé tant qu'il n'est pas installé.
-    latest=True (bouton « ⏩ Tout installer ») : la DERNIÈRE publication directement (elle contient toutes les précédentes)."""
+    latest=True (bouton « ⏩ Tout installer ») : la DERNIÈRE publication directement (elle contient toutes les précédentes).
+    Bot 3.13.0 : les publications étiquetées pour l'AUTRE plateforme ([linux] / [windows]) ne sont pas proposées."""
     get = http or http_get
     repo = cfg.update.github.strip()
     branch = "stable" if cfg.update.validated_only else (cfg.update.branch or "main")
@@ -168,13 +193,17 @@ def fetch(cfg: Config, http: Http | None = None, force: bool = False, now: float
                 cj = json.loads(rc[1].decode("utf-8"))
                 commits = cj.get("commits") or []
                 if cj.get("status") == "ahead" and commits:
-                    nxt = commits[0]
-                    remaining = len(commits) - 1
-                    later = [(c.get("commit", {}).get("message") or "").strip().splitlines()[0][:160]
-                             for c in commits[1:] if (c.get("commit", {}).get("message") or "").strip()]
+                    mine = [c for c in commits if concerns(_msg(c), platform)]    # Bot 3.13.0 : autre plateforme → sautée
+                    if not mine:
+                        return FetchResult(True, False, sha, "", token_expires=expires)
+                    nxt = mine[0]
+                    remaining = len(mine) - 1
+                    later = [_msg(c).splitlines()[0][:160] for c in mine[1:] if _msg(c)]
                     sha = nxt.get("sha", sha)
-                    msg = (nxt.get("commit", {}).get("message") or "").strip()
+                    msg = _msg(nxt)
                     j = nxt
+        elif not latest and not concerns(msg, platform):                   # sans référence d'installation
+            return FetchResult(True, False, sha, "", token_expires=expires)
         res = get(f"{API}/repos/{repo}/zipball/{sha}", _headers(cfg))
         code, data = res[0], res[1]
         if code != 200:

@@ -26,5 +26,7 @@ la branche `stable` avance et le bot du VPS (qui ne lit QUE `stable`) propose «
   - EA : `ea/version.txt` ET `#define SX_VERSION "x.y.z"` (SX_Core.mqh) ET `#property version "x.yy"` (majeur.mineur sur 2 chiffres, ex. 5.03) dans ScalpX_v5.mq5 ;
     entrée dans `docs/CHANGELOG.md`. Le VPS recompile lui-même (le .ex5 du dépôt n'est pas recopié lors des mises à jour).
   - Le message de commit commence par les versions touchées, ex. « Bot 1.2.0 : … » ou « EA 5.3.1 : … ».
+  - Plateforme : un changement qui ne concerne qu'un VPS porte l'étiquette `[linux]` ou `[windows]` dans la 1re ligne
+    (ex. « Bot 3.14.0 [linux] : … ») : l'autre VPS ne se la voit pas proposer. Sans étiquette : proposée aux deux.
 - Le bot ne recopie jamais `.env`, `config.toml`, `data\`. Toute nouvelle option de config doit avoir une valeur par défaut dans `core/config.py`.
 - Mettre à jour `docs/CHANGELOG.md` et les tests à chaque changement ; messages de commit en français, courts (affichés dans Telegram).

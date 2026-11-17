@@ -411,3 +411,44 @@ def test_script_de_surveillance_present_et_prudent():
     # le marqueur est traité AVANT le test « bot vivant » (l'ancien bot tient encore son verrou pendant l'arrêt)
     assert t.index("if (Test-Path $mark)") < t.index("if (Alive) {\r\n    if (Test-Path $state)")
     assert "Wait-Process -Id $old" in t and "Stop-Process -Id $old -Force" in t
+
+
+def test_github_publication_d_une_autre_plateforme_non_proposee(tmp_path, cfg):
+    """Bot 3.13.0 : [linux] / [windows] dans le message → proposée seulement à cette plateforme."""
+    import json
+    from core import github as gh
+    assert gh.platforms("Bot 3.14.0 [linux] : Ubuntu") == {"linux"}
+    assert gh.platforms("EA 7.13.0 : filtre") == {"linux", "windows"}
+    assert gh.concerns("Bot 1.0.0 [Windows] : x", "windows") and not gh.concerns("Bot 1.0.0 [windows] : x", "linux")
+    cfg.update.github, cfg.update.source = "aigle3/scalpx", str(tmp_path / "release")
+    msgs = {"c2": "Bot c2 [linux] : Ubuntu", "c3": "Bot c3 : commun", "c4": "Bot c4 [linux] : correctif"}
+    chain = ["c1", "c2", "c3", "c4"]
+    head = {"sha": "c2"}
+    got = []
+
+    def commit(s):
+        return {"sha": s, "commit": {"message": msgs.get(s, s), "committer": {"date": "2026-11-17"}}}
+
+    def http(url, headers):
+        if url.endswith("/commits/stable"):
+            return 200, json.dumps(commit(head["sha"])).encode()
+        if "/compare/" in url:
+            base, top = url.split("/compare/")[1].split("...")
+            after = chain[chain.index(base) + 1:chain.index(top) + 1]
+            return 200, json.dumps({"status": "ahead", "commits": [commit(s) for s in after]}).encode()
+        if "/zipball/" in url:
+            got.append(url.rsplit("/", 1)[1])
+            return 200, _zip({"bot/main.py": b"print(1)"})
+        return 404, b""
+
+    gh._SEEN.update(sha="", since=0.0)
+    r = gh.fetch(cfg, http, force=True, installed="c1", platform="windows")       # seule c2 [linux] publiée
+    assert not r.changed and got == []
+    assert gh.fetch(cfg, http, force=True, installed="c1", platform="linux").sha == "c2"
+    import shutil
+    shutil.rmtree(tmp_path / "release")
+    got.clear()
+    head["sha"] = "c4"
+    r = gh.fetch(cfg, http, force=True, installed="c1", platform="windows")       # c3 commune (contient aussi c2)
+    assert r.changed and r.sha == "c3" and r.remaining == 0 and got == ["c3"]
+    assert not gh.fetch(cfg, http, force=True, installed="c3", platform="windows").changed   # c4 [linux] sautée
