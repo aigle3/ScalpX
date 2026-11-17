@@ -805,12 +805,14 @@ class Router:
         parts = [f"<b>{esc(v.inst.label)}</b>\n{esc((r.message or '—').strip())[:1500]}" for v, r in zip(views, res)]
         await self.sender.send(self.chat_id, "📋 <b>Positions</b>\n\n" + "\n\n".join(parts)[:3900], [[("✖ Fermer", "d:close")]], True)
 
-    async def _terminals(self, insts, verb: str) -> None:
+    async def _terminals(self, insts, verb: str, title: str = "") -> list[str]:
         """Bot 3.9.0 : redémarrer / lancer / arrêter plusieurs terminaux UN PAR UN. Pour lancer / redémarrer, le suivant
-        n'est lancé qu'une fois le précédent en ligne et connecté (vert), ou après le délai (verify_deploy_s)."""
-        label = {"rst": "Redémarrage", "start": "Lancement", "stop": "Arrêt"}[verb]
+        n'est lancé qu'une fois le précédent en ligne et connecté (vert), ou après le délai (verify_deploy_s).
+        Bot 3.11.0 : renvoie les identifiants réussis (arrêt : terminal vérifié fermé) ; aussi utilisé par la mise à jour du bot."""
+        label = title or {"rst": "Redémarrage", "start": "Lancement", "stop": "Arrêt"}[verb]
         n = len(insts)
         done: list[str] = []
+        good: list[str] = []
         mid = await self.sender.send(self.chat_id, f"⏳ <b>{label}</b> de {n} terminal(aux), un par un…", None, True)
 
         async def show(cur: str = "") -> None:
@@ -820,8 +822,7 @@ class Router:
             except Exception:
                 log.debug("progression des terminaux", exc_info=True)
 
-        t = self.ctx.cfg.timing
-        timeout = float(max(t.verify_deploy_s, t.create_timeout_s))   # Bot 3.10.2 : au moins 5 min (VPS chargé)
+        timeout = float(self.ctx.cfg.timing.wait_online_limit_s)      # Bot 3.11.0 : 0 = le temps qu'il faut
         for k, i in enumerate(insts, 1):
             name = f"<b>{esc(i.label)}</b>"
             await show(f"{name} ({k}/{n}) : {'arrêt' if verb == 'stop' else 'lancement'}…")
@@ -829,6 +830,10 @@ class Router:
             try:
                 if verb == "stop":
                     r = await act.action_stop(self.ctx, i)
+                    if not await asyncio.to_thread(self.ctx.mgr.is_running, i):       # vérifié : bien fermé
+                        good.append(i.id)
+                    else:
+                        r = f"⚠️ toujours ouvert ({r})"
                 else:
                     r = await (act.action_restart if verb == "rst" else act.action_start)(self.ctx, i)
                     if r.startswith(("🔄", "🚀")):
@@ -836,6 +841,8 @@ class Router:
                             await show(f"{name} ({k}/{n}) : attente de l'EA {sec} s ({esc(last)})…")
                         ok, msg = await act.wait_online(self.ctx, i, t0, timeout, tick)
                         r = msg
+                        if ok:
+                            good.append(i.id)
             except Exception as exc:
                 log.exception("terminal %s", i.label)
                 r = f"❌ {exc}"
@@ -844,6 +851,22 @@ class Router:
         await self.sender.edit(self.chat_id, mid, f"🖥 <b>{label}</b> terminé · {n} terminal(aux)\n" + "\n".join(done),
                                [[("✖ Fermer", "d:close")]])
         await self.dash.refresh(force=True)
+        return good
+
+    async def relaunch_after_update(self, insts) -> None:
+        """Bot 3.11.0 : terminaux arrêtés pour la mise à jour du bot, relancés UN PAR UN (le suivant attend le vert).
+        La liste n'est effacée qu'à la fin : un redémarrage du bot pendant la relance reprend les terminaux restants.
+        Un terminal non relancé repasse « démarré » : la surveillance le relance."""
+        from mt5 import cpufree
+        from storage.db import ARRETE
+        try:
+            await self._terminals(insts, "start", "Relance après la mise à jour")
+        finally:
+            for i in insts:
+                cur = self.ctx.db.get(i.id)
+                if cur is not None and cur.desired_state == ARRETE:
+                    self.ctx.db.set_desired(i.id, DEMARRE)
+            cpufree.clear(self.ctx.db)
 
     # ------------------------------------------------------------------ 💾 presets centraux
     def _running(self) -> list:
@@ -1360,6 +1383,21 @@ class Router:
                 ver = await asyncio.to_thread(upd.install_ea, self.ctx.cfg, plan)
                 out.append(f"📈 EA copié dans BASE" + (f" — compilation v{esc(ver)} dans quelques secondes" if ver else " (.set seulement)"))
             if plan.bot_files or plan.bot_remove:
+                if self.ctx.cfg.update.close_terminals:
+                    # Bot 3.11.0 : comme « 🛑 Arrêter tous » : terminaux fermés UN PAR UN (fermeture vérifiée), puis mise à jour ;
+                    # le nouveau bot les relance un par un (comme « 🚀 Lancer tous »). Positions et TP restent chez le broker.
+                    from mt5 import cpufree
+                    from storage.db import DEMARRE as _DEM
+                    running = await asyncio.to_thread(lambda: [i for i in self.ctx.db.list(states=(_DEM,)) if self.ctx.mgr.is_running(i)])
+                    if running:
+                        await self._upd_step(mid, "⏳ <b>Installation</b> : " + ("\n".join(out) + "\n" if out else "")
+                                             + f"arrêt des {len(running)} terminaux, un par un (relancés après le redémarrage)…")
+                        stopped = await self._terminals(running, "stop", "Arrêt pour la mise à jour du bot")
+                        cpufree.remember(self.ctx.db, stopped)
+                        for i in running:                          # resté ouvert (clôture à 500 en cours…) : surveillé comme avant
+                            if i.id not in stopped:
+                                self.ctx.db.set_desired(i.id, _DEM)
+                        out.append(f"🔌 {len(stopped)}/{len(running)} terminal(aux) arrêté(s) : relancés un par un par le nouveau bot")
                 await self._upd_step(mid, "⏳ <b>Installation</b> : " + ("\n".join(out) + "\n" if out else "")
                                      + f"copie du bot ({len(plan.bot_files) + len(plan.bot_remove)} fichier(s))…")
                 await asyncio.to_thread(upd.install_bot, plan, bot_root)
@@ -1384,7 +1422,7 @@ class Router:
             await self.sender.edit(self.chat_id, mid, "✅ <b>Mise à jour installée</b>\n" + "\n".join(out), None)
         if plan.bot_files or plan.bot_remove:
             uc = self.ctx.cfg.update
-            if uc.cpu_free_pct > 0:                    # Bot 3.7.2 : assez de CPU libre pour que le nouveau bot démarre vite
+            if uc.cpu_free_pct > 0 and not uc.close_terminals:   # Bot 3.7.2 (si close_terminals = false) : assez de CPU libre
                 from mt5 import cpufree
                 head = "✅ <b>Mise à jour installée</b>\n" + "\n".join(out[:-1]) + ("\n" if out[:-1] else "")
 

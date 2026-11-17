@@ -555,10 +555,17 @@ async def startup(app: Application) -> None:
         log.exception("démarrage : nettoyage des créations refusées")
     try:
         from mt5 import cpufree
-        back = cpufree.restore_after_restart(s.ctx.db)           # Bot 3.7.2 : fermés pour libérer le CPU avant le redémarrage
+        from storage.db import ARRETE
+        back = cpufree.restore_after_restart(s.ctx.db, clear_list=False)   # fermés avant le redémarrage (mise à jour)
         if back:
             log.info("démarrage : %d terminal(aux) fermé(s) pour la mise à jour, à relancer", len(back))
         launched = await s.ctx.watchdog.startup_launch()
+        # Bot 3.11.0 : arrêtés pour la mise à jour → relancés UN PAR UN (le suivant attend le vert), comme « 🚀 Lancer tous »
+        todo = [i for i in (s.ctx.db.get(x) for x in back) if i is not None and i.desired_state == ARRETE]
+        if todo:
+            s.router._bg(s.router.relaunch_after_update(todo))
+        else:
+            cpufree.clear(s.ctx.db)
         await s.sender.reply_menu(s.chat_id, f"🤖 Bot {bot_version()} démarré · {len(launched)} terminal(aux) relancé(s).\n"
                                               f"Le bouton <b>{MENU_BUTTON}</b> (en bas) affiche le panneau.")
         await s.router.restart_report()                            # « ✅ Redémarré en N s » dans le message de la mise à jour

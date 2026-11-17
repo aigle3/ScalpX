@@ -415,8 +415,7 @@ async def test_deploiement_position_ouverte_en_attente(stack):
 async def test_deploiement_ex5_defectueux_laisse_le_nouvel_ea(stack):
     """Bot 3.10.2 : plus de retour à l'ancien EA (demandé) : nouvel EA laissé en place, compte « démarré », à redémarrer à la main."""
     cfg, db, procs, status, cmdq, mgr, ea = stack
-    cfg.timing.verify_deploy_s = 2
-    cfg.timing.create_timeout_s = 2
+    cfg.timing.wait_online_limit_s = 2
     a = seed(stack, 1, "Demo-Server 1")
     b = seed(stack, 2, "Demo-Server 1")
     publish(cfg, "5.1", "BAD-5.1")                                   # l'EA ne démarre pas (pas de heartbeat)
@@ -710,3 +709,41 @@ async def test_liberation_cpu_rien_a_fermer(stack):
     cfg, db, procs, status, cmdq, mgr, ea = stack
     seed(stack)
     assert await cpufree.free_cpu(db, mgr, cpu_fn=lambda: 20.0, target_free=70, wait_s=0.05, sample_s=0.01) == []
+
+
+def test_attente_sans_limite_par_defaut():
+    from core.config import Timing
+    assert Timing().wait_online_limit_s == 0                       # Bot 3.11.0 : le temps qu'il faut
+
+
+@pytest.mark.asyncio
+async def test_attente_abandonnee_si_terminal_ferme():
+    from mt5.manager import Gone
+
+    class M:
+        up = True
+
+        def is_running(self, inst):
+            return self.up
+    m = M()
+    g = Gone(m, object(), grace_s=0.05, every_s=0.0)
+    assert not await g.check()
+    m.up = False
+    assert not await g.check()                                     # fermé depuis moins de grace_s
+    await asyncio.sleep(0.06)
+    assert await g.check()
+
+
+def test_liste_des_terminaux_arretes_pour_la_mise_a_jour(stack):
+    """Bot 3.11.0 : arrêtés (ARRETE) pour la mise à jour du bot : restent arrêtés au démarrage, liste gardée jusqu'à la relance."""
+    from mt5 import cpufree
+    from storage.db import ARRETE
+    cfg, db, procs, status, cmdq, mgr, ea = stack
+    a = seed(stack, 1, "Demo-Server 1")
+    db.set_desired(a.id, ARRETE)
+    cpufree.remember(db, [a.id])
+    assert cpufree.restore_after_restart(db, clear_list=False) == [a.id]
+    assert db.get(a.id).desired_state == ARRETE
+    assert cpufree.restore_after_restart(db, clear_list=False) == [a.id]     # toujours là (relance pas finie)
+    cpufree.clear(db)
+    assert cpufree.restore_after_restart(db) == []

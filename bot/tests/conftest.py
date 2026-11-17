@@ -199,7 +199,7 @@ def cfg(tmp_path: Path) -> Config:
                     common_files=common, data=tmp_path / "data"),
         mt5=MT5(servers=["Demo-Server 1", "Live-Server"], default_server="Demo-Server 1"),
         timing=Timing(heartbeat_stale_s=5, create_timeout_s=5, stop_wait_s=1, launch_stagger_s=0, ack_timeout_s=2,
-                      close500_wait_max_s=2, maintenance_wait_s=2, verify_deploy_s=4),
+                      close500_wait_max_s=2, maintenance_wait_s=2, verify_deploy_s=4, wait_online_limit_s=4),
         alerts=Alerts(min_disk_gb=0.0),
     )
 

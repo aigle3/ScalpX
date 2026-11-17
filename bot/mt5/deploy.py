@@ -186,10 +186,15 @@ class DeployManager:
     async def _wait_new_version(self, inst: Instance, version: str, pre_etat: str | None, pre_cycle: int | None, since: float) -> tuple[bool, str]:
         """Le nouvel .ex5 tourne si un heartbeat postérieur à la relance arrive, connecté, avec état et cycle inchangés.
         La version affichée n'est pas exigée : une recompilation sans changement de version doit aussi passer."""
-        end = time.monotonic() + max(self.cfg.timing.verify_deploy_s, self.cfg.timing.create_timeout_s)   # Bot 3.10.2
+        lim = self.cfg.timing.wait_online_limit_s                       # Bot 3.11.0 : 0 = le temps qu'il faut
+        end = time.monotonic() + lim if lim > 0 else float("inf")
         last = "aucun heartbeat"
         t0, shown = time.monotonic(), time.monotonic()
+        from .manager import Gone
+        gone = Gone(self.mgr, inst)
         while time.monotonic() < end:
+            if await gone.check():
+                return False, f"terminal fermé pendant l'attente du nouvel EA ({last})"
             if time.monotonic() - shown >= 10:
                 shown = time.monotonic()
                 await self._step(inst, f"📡 attente du nouvel EA : {int(shown - t0)} s (dernier signe : {last})", log_it=False)
@@ -279,7 +284,8 @@ class DeployManager:
             old = self.status.read(inst.id)
             self._old_ts = old.ts if old is not None else 0          # dernier heartbeat de l'ancien EA (ne doit pas compter)
             self.mgr.launch(inst)                                         # 7) sans /config (maintenance non persistée)
-            await self._step(inst, f"🚀 terminal relancé : attente du nouvel EA (au plus {max(self.cfg.timing.verify_deploy_s, self.cfg.timing.create_timeout_s)} s)")
+            await self._step(inst, "🚀 terminal relancé : attente du nouvel EA (le temps qu'il faut)" if self.cfg.timing.wait_online_limit_s <= 0
+                             else f"🚀 terminal relancé : attente du nouvel EA (au plus {self.cfg.timing.wait_online_limit_s} s)")
             ok, why = await self._wait_new_version(inst, version, pre_etat, pre_cycle, t0)   # 8)
             if ok:
                 self._back_s = int(time.time() - t0)
@@ -437,11 +443,17 @@ class DeployManager:
                 continue
             log.info("déploiement groupé %s : terminal relancé (%d/%d)", inst.label, k, len(todo))
             await show(inst.id, RUNNING, f"🚀 terminal relancé ({k}/{len(todo)}) : attente du nouvel EA")
-            # Bot 3.10.2 : au moins le délai de création (5 min) : sur un VPS chargé, un terminal met plus de 2 min à charger l'EA
-            deadline = time.monotonic() + max(self.cfg.timing.verify_deploy_s, self.cfg.timing.create_timeout_s)
+            # Bot 3.11.0 : le temps qu'il faut (wait_online_limit_s = 0) ; abandon seulement si le terminal se ferme
+            lim = self.cfg.timing.wait_online_limit_s
+            deadline = time.monotonic() + lim if lim > 0 else float("inf")
             last, shown = "aucun heartbeat", time.monotonic()
             res: DeployOutcome | None = None
+            from .manager import Gone
+            gone = Gone(self.mgr, inst)
             while time.monotonic() < deadline:
+                if await gone.check():
+                    last = "terminal fermé pendant l'attente"
+                    break
                 st = self.status.read(inst.id)
                 if st is not None and st.ts > old_ts and st.ts >= t0 - 2:
                     last = f"version {st.version or '?'}" + ("" if st.connecte else ", terminal pas encore connecté au serveur")

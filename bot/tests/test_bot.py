@@ -970,6 +970,26 @@ async def test_terminaux_de_tous_les_comptes(svc):
 
 
 @pytest.mark.asyncio
+async def test_mise_a_jour_du_bot_arrete_puis_relance_un_par_un(svc):
+    """Bot 3.11.0 : arrêt vérifié de chaque terminal (liste mémorisée), puis relance un par un ; liste effacée à la fin."""
+    from mt5 import cpufree
+    from storage.db import ARRETE, DEMARRE
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    st = ctx_stack(svc)
+    a = seed(st, 97, "Demo-Server 1")
+    b = seed(st, 98, "Demo-Server 1")
+    stopped = await router._terminals([a, b], "stop", "Arrêt pour la mise à jour du bot")
+    assert sorted(stopped) == sorted([a.id, b.id]) and not ctx.mgr.is_running(a) and not ctx.mgr.is_running(b)
+    assert ctx.db.get(a.id).desired_state == ARRETE
+    cpufree.remember(ctx.db, stopped)
+    await router.relaunch_after_update([ctx.db.get(a.id), ctx.db.get(b.id)])
+    assert ctx.mgr.is_running(a) and ctx.mgr.is_running(b)
+    assert ctx.db.get(a.id).desired_state == DEMARRE and ctx.db.get(b.id).desired_state == DEMARRE
+    assert cpufree.restore_after_restart(ctx.db) == []
+    assert any("Relance après la mise à jour" in m[1] for m in sender.sent)
+
+
+@pytest.mark.asyncio
 async def test_plantages_dates_et_effacement(svc):
     import time as _t
     ctx, sender, dash, router, notifier, ea, conf = svc

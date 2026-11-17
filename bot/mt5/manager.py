@@ -126,3 +126,23 @@ class InstanceManager:
         dst = self.cfg.paths.archives / name
         shutil.move(str(src), str(dst))
         return dst
+
+
+class Gone:
+    """Bot 3.11.0 : terminal fermé depuis au moins `grace_s` (contrôlé toutes les 10 s, hors de la boucle du bot)."""
+
+    def __init__(self, ctx_or_mgr, inst: Instance, grace_s: float = 30.0, every_s: float = 10.0) -> None:
+        self.mgr = getattr(ctx_or_mgr, "mgr", ctx_or_mgr)
+        self.inst, self.grace_s, self.every_s = inst, grace_s, every_s
+        self._next, self._down_since = time.monotonic() + every_s, None
+
+    async def check(self) -> bool:
+        now = time.monotonic()
+        if now < self._next:
+            return False
+        self._next = now + self.every_s
+        if await asyncio.to_thread(self.mgr.is_running, self.inst):
+            self._down_since = None
+            return False
+        self._down_since = self._down_since or now
+        return now - self._down_since >= self.grace_s

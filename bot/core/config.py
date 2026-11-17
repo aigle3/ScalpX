@@ -61,6 +61,8 @@ class Timing(BaseModel):
     status_interval_s: int = 5
     presets_check_s: int = 600             # Bot 3.10.0 : contrôle « robots conformes au preset ⭐ » (10 min, avant 5)
     verify_deploy_s: int = 120
+    wait_online_limit_s: int = 0           # Bot 3.11.0 : attente d'un terminal relancé (mise à jour de l'EA, lancer / redémarrer tous) :
+                                           # 0 = sans limite, le temps qu'il faut (abandon seulement si le terminal se ferme)
 
 
 class Alerts(BaseModel):
@@ -100,6 +102,7 @@ class Update(BaseModel):
     enabled: bool = True
     cpu_free_pct: int = 30                 # Bot 3.8.2 : 30 % (70 avant) ; Bot 3.7.2 : avant de redémarrer le bot, fermer des terminaux un par un jusqu'à
     cpu_wait_s: int = 30                   # ce % de CPU libre (moyenne sur cpu_wait_s après chaque fermeture) ; 0 = jamais
+    close_terminals: bool = True           # Bot 3.11.0 : mise à jour du bot = tous les terminaux arrêtés un par un, puis relancés un par un
 
 
 class Backup(BaseModel):

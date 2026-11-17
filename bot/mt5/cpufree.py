@@ -77,8 +77,19 @@ async def free_cpu(db: Database, mgr, cpu_fn: Callable[[], float] | None = None,
     return closed
 
 
-def restore_after_restart(db: Database) -> list[str]:
-    """Au démarrage du nouveau bot : les terminaux fermés pour le redémarrage repassent en DEMARRE (relancés ensuite)."""
+def remember(db: Database, ids: list[str]) -> None:
+    """Bot 3.11.0 : terminaux arrêtés (« arrêté ») pour la mise à jour du bot, à relancer un par un par le nouveau bot."""
+    db.meta_set(META_KEY, json.dumps(list(ids)))
+
+
+def clear(db: Database) -> None:
+    db.meta_set(META_KEY, "")
+
+
+def restore_after_restart(db: Database, clear_list: bool = True) -> list[str]:
+    """Au démarrage du nouveau bot : les terminaux fermés pour libérer le CPU (MAINTENANCE) repassent en DEMARRE (relancés
+    ensuite). Bot 3.11.0 : ceux arrêtés pour la mise à jour (ARRETE) restent arrêtés : le bot les relance un par un et
+    n'efface la liste qu'à la fin (clear_list=False)."""
     raw = db.meta_get(META_KEY) or ""
     if not raw:
         return []
@@ -90,5 +101,6 @@ def restore_after_restart(db: Database) -> list[str]:
         inst = db.get(iid)
         if inst is not None and inst.desired_state == MAINTENANCE:
             db.set_desired(iid, DEMARRE)
-    db.meta_set(META_KEY, "")
+    if clear_list:
+        db.meta_set(META_KEY, "")
     return ids

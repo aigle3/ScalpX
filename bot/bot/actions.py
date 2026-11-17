@@ -103,20 +103,26 @@ async def action_restart(ctx: Ctx, inst: Instance, force: bool = False) -> str:
 
 async def wait_online(ctx: Ctx, inst: Instance, since: float, timeout: float,
                       tick: "Callable[[int, str], Awaitable[None]] | None" = None) -> tuple[bool, str]:
-    """Bot 3.9.0 : attend que l'EA d'un terminal relancé réponde (heartbeat écrit après `since`) ET soit connecté au serveur."""
-    end = time.monotonic() + timeout
+    """Bot 3.9.0 : attend que l'EA d'un terminal relancé réponde (heartbeat écrit après `since`) ET soit connecté au serveur.
+    Bot 3.11.0 : timeout <= 0 = sans limite (le temps qu'il faut) ; abandon si le terminal reste fermé 30 s."""
+    end = time.monotonic() + timeout if timeout > 0 else float("inf")
     last, shown = "aucun signe de vie", time.monotonic()
+    from mt5.manager import Gone
+    gone = Gone(ctx, inst)
     while time.monotonic() < end:
         st = ctx.status.read(inst.id)
         if st is not None and st.ts >= since - 2:
             if st.connecte:
                 return True, f"🟢 en ligne et connecté en {int(time.time() - since)} s"
             last = "EA lancé, pas encore connecté au serveur"
+        if await gone.check():
+            return False, f"⚠️ terminal fermé pendant l'attente ({last}) : je passe au suivant"
         if tick and time.monotonic() - shown >= 5:
             shown = time.monotonic()
             await tick(int(time.time() - since), last)
         await asyncio.sleep(1.0)
     return False, f"⚠️ pas de réponse en {int(timeout)} s ({last}) : je passe au suivant"
+
 
 
 async def action_delete(ctx: Ctx, inst: Instance) -> str:
