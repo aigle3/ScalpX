@@ -1,7 +1,7 @@
 ﻿//+------------------------------------------------------------------+
 //| SX_Smart.mqh - ScalpX                                            |
 //| Alertes (priorités), watchdog, spread/swap, news, pause          |
-//| programmée, mode vacances, captures d'écran / courbe d'equity.   |
+//| programmée, mode vacances, courbe d'equity.                      |
 //+------------------------------------------------------------------+
 
 // prio 0 = information (silencieuse), 2 = critique (toujours sonore)
@@ -409,26 +409,13 @@ void NewsTick()
 }
 
 //+------------------------------------------------------------------+
-//| Captures : graphique et courbe d'equity                          |
+//| Courbe d'equity (image envoyée au bot)                           |
 //+------------------------------------------------------------------+
 // [ARCHI] début
-// Les captures sont enregistrées dans Common\Files (le bot les récupère) et annoncées par un événement.
+// La courbe est enregistrée dans Common\Files (le bot la récupère) et annoncée par un événement.
 void ShotTick()
 {
-   if(g_shotReq == "" && g_curveReq == "") return;
-   if(g_shotReq != "")
-   {
-      g_shotReq = "";
-      string f = "sx_shot_" + g_aid + ".png";
-      ChartRedraw(0);
-      if(ChartScreenShot(0, f, 1280, 720, ALIGN_RIGHT) && FileCopy(f, 0, f, FILE_COMMON | FILE_REWRITE))
-      {
-         string cap = "📸 " + _Symbol + " · " + TfLabel() + " · " + TimeToString(LocalNow(), TIME_SECONDS) +
-                      "\nEquity " + F2(AccountInfoDouble(ACCOUNT_EQUITY)) + " " + Cur() + " · Flottant " + Sgn(st_floating) + " · " + IntegerToString(st_posCount) + " pos";
-         EvTyped("CAPTURE", 1, cap, "{\"fichier\":\"" + f + "\"}");
-      }
-      else EvTyped("NOTIF", 1, "❌ Capture du graphique impossible.");
-   }
+   if(g_curveReq == "") return;
    if(g_curveReq != "")
    {
       g_curveReq = "";

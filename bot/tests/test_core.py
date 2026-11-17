@@ -500,3 +500,31 @@ async def test_wait_online_attend_heartbeat_connecte():
     ctx2 = NS(status=NS(read=lambda iid: NS(ts=t0 + 1, connecte=False)))
     ok, msg = await act.wait_online(ctx2, NS(id="a"), t0, timeout=1.5)
     assert not ok and "pas encore connecté" in msg
+
+
+def test_catalogue_du_bot_identique_aux_reglages_de_l_ea():
+    """EA 8.0.0 / Bot 4.3.0 : mêmes clés, mêmes groupes et mêmes noms de groupes que SX_Core.mqh (réglages 🎨 Graphique
+    retirés des deux côtés) ; un preset ancien qui contient encore ch_* est lu sans erreur, sans ces clés."""
+    import re
+    from pathlib import Path
+    from core import params as cat, presets as ps
+    src = (Path(__file__).resolve().parents[2] / "ea/MQL5/Experts/SX_Core.mqh").read_text(encoding="utf-8-sig")
+    enum = re.search(r"enum ENUM_PGROUP \{([^}]*)\}", src).group(1)
+    groups = [g.split("=")[0].strip() for g in enum.split(",") if g.strip() and "COUNT" not in g]
+    names = dict(re.findall(r'g_groupName\[(G_\w+)\]\s*=\s*"([^"]+)"', src))
+    assert [names[g] for g in groups] == cat.GROUPS
+    regs = {k: groups.index(g) for k, g in re.findall(r'Reg\(P_\w+,\s*"(\w+)",\s*"[^"]*",\s*(G_\w+)', src)}
+    assert regs == {p[0]: p[2] for p in cat.PARAMS}
+    assert not any(k.startswith("ch_") for k in regs) and not any(k.startswith("ch_") for k in ps.SET_INPUTS)
+    assert set(ps.SET_INPUTS) <= set(regs)
+
+
+def test_preset_ancien_avec_reglages_graphiques_lu_sans_eux(tmp_path):
+    """Bot 4.3.0 : un presets.json d'avant (ch_style, ch_panel…) se charge ; les clés graphiques disparaissent."""
+    import json
+    from core import presets as ps
+    f = tmp_path / "presets.json"
+    f.write_text(json.dumps({"presets": {"Martin": {"fast": "12", "ch_style": "1", "ch_panel": "0"}}, "active": "Martin"}),
+                 encoding="utf-8")
+    st = ps.PresetStore(f)
+    assert st.presets == {"Martin": {"fast": "12"}} and st.active == "Martin"

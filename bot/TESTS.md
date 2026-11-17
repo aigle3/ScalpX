@@ -37,7 +37,7 @@ Légende : ☐ à faire · OK / KO à noter à la main.
 
 | # | Test | Procédure | Résultat attendu | Vérification | OK/KO |
 |---|---|---|---|---|---|
-| C1 | ARRET_500 n'ouvre rien | Rester en `ARRET_500` 10 min (pendant un créneau +1 %) | Aucune position/ordre ; le panneau affiche « Seuil 500 atteint : reprise après retrait » | Panneau du graphique, historique | ☐ |
+| C1 | ARRET_500 n'ouvre rien | Rester en `ARRET_500` 10 min (pendant un créneau +1 %) | Aucune position/ordre ; la fiche du compte (Telegram) affiche l'état ARRET_500 | Fiche du compte, historique | ☐ |
 | C2 | Reprise avec 125,40 restant | En `ARRET_500`, 0 position : régler `SeuilArret` **au-dessus** du solde (ex. 600) pour simuler un retrait ; ou faire un vrai retrait si le broker démo le permet | Reprise automatique : `ACTIF`, **cycle +1**, notification 🟢, événement `REPRISE_RETRAIT` | Telegram, `statut.cycle` | ☐ |
 | C3 | Capital insuffisant | En `ARRET_500`, régler `SeuilReprise` **au-dessus** du solde (ex. 520, `SeuilArret` 600) | Reste `ARRET_500`, **une seule** alerte ⚠️ `CAPITAL_INSUFFISANT` (pas en boucle) | Telegram (1 message sur 10 min) | ☐ |
 | C4 | Equity sous 125 en ACTIF | Série ouverte, laisser l'equity passer sous 125 (perte flottante) | L'EA continue de trader au même lot et **ne ferme aucune position** (seul le lancement d'une nouvelle série est bloqué si solde < 125) | Historique, journal | ☐ |

@@ -1152,7 +1152,6 @@ bool CmdExecute(string cmd, string &args[], string &msg)
    if(cmd == "JOURNAL") { msg = FilterJournalText(); return true; }
    if(cmd == "PRESETS") { msg = PresetsText(); return true; }
    if(cmd == "VACANCES") return CmdVacances(a0, msg);
-   if(cmd == "CAPTURE") { g_shotReq = "1"; msg = "📸 Capture en route…"; return true; }
    if(cmd == "COURBE")  { g_curveReq = "1"; msg = "📈 Courbe en route…"; return true; }
    if(cmd == "PRESET_SAVE")
    {
@@ -1186,7 +1185,6 @@ bool CmdExecute(string cmd, string &args[], string &msg)
       ResetParamsToDefaults();
       RebuildIndicators();
       g_tpSig = -1;
-      ChartRefreshAll(true);
       g_configOK = false;
       GlobalVariableDel(GVN("cfgok"));
       msg = "✅ Valeurs par défaut rétablies. ⚠️ Valide les paramètres (VALIDER) avant la reprise.";

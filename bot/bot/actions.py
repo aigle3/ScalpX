@@ -20,7 +20,7 @@ from storage.db import ARRETE, DEMARRE, Database, Instance
 # Menu « commandes EA » de la fiche compte
 CARD_CMDS = [("📌 Positions", "POSITIONS"), ("⚙️ Params", "PARAMS"), ("🧪 Filtres", "FILTRES"), ("🛡 Risque", "RISQUE"),
              ("📰 News", "NEWS"), ("📒 Journal", "JOURNAL"), ("📝 Rapport", "RAPPORT"), ("🎯 Objectif", "OBJECTIF"),
-             ("📸 Capture", "CAPTURE"), ("📈 Courbe", "COURBE"), ("📡 Statut", "STATUT"), ("🏓 Ping", "PING")]
+             ("📈 Courbe", "COURBE"), ("📡 Statut", "STATUT"), ("🏓 Ping", "PING")]
 
 # Consultations : jamais écrites dans le journal des actions (qui ne garde que ce qui change quelque chose)
 READ_ONLY_CMDS = {"POSITIONS", "PARAMS", "FILTRES", "RISQUE", "NEWS", "JOURNAL", "RAPPORT", "CAPTURE", "COURBE", "STATUT",

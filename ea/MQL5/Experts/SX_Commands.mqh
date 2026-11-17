@@ -186,7 +186,7 @@ string ActPause()
           "\n\nℹ️ Plus aucune nouvelle position ni ordre de grille. Les positions ouvertes restent gérées (TP, objectif, protections).";
 }
 
-// La confirmation est faite par le bot (et par le double clic du panneau du graphique).
+// La confirmation est faite par le bot.
 string ActCloseAll()
 {
    g_enabled = false;
