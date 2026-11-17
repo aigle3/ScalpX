@@ -70,7 +70,9 @@ class FakeProc:
 
 def test_terminal_reconnu_sous_wine(monkeypatch, tmp_path):
     exe = tmp_path / "i1" / "terminal64.exe"
-    procs = [FakeProc(10, "terminal64.exe", [w.to_win(exe), "/portable"]),
+    procs = [FakeProc(10, "main", [str(exe), "/portable", "/config:Z:\\x.ini"]),      # forme réelle (Bot 3.15.2)
+             FakeProc(13, "CrBrowserMain", ["C:\\Program Files (x86)\\Microsoft\\EdgeWebView\\msedgewebview2.exe",
+                                            "--webview-exe-name=terminal64.exe"]),
              FakeProc(11, "python3", ["/usr/bin/python3", "main.py"]),
              FakeProc(12, "metatester64.ex", [w.to_win(tmp_path / "bt" / "metatester64.exe")])]
     import psutil

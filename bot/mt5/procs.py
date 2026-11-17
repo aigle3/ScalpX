@@ -51,9 +51,8 @@ class PsutilProcesses:
         if FAST_NAMES and name and name not in names:              # Windows : nom du processus = nom de l'exécutable
             return None
         if self.wine is not None:
-            short = {n[:COMM_LEN] for n in names}
-            if name and name[:COMM_LEN] not in short and not name.startswith("wine"):
-                return None
+            # Bot 3.15.2 : sous Wine le processus porte un nom quelconque (« main » pour terminal64.exe) : aucun tri
+            # par nom, la ligne de commande de chaque processus est lue (une fois par processus, résultat mémorisé)
             from .wine import cmdline_exe
             try:
                 cwd = None
@@ -62,9 +61,10 @@ class PsutilProcesses:
                 except (psutil.AccessDenied, OSError):
                     pass
                 found = cmdline_exe(p.cmdline(), self.wine.prefix_path(), cwd)
-                if found is None and cwd and name:          # Bot 3.15.1 : ligne de commande illisible → dossier courant
+                if found is None and cwd and (name == "main" or name[:COMM_LEN] in {n[:COMM_LEN] for n in names}
+                                              or name.startswith("wine")):   # Bot 3.15.1 : ligne de commande illisible → dossier courant
                     for n in names:                          # (le terminal est lancé dans le dossier de l'instance)
-                        if (n[:COMM_LEN] == name[:COMM_LEN] or name.startswith("wine")) and (Path(cwd) / n).is_file():
+                        if (Path(cwd) / n).is_file():
                             return str(Path(cwd) / n)
                 return found
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
@@ -90,7 +90,7 @@ class PsutilProcesses:
                         pe = self._pid_exe[key]
                     else:
                         pe = self._exe_of(p, self._names)
-                        if pe is None and (FAST_NAMES or self.wine is not None) and key[1] and key[1] not in self._names:
+                        if pe is None and FAST_NAMES and key[1] and key[1] not in self._names:
                             continue                           # processus non suivi : rien à retenir
                     if key[0] is not None:
                         seen[key] = pe

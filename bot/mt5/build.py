@@ -188,11 +188,13 @@ def kill_stale(base: Path) -> int:
     wine = os.name != "nt"                                    # Bot 3.15.0 : Linux → nom tronqué à 15, chemin dans la ligne de commande
     for p in psutil.process_iter(["name", "exe"]):
         try:
-            if (p.info.get("name") or "").lower()[:15 if wine else None] != METAEDITOR.lower()[:15 if wine else None]:
+            if not wine and (p.info.get("name") or "").lower() != METAEDITOR.lower():   # Wine : nom quelconque (« main »)
                 continue
             if wine:
                 from .wine import cmdline_exe
                 exe = cmdline_exe(p.cmdline()) or ""
+                if not exe:
+                    continue
             else:
                 exe = p.info.get("exe") or ""
             if exe and os.path.normcase(os.path.abspath(exe)) != target:
