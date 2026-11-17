@@ -25,8 +25,7 @@ ok()   { echo -e "  \e[32m[OK]\e[0m $*"; }
 warn() { echo -e "  \e[33m[!]\e[0m  $*"; }
 die()  { echo -e "  \e[31m[ERREUR]\e[0m $*"; exit 1; }
 ask()  { local r; read -rp "  $1 " r </dev/tty || true; echo "$r"; }
-as_u() { sudo -u "$U" -H env WINEPREFIX="$PFX" WINEARCH=win64 DISPLAY="$DISP" WINEDEBUG=-all \
-              WINEDLLOVERRIDES="mscoree,mshtml=" "$@"; }
+as_u() { sudo -u "$U" -H env WINEPREFIX="$PFX" WINEARCH=win64 DISPLAY="$DISP" WINEDEBUG=-all "$@"; }
 
 [ "$(id -u)" -eq 0 ] || die "lance ce script avec sudo : sudo bash linux/install.sh"
 [ -f "$PKG/bot/main.py" ] && [ -d "$PKG/ea/MQL5/Experts" ] || die "paquet incomplet : lance le script depuis le dossier ScalpX téléchargé"
@@ -83,10 +82,18 @@ if [ ! -f "$PFX/system.reg" ]; then
     as_u wineboot -i >/dev/null 2>&1 || true
     as_u wineserver -w || true
 fi
-as_u wine reg add 'HKEY_CURRENT_USER\Software\Wine' /v Version /t REG_SZ /d win10 /f >/dev/null 2>&1 || true
+as_u winecfg -v=win11 >/dev/null 2>&1 || true                 # comme le script Linux officiel de MetaQuotes
 as_u wineserver -w || true
 [ -f "$PFX/system.reg" ] || die "préfixe Wine non créé"
-ok "préfixe prêt (Windows 10)"
+ok "préfixe prêt (Windows 11)"
+# L'installeur MT5 exige WebView2 (sinon il s'arrête aussitôt sur une erreur invisible : NtRaiseHardError)
+if ! ls -d "$PFX/drive_c/Program Files (x86)/Microsoft/EdgeWebView" >/dev/null 2>&1; then
+    echo "  Installation de Microsoft WebView2 (requis par l'installeur MT5)…"
+    as_u curl -fsSL -o /tmp/webview2.exe "https://go.microsoft.com/fwlink/p/?LinkId=2124703" || die "téléchargement de WebView2 impossible"
+    as_u wine /tmp/webview2.exe /silent /install >/dev/null 2>&1 || true
+    as_u wineserver -w || true
+fi
+ls -d "$PFX/drive_c/Program Files (x86)/Microsoft/EdgeWebView" >/dev/null 2>&1 && ok "WebView2 installé" || warn "WebView2 non détecté : l'installation de MT5 risque d'échouer"
 
 # ---------------------------------------------------------------- 4. BASE MT5
 step "4/7  MetaTrader 5 : dossier BASE ($BASE)"
