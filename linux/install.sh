@@ -176,11 +176,16 @@ ENVF="$BOT/.env"
 envget() { sed -n "s/^$1=//p" "$ENVF" 2>/dev/null | head -1 | tr -d '\r'; }
 umask 077; touch "$ENVF"; umask 022
 chown "$U:$U" "$ENVF"; chmod 600 "$ENVF"
+# Valeurs déjà obtenues par l'installation rapide (linux/installer.sh, qui les a demandées dans Telegram) : écrites
+# telles quelles, aucune question (et le bot ne redemande pas le jeton GitHub).
+for k in TELEGRAM_TOKEN ALLOWED_CHAT_IDS GITHUB_TOKEN; do
+    v="${!k:-}"
+    if [ -n "$v" ] && [ -z "$(envget "$k")" ] && [[ "$v" =~ ^[A-Za-z0-9:_,-]+$ ]]; then echo "$k=$v" >> "$ENVF"; fi
+done
 tok=$(envget TELEGRAM_TOKEN); chat=$(envget ALLOWED_CHAT_IDS)
 if [ -z "$tok" ] || [ -z "$chat" ]; then
     [ -z "$AUTO" ] || die "token Telegram ou chat_id absent du .env : lance une fois sudo bash linux/install.sh"
     echo "  Dans Telegram : @BotFather -> /newbot -> copie le TOKEN. Ton chat_id : écris à @userinfobot."
-    echo "  Si l'ancien bot Windows tourne encore, utilise un AUTRE token (deux bots sur le même token se gênent)."
 fi
 if [ -z "$tok" ]; then
     for _ in 1 2 3; do tok=$(ask "TELEGRAM_TOKEN :"); [[ "$tok" =~ ^[0-9]{6,}:[A-Za-z0-9_-]{30,}$ ]] && break; warn "format attendu : 123456789:AAxx…"; tok=""; done
@@ -263,3 +268,10 @@ systemctl is-active --quiet scalpx-bot.service && ok "bot démarré : ouvre Tele
 
 echo
 echo "Terminé. Journal du bot : journalctl -u scalpx-bot -f   |   fichiers : $BOT/data/logs"
+# Paquet téléchargé à la main (ex. ~/scalpx-paquet) : plus utile, le bot garde sa propre copie (release) → supprimé.
+case "$PKG" in
+    "$APP"/*) ;;
+    *) if [ -f "$PKG/linux/install.sh" ] && [ -f "$PKG/bot/main.py" ]; then
+           cd / && rm -rf "$PKG" && rm -f /etc/scalpx/paquet && echo "Paquet d'installation supprimé ($PKG)."
+       fi ;;
+esac

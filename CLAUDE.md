@@ -15,6 +15,8 @@ la branche `stable` avance et le bot du VPS (qui ne lit QUE `stable`) propose «
 - `ea/version.txt` : version publiée de l'EA.
 - `linux/` : installation sur le VPS Ubuntu (Wine + Xvfb + services systemd) : `install.sh` (LF, pas de CRLF), `LISEZMOI.md`.
   Le VPS est sous Ubuntu uniquement (plus de Windows) : MT5, MetaEditor et le testeur tournent sous Wine.
+  `linux/installer.sh` est aussi publié tel quel dans le dépôt PUBLIC `aigle3/scalpx-installation` (installation en une
+  ligne) : le recopier là-bas à chaque modification ; jamais de secret ni de code ScalpX dedans.
 - `docs/CHANGELOG.md` : historique des modifications de l'EA.
 
 ## Règles

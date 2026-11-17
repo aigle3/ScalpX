@@ -31,7 +31,7 @@ jobs:
         working-directory: bot
         run: python -m pytest -q
       - name: Syntaxe de l'installeur Linux
-        run: bash -n linux/install.sh
+        run: bash -n linux/install.sh && bash -n linux/installer.sh && bash -n linux/scalpx-uninstall.sh && bash -n linux/scalpx-root-update.sh
 
   compile-ea:
     runs-on: windows-latest

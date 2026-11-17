@@ -7,16 +7,17 @@ et le bot Telegram central en **service systemd**.
 - Ubuntu **24.04 ou 26.04** (22.04 accepté), 64 bits, sans bureau graphique. 8 Go de RAM pour une dizaine de comptes.
 - Accès root (sudo).
 
-## Installation (seule fois où tu touches au VPS)
-Le dépôt est privé : le téléchargement demande ton jeton GitHub de lecture (remplace `github_pat_TON_JETON`) :
+## Installation (une seule commande, aucun jeton dedans)
+Sur le serveur neuf, connecté en root (ou avec sudo) :
 ```bash
-mkdir -p ~/scalpx-paquet && cd ~/scalpx-paquet
-curl -fsSL -H "Authorization: Bearer github_pat_TON_JETON" https://api.github.com/repos/aigle3/ScalpX/tarball/stable | tar xz --strip-components=1
-sudo bash linux/install.sh
+curl -fsSL https://raw.githubusercontent.com/aigle3/scalpx-installation/main/installer.sh | sudo bash
 ```
-Le script installe tout (Wine, Xvfb, Python, MT5, EA, bot, services, droits limités du bot) et ne demande que le
-**token Telegram** et ton **chat_id**, seulement s'ils manquent. Au démarrage, le bot te demande dans Telegram les jetons
-GitHub qui lui manquent (mises à jour, sauvegarde) : tu les envoies, il les enregistre et efface ton message.
+1. Le script demande le **token du bot Telegram** et ton **chat_id** (les deux seules questions).
+2. Le bot t'écrit dans Telegram : tu lui envoies ton **jeton GitHub** (lecture du dépôt ScalpX) ; il l'efface aussitôt et
+   le garde pour les mises à jour (il ne te le redemandera pas).
+3. Tout s'installe (Wine, Xvfb, Python, MT5, EA, bot, services, droits limités du bot), l'avancement s'affiche dans
+   Telegram ; le paquet téléchargé est supprimé à la fin.
+4. Dans Telegram : ☁️ Restaurer (🛠 Système) puis 📄 Comptes (fichier). Le bot te demande aussi le jeton de sauvegarde.
 
 Relancer l'installation (sans jeton : le bot garde toujours la dernière version téléchargée) :
 `sudo bash /home/scalpx/scalpx/release/linux/install.sh` — ou, une fois les droits du bot en place, 🛠 Système → 🔧.
