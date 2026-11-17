@@ -1609,3 +1609,40 @@ async def test_bouton_du_bas_remis(svc):
     assert any(d == "d:menu" for row in kb for _, d in row)
     await router.on_callback("d:menu")
     assert sent and "Tableau de bord" in sent[0]
+
+
+async def test_presets_export_puis_import_dans_un_autre_bot(svc):
+    """Bot 3.16.0 : 📤 Exporter → fichier texte ; 📥 Importer (texte collé ou fichier) → presets recréés, ⭐ inchangé."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    from bot import presets_ui as pui
+    from core import presets as ps
+    st = dash.store
+    st.put("Martin", {"lot": "0.02", "fast": "12"})
+    st.put("🧩 Base avant optimisation", {"lot": "0.01"})
+    await router.on_callback("s:expa")
+    fname, data = sender.docs[-1]
+    text = data.decode("utf-8")
+    assert fname == "scalpx_presets.txt" and text == ps.export_text(st, st.names())
+    assert "[preset=Martin]" in text and "lot=0.02" in text and "[preset=🧩 Base avant optimisation]" in text
+    got, unknown = ps.parse_import(text + "\ninconnu=3\n")
+    assert got == {"Martin": {"lot": "0.02", "fast": "12"}, "🧩 Base avant optimisation": {"lot": "0.01"}} and unknown == 1
+    assert ps.parse_import("# preset=X\nfast=9\n")[0] == {"X": {"fast": "9"}}       # format du testeur MT5
+    import pytest
+    with pytest.raises(ValueError):
+        ps.parse_import("bonjour")
+    # autre bot : aucun preset → import direct, sans confirmation ; ⭐ actif inchangé
+    for n in list(st.presets):
+        st.delete(n)
+    await router.on_callback("s:imp")
+    assert router.awaiting_import
+    await router.on_text(text)
+    assert not router.awaiting_import
+    assert st.presets["Martin"] == {"lot": "0.02", "fast": "12"} and not st.active
+    # réimport : remplace l'existant → confirmation demandée
+    st.put("Martin", {"lot": "0.05"})
+    await router.on_callback("s:imp")
+    await router.on_text(text)
+    assert dash.screen[0] == "confirm" and st.presets["Martin"] == {"lot": "0.05"}
+    tok = dash.screen[1]
+    await router.on_callback(f"ok:{tok}")
+    assert await _until(lambda: st.presets["Martin"] == {"lot": "0.02", "fast": "12"})

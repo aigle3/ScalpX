@@ -203,6 +203,33 @@ async def h_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             log.warning("bouton du tableau de bord : envoi impossible", exc_info=True)
 
 
+async def h_doc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Bot 3.16.0 : fichier reçu. Seul usage : 📥 import de presets (fichier exporté par l'autre bot)."""
+    s = svc(context)
+    m = update.message
+    if m is None or m.document is None:
+        return
+    if not s.router.awaiting_import:
+        await s.sender.send(s.chat_id, "📎 Fichier ignoré. Pour importer des presets : 💾 Presets → 📥 Importer, puis renvoie-le.",
+                            [[("✖ Fermer", "d:close")]], True)
+        return
+    s.router.awaiting_import = False
+    if (m.document.file_size or 0) > 200_000:
+        await s.router.preset_import("")                   # message « fichier trop gros / rien de reconnu »
+        return
+    try:
+        f = await m.document.get_file()
+        data = bytes(await f.download_as_bytearray())
+    except Exception as exc:
+        log.warning("import de presets : fichier illisible : %s", exc)
+        data = b""
+    try:
+        await s.sender.delete(update.effective_chat.id, m.message_id)
+    except Exception:
+        pass
+    await s.router.preset_import(data.decode("utf-8-sig", errors="replace"))
+
+
 async def h_cb(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     q = update.callback_query
     if q is None or q.data is None:
@@ -636,6 +663,7 @@ def build_application(cfg: Config, ctx_factory) -> Application:
     app.add_handler(conv)
     app.add_handler(CallbackQueryHandler(h_cb, pattern=CB_PATTERN))
     app.add_handler(MessageHandler(filters.TEXT, h_text))
+    app.add_handler(MessageHandler(filters.Document.ALL, h_doc))                 # Bot 3.16.0 : import de presets
     app.add_error_handler(h_error)
 
     jq = app.job_queue

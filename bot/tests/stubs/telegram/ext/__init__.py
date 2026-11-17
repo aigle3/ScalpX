@@ -15,6 +15,8 @@ class _Flt:
     def __invert__(self): return self
 class filters:
     TEXT = COMMAND = _Flt()
+    class Document:
+        ALL = _Flt()
 class _JQ:
     def __init__(self): self.jobs = []
     def run_repeating(self, cb, interval, first=0, job_kwargs=None): self.jobs.append(("rep", cb.__name__, interval, job_kwargs))

@@ -41,6 +41,7 @@ class Router:
         self._upd_after = ""                    # « Installer » touché pendant une compilation / un déploiement : installé ensuite
         self.awaiting_preset: tuple[str, str] | None = None   # (compte modèle, preset remplacé) : nom attendu (texte)
         self.awaiting_goal: str | None = None               # compte (ou ALL_ID) dont on attend l'objectif (message texte)
+        self.awaiting_import = False                        # Bot 3.16.0 : fichier / texte de presets attendu (📥 Importer)
         self._dep_sel: set[str] = set()
         from mt5.backtester import BacktestManager
         self.bt = BacktestManager(ctx.cfg, ctx.db, ctx.mgr.procs)      # 🧪 terminal de backtest à part
@@ -414,6 +415,10 @@ class Router:
                 await self.dash.refresh(force=True)
                 return
             await self._goal_confirm(inst, v.replace(",", "."))
+            return
+        if self.awaiting_import:
+            self.awaiting_import = False
+            await self.preset_import(text)
             return
         if self.awaiting_preset:
             iid, _ = self.awaiting_preset
@@ -944,8 +949,9 @@ class Router:
         """s:l liste · s:o:<P> preset · s:new[:<P>] modèle · s:src:<compte>[:<P>] · s:ap:<P> appliquer · s:del:<P> · s:chk."""
         store, dash = self.dash.store, self.dash
         sub = p[1] if len(p) > 1 else "l"
-        name = pui.find(store, p[2]) if len(p) > 2 and sub in ("o", "ap", "del", "new", "cmp") else ""
+        name = pui.find(store, p[2]) if len(p) > 2 and sub in ("o", "ap", "del", "new", "cmp", "exp") else ""
         self.awaiting_preset = None
+        self.awaiting_import = False
         if sub == "o" and name:
             dash.goto("pso", name)
         elif sub == "new":
@@ -981,6 +987,18 @@ class Router:
             else:
                 dash.flash("⏳ Lecture des réglages des robots…")
                 self._bg(self._preset_compare(name))
+        elif sub in ("exp", "expa"):                                     # Bot 3.16.0 : 📤 fichier texte envoyé dans la conversation
+            names = [name] if sub == "exp" and name else ([] if sub == "exp" else store.names())
+            if not names:
+                dash.flash("Aucun preset à exporter.")
+            else:
+                await self._preset_export(names)
+                return ""
+        elif sub == "imp":
+            self.awaiting_import = True
+            dash.goto("psl")
+            dash.flash("📥 Envoie le <b>fichier de presets</b> exporté par l'autre bot (transfère-le), ou colle son texte. "
+                       "Les presets du même nom seront remplacés après confirmation.", 300)
         elif sub == "chk":
             dash.goto("psl")
             dash.flash("⏳ Contrôle des robots…")
@@ -1047,6 +1065,50 @@ class Router:
                                [[("✖ Fermer", "d:close")]], True)
         self.dash.flash("🔍 Comparaison envoyée ci-dessous.", 10)
         await self.dash.refresh(force=True)
+
+    async def _preset_export(self, names: list[str]) -> None:
+        store = self.dash.store
+        data = pui.ps.export_text(store, names).encode("utf-8")
+        slug = re.sub(r"[^A-Za-z0-9_-]+", "_", names[0]).strip("_") or "preset" if len(names) == 1 else "presets"
+        await self.sender.document(self.chat_id, data, f"scalpx_{slug}.txt",
+                                   f"📤 {len(names)} preset(s) : " + ", ".join(names)[:300] +
+                                   "\nPour l'autre VPS : transfère ce fichier à son bot après 💾 Presets → 📥 Importer.")
+        self.ctx.db.add_action("", "PRESET EXPORTÉ", True, ", ".join(names)[:200])
+        self.dash.flash(f"📤 Fichier envoyé ci-dessous ({len(names)} preset(s)).", 15)
+        await self.dash.refresh(force=True)
+
+    async def preset_import(self, text: str) -> None:
+        """Texte / fichier exporté → presets créés ou remplacés (après confirmation s'il en remplace). Le preset ⭐ actif
+        ne change pas : 📤 Appliquer reste un geste volontaire."""
+        try:
+            got, unknown = pui.ps.parse_import(text)
+        except ValueError as exc:
+            self.dash.goto("psl")
+            self.dash.flash(f"❌ Import impossible : {esc(str(exc))}.")
+            await self.dash.refresh(force=True)
+            return
+        store = self.dash.store
+        replaced = [n for n in got if n in store.presets]
+        desc = "\n".join(f"• {esc(n)} : {len(v)} réglages" + (" (remplace l'existant)" if n in replaced else " (nouveau)")
+                         for n, v in got.items())
+        note = f"\n<i>{unknown} réglage(s) inconnu(s) de cet EA ignoré(s).</i>" if unknown else ""
+
+        async def run() -> None:
+            for n, v in got.items():
+                store.put(n, v)
+                self.dash.params.vals.pop(pui.PREFIX + n, None)
+            if store.active in got:
+                self.sync_base_set()
+            self.ctx.db.add_action("", "PRESET IMPORTÉ", True, ", ".join(got)[:200])
+            self.dash.goto("psl")
+            self.dash.flash(f"📥 {len(got)} preset(s) importé(s)."
+                            + ("" if store.active in got else " 📤 Appliquer pour l'envoyer aux robots et en faire le preset ⭐."))
+            await self.dash.refresh(force=True)
+
+        if replaced:
+            await self._ask(f"📥 <b>Importer {len(got)} preset(s) ?</b>\n{desc}{note}", run, ("psl",), "📥 Importer")
+        else:
+            await run()
 
     async def _preset_delete(self, name: str) -> None:
         self.dash.store.delete(name)

@@ -103,7 +103,7 @@ class PresetStore:
         self.export()
 
     def export(self) -> Path | None:
-        """Bot 3.14.0 : preset ⭐ actif (ex. Martin) copié dans Common\Files\scalpx_preset.cfg à chaque modification (toi,
+        """Bot 3.14.0 : preset ⭐ actif (ex. Martin) copié dans Common\\Files\\scalpx_preset.cfg à chaque modification (toi,
         l'optimiseur, ⭐) : l'EA lancé à la main dans le testeur MT5 de n'importe quel terminal du VPS le charge tout seul.
         Format « clé=valeur » des backtests du bot (TOUS les réglages, news et créneaux compris)."""
         if self.export_dir is None or not self.active or self.active not in self.presets:
@@ -287,3 +287,52 @@ def write_base_set(set_path: Path, values: dict[str, str]) -> bool:
         tmp.write_bytes(new)
         os.replace(tmp, p)
     return True
+
+
+# ---- Bot 3.16.0 : export / import de presets (fichier texte transféré d'un bot à l'autre dans Telegram)
+EXPORT_HEADER = "# ScalpX presets"
+_MAX_IMPORT = 200_000                                  # octets : un preset fait ~2 Ko
+
+
+def export_text(store: "PresetStore", names: list[str]) -> str:
+    """Presets → texte : une section « [preset=Nom] » puis « clé=valeur » par réglage (valeurs brutes de l'EA)."""
+    out = [EXPORT_HEADER, "# A importer dans l'autre bot : Presets > Importer, puis envoyer ce fichier (ou coller ce texte).", ""]
+    for n in names:
+        vals = store.presets.get(n)
+        if vals is None:
+            continue
+        out.append(f"[preset={n}]")
+        out += [f"{k}={v}" for k, v in vals.items() if k]
+        out.append("")
+    return "\n".join(out)
+
+
+def parse_import(text: str) -> tuple[dict[str, dict[str, str]], int]:
+    """Texte exporté → ({nom: réglages}, nombre de réglages inconnus ignorés). Accepte aussi une seule section sans
+    en-tête (« # preset=Nom » du testeur MT5, ou rien : nom « Importé »). ValueError si aucun réglage reconnu."""
+    if len(text.encode("utf-8", "replace")) > _MAX_IMPORT:
+        raise ValueError("fichier trop gros")
+    presets: dict[str, dict[str, str]] = {}
+    name, unknown = "", 0
+    for raw in text.replace("\r", "").split("\n"):
+        line = raw.strip().lstrip("\ufeff")
+        if not line:
+            continue
+        m = re.fullmatch(r"\[preset=(.{1,60})\]", line) or re.fullmatch(r"#\s*preset=(.{1,60})", line)
+        if m:
+            name = m.group(1).strip()
+            presets.setdefault(name, {})
+            continue
+        if line.startswith(("#", ";")) or "=" not in line:
+            continue
+        k, v = (x.strip() for x in line.split("=", 1))
+        if k not in BY_KEY:
+            unknown += 1
+            continue
+        if any(c in v for c in "\x00"):
+            continue
+        presets.setdefault(name or "Importé", {})[k] = v
+    presets = {n: v for n, v in presets.items() if v}
+    if not presets:
+        raise ValueError("aucun réglage ScalpX reconnu")
+    return presets, unknown
