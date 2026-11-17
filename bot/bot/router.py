@@ -201,7 +201,9 @@ class Router:
             return await self._ask("⚡ <b>Optimiser le VPS ?</b>\nRéglages Windows qui libèrent du CPU (antivirus, services inutiles, "
                                    "alimentation…), CPU mesuré avant / après (≈ 1 min). Les terminaux et l'EA continuent de trader.",
                                    self.vps_optimize, ("sys",), "⚡ Optimiser")
-        elif sub in ("srv", "svl", "svo", "svx", "sva", "rbt", "uni", "rup"):   # Bot 3.18.0 : 🖥 Serveur (Linux)
+        elif sub in ("unigo", "unino"):                         # Bot 3.18.3 : dernière confirmation (compte à rebours)
+            return await self._uninstall_cb(sub, p)
+        elif sub in ("srv", "sva", "rbt", "uni", "rup"):        # Bot 3.18.0 : 🖥 Serveur (Linux)
             return await self._server_cb(sub, p)
         elif sub == "key":                                      # Bot 3.18.0 : 🔑 clés et jetons (saisis ici, jamais sur le VPS)
             self.dash.goto("key")
@@ -1150,27 +1152,9 @@ class Router:
             st, auto, sudo = await asyncio.gather(asyncio.to_thread(sv.stats), asyncio.to_thread(sv.autostart),
                                                   asyncio.to_thread(sv.sudo_ready))
             dash.srv = (st, auto, sudo)
-        elif sub == "svl":
-            dash.goto("svl")
-            dash.svcs = await asyncio.to_thread(sv.services)
-        elif sub == "svo" and len(p) > 2 and p[2].isdigit():
-            dash.goto("svo", int(p[2]))
-        elif sub == "svx" and len(p) > 3 and p[3].isdigit():
-            act, i = p[2], int(p[3])
-            svcs = getattr(dash, "svcs", [])
-            if not 0 <= i < len(svcs):
-                dash.goto("svl")
-            else:
-                unit = svcs[i].unit
-                if act in ("stop", "disable"):
-                    return await self._ask(f"🧩 <b>{'Arrêter' if act == 'stop' else 'Désactiver'} {esc(unit)} ?</b>"
-                                           + ("\nIl ne sera plus lancé au démarrage du VPS." if act == "disable" else ""),
-                                           lambda: self._service_do(unit, act, i), ("svo", i), "✅ Confirmer")
-                return await self._service_do(unit, act, i) or ""
         elif sub == "sva":
-            res = await asyncio.gather(*[asyncio.to_thread(sv.action, u, "enable") for u in sv.OWN])
-            dash.flash("✅ Relancés au démarrage du VPS." if all(ok for ok, _ in res) else
-                       "❌ " + esc("; ".join(m for ok, m in res if not ok)))
+            ok, msg = await asyncio.to_thread(sv.enable_own)
+            dash.flash("✅ Bot et écran virtuel relancés au démarrage du VPS." if ok else "❌ " + esc(msg))
             return await self._server_cb("srv", ["d", "srv"])
         elif sub == "rbt":
             return await self._ask("🔁 <b>Redémarrer le VPS ?</b>\nTerminaux et bot coupés ≈ 1 à 3 min ; au retour, le bot et les "
@@ -1185,17 +1169,6 @@ class Router:
                                    "préfixe Wine, l'historique, les services et les autorisations. Rien ne restera de ScalpX.",
                                    self._uninstall_2, ("srv",), "🧨 Continuer")
         await dash.refresh(force=True)
-        return ""
-
-    async def _service_do(self, unit: str, act: str, i: int) -> str:
-        from core import server as sv
-        ok, msg = await asyncio.to_thread(sv.action, unit, act)
-        self.ctx.db.add_action("", f"SERVICE {act.upper()} {unit}", ok, msg)
-        self.dash.svcs = await asyncio.to_thread(sv.services)
-        idx = next((k for k, s in enumerate(self.dash.svcs) if s.unit == unit), -1)
-        self.dash.goto(*(("svo", idx) if idx >= 0 else ("svl",)))
-        self.dash.flash(("✅ " if ok else "❌ ") + f"{esc(unit)} : {act} → {esc(msg)}")
-        await self.dash.refresh(force=True)
         return ""
 
     async def _root_update(self) -> None:
@@ -1223,20 +1196,50 @@ class Router:
                         "VPS ne répondra plus jamais. Les positions restent chez le broker.", self._uninstall_3, ("srv",),
                         "🧨 Oui, je suis sûr")
 
-    async def _uninstall_3(self) -> None:
-        t0 = _clock()
-        await self._ask("🛑 <b>Dernière confirmation.</b>\nAttends <b>10 secondes</b> avant de toucher le bouton (un appui plus tôt "
-                        "est refusé). Cette action est définitive.", lambda: self._uninstall_go(t0), ("srv",), "🧨 DÉSINSTALLER")
+    UNI_STEP_S = 1.0                                     # compte à rebours de la dernière confirmation (remplacé dans les tests)
 
-    async def _uninstall_go(self, t0: float) -> None:
-        from core import server as sv
-        if _clock() - t0 < 10:
-            self.dash.flash("⏱ Trop tôt : attends 10 secondes après l'affichage, puis confirme.")
-            await self._uninstall_3()
+    async def _uninstall_3(self) -> None:
+        """Dernière confirmation : compte à rebours de 10 s affiché, puis le bouton apparaît (valable 60 s)."""
+        import secrets
+        tok = secrets.token_hex(4)
+        self._uni = (tok, 0.0)
+        txt = "🛑 <b>Dernière confirmation</b> : désinstallation complète de ScalpX sur ce VPS, définitive."
+        mid = await self.sender.send(self.chat_id, f"{txt}\n\n⏳ Bouton disponible dans <b>10</b> s…",
+                                     [[("✖ Annuler", "d:unino")]], False)
+        for n in range(9, 0, -1):
+            await asyncio.sleep(self.UNI_STEP_S)
+            if getattr(self, "_uni", ("", 0))[0] != tok:              # annulé pendant le compte à rebours
+                return
+            await self.sender.edit(self.chat_id, mid, f"{txt}\n\n⏳ Bouton disponible dans <b>{n}</b> s…", [[("✖ Annuler", "d:unino")]])
+        await asyncio.sleep(self.UNI_STEP_S)
+        if getattr(self, "_uni", ("", 0))[0] != tok:
             return
+        self._uni = (tok, _clock())
+        self._uni_msg = mid
+        await self.sender.edit(self.chat_id, mid, f"{txt}\n\n👇 Tu peux confirmer (bouton valable 1 min).",
+                               [[("🧨 DÉSINSTALLER MAINTENANT", f"d:unigo:{tok}")], [("✖ Annuler", "d:unino")]])
+
+    async def _uninstall_cb(self, sub: str, p: list[str]) -> str:
+        tok, ready = getattr(self, "_uni", ("", 0.0))
+        mid = getattr(self, "_uni_msg", None)
+        if sub == "unino" or not tok:
+            self._uni = ("", 0.0)
+            if mid:
+                await self.sender.edit(self.chat_id, mid, "✖ Désinstallation annulée.", [[("✖ Fermer", "d:close")]])
+            return "Annulé"
+        if len(p) < 3 or p[2] != tok or not ready or _clock() - ready > 60:
+            return "Expiré : recommence depuis 🖥 Serveur"
+        self._uni = ("", 0.0)
+        if mid:
+            await self.sender.edit(self.chat_id, mid, "🧨 <b>Désinstallation confirmée.</b>", None)
+        self._bg(self._uninstall_go())
+        return "OK"
+
+    async def _uninstall_go(self) -> None:
+        from core import server as sv
         self.ctx.db.add_action("", "DÉSINSTALLATION", True, "")
-        await self.sender.send(self.chat_id, "🧨 <b>Désinstallation lancée.</b> Le bot s'arrête définitivement. Wine, Xvfb et Python "
-                               "restent installés sur le système (paquets Ubuntu).", None, True)
+        await self.sender.send(self.chat_id, "🧨 <b>Désinstallation lancée.</b> Le serveur t'envoie chaque étape ici, puis un "
+                               "dernier message quand tout est effacé.", None, True)
         ok, err = await asyncio.to_thread(sv.uninstall)
         if not ok:
             self.dash.goto("srv")

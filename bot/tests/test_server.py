@@ -11,36 +11,14 @@ class R:
         self.stdout, self.returncode, self.stderr = out, code, err
 
 
-def test_services_lus_tries_par_memoire():
-    calls = []
-
-    def run(args, timeout=30):
-        calls.append(args)
-        if "list-units" in args:
-            return R("ssh.service loaded active running OpenBSD Secure Shell server\n"
-                     "snapd.service loaded active running Snap Daemon\n"
-                     "cups.service loaded failed failed CUPS\n"
-                     "apt-daily.service loaded inactive dead Daily apt\n")
-        return R("Id=ssh.service\nMemoryCurrent=5242880\nUnitFileState=enabled\n\n"
-                 "Id=snapd.service\nMemoryCurrent=52428800\nUnitFileState=enabled\n\n"
-                 "Id=cups.service\nMemoryCurrent=[not set]\nUnitFileState=disabled\n")
-    s = sv.services(run)
-    assert [x.unit for x in s] == ["cups.service", "snapd.service", "ssh.service"]          # en échec d'abord
-    assert s[1].mem_mb == 50 and s[2].enabled == "enabled" and s[1].desc == "Snap Daemon"
-
-
-def test_actions_limitees_et_services_vitaux_proteges():
+def test_demarrage_auto_limite_aux_services_scalpx():
     calls = []
     run = lambda a, timeout=30: calls.append(a) or R()                                      # noqa: E731
-    assert sv.action("ssh.service", "stop", run)[0] is False and not calls                 # SSH : jamais arrêté
-    assert sv.action("scalpx-bot.service", "disable", run)[0] is False
-    assert sv.action("x; rm -rf /", "stop", run)[0] is False
-    assert sv.action("snapd.service", "format", run)[0] is False
-    assert sv.action("snapd.service", "disable", run) == (True, "fait")
-    assert calls[-1] == ["sudo", "-n", "/usr/bin/systemctl", "disable", "--now", "snapd.service"]
-    assert sv.action("ssh.service", "start", run)[0]                                        # démarrer un vital : permis
-    msg = sv.action("snapd.service", "stop", lambda a, timeout=30: R(code=1, err="sudo: a password is required"))[1]
-    assert "install.sh" in msg
+    assert sv.enable_own(run) == (True, "fait")
+    assert calls == [["sudo", "-n", "/usr/bin/systemctl", "enable", "--now", "scalpx-bot.service"],
+                     ["sudo", "-n", "/usr/bin/systemctl", "enable", "--now", "scalpx-xvfb.service"]]
+    ok, msg = sv.enable_own(lambda a, timeout=30: R(code=1, err="sudo: a password is required"))
+    assert not ok and "install.sh" in msg
 
 
 def test_libelles_des_processus_wine():

@@ -2,21 +2,46 @@
 # ScalpX — désinstallation complète (installé par install.sh dans /usr/local/sbin/scalpx-uninstall, appartient à root).
 # Lancé par le bot (🧨 Tout désinstaller) via sudo, ou à la main : sudo /usr/local/sbin/scalpx-uninstall
 # Supprime : services scalpx-bot et scalpx-xvfb, utilisateur @USER@ et TOUT son dossier (bot, BASE, comptes MT5, préfixe Wine,
-# historique), autorisations sudo et ce script. Wine, Xvfb et Python restent installés (paquets système).
-# Les positions restent chez le broker.
+# historique), autorisations sudo et scripts ScalpX. Wine, Xvfb et Python restent installés (paquets système).
+# Les positions restent chez le broker. Chaque étape est envoyée dans Telegram (le bot étant arrêté, c'est ce script qui
+# écrit, avec le token lu dans le .env avant sa suppression) et notée dans /var/log/scalpx-uninstall.log.
 set -u
 U="@USER@"
+LOG=/var/log/scalpx-uninstall.log
 if [ -z "${SCALPX_DETACHED:-}" ]; then
     # hors du service du bot : la désinstallation continue quand le bot s'arrête
     exec systemd-run --quiet --collect --unit="scalpx-uninstall-$(date +%s)" -E SCALPX_DETACHED=1 /usr/local/sbin/scalpx-uninstall
 fi
-sleep 5                                                    # laisse le bot envoyer son dernier message
-systemctl disable --now scalpx-bot.service scalpx-xvfb.service 2>/dev/null
-pkill -KILL -u "$U" 2>/dev/null
-sleep 2
+exec >>"$LOG" 2>&1
+ENVF="/home/$U/scalpx/bot/.env"
+val() { sed -n "s/^$1=//p" "$ENVF" 2>/dev/null | head -1 | tr -d '\r"'"'"' '; }
+TOK=$(val TELEGRAM_TOKEN)
+CHAT=$(val ALLOWED_CHAT_IDS); [ -n "$CHAT" ] || CHAT=$(val CHAT_ID); CHAT="${CHAT%%,*}"; CHAT="${CHAT%%;*}"
+HOST=$(hostname)
+step() {                                                  # étape : journal + message Telegram
+    echo "$(date '+%F %T') $1"
+    [ -n "$TOK" ] && [ -n "$CHAT" ] && curl -s --max-time 15 -o /dev/null "https://api.telegram.org/bot$TOK/sendMessage" \
+        --data-urlencode "chat_id=$CHAT" --data-urlencode "text=$1" -d parse_mode=HTML -d disable_notification="${2:-true}"
+}
+sleep 4                                                    # laisse le bot envoyer son dernier message
+step "🧨 <b>Désinstallation de ScalpX</b> ($HOST)
+1/5 ⏹ arrêt du bot et de l'écran virtuel…"
+systemctl disable --now scalpx-bot.service scalpx-xvfb.service
+step "2/5 🔌 arrêt des terminaux MT5 et de Wine…"
+pkill -TERM -u "$U"; sleep 5; pkill -KILL -u "$U"; sleep 2
+step "3/5 🗑 suppression des services…"
 rm -f /etc/systemd/system/scalpx-bot.service /etc/systemd/system/scalpx-xvfb.service
 systemctl daemon-reload
-id "$U" >/dev/null 2>&1 && userdel -r "$U" 2>/dev/null
+step "4/5 🗑 suppression de l'utilisateur $U et de tout son dossier (bot, BASE, comptes, Wine, historique)…"
+id "$U" >/dev/null 2>&1 && userdel -r "$U"
 rm -rf "/home/$U"
-rm -f /etc/sudoers.d/scalpx /usr/local/sbin/scalpx-uninstall /usr/local/sbin/scalpx-root-update /var/log/scalpx-root-update.log
-logger "ScalpX désinstallé"
+step "5/5 🗑 suppression des autorisations et des scripts ScalpX…"
+rm -f /etc/sudoers.d/scalpx /usr/local/sbin/scalpx-root-update /var/log/scalpx-root-update.log
+if [ -d "/home/$U" ] || id "$U" >/dev/null 2>&1; then
+    step "⚠️ Désinstallation incomplète : il reste des fichiers de $U. Journal : $LOG" false
+else
+    step "👋 <b>ScalpX est désinstallé de $HOST.</b>
+Merci pour tout ce temps ensemble. Le bot de ce serveur ne répondra plus : tu peux le supprimer dans @BotFather.
+Tes positions restent chez le broker, et tes presets t'attendent sur GitHub (☁️) pour le prochain serveur. Bonne chance ! 🍀" false
+fi
+rm -f /usr/local/sbin/scalpx-uninstall

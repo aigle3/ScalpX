@@ -1696,18 +1696,14 @@ async def test_jeton_de_sauvegarde_et_desinstallation_apres_10_s(svc, monkeypatc
     assert ctx.db.meta_get("ghb_ts")
     calls = []
     monkeypatch.setattr(sv, "uninstall", lambda run=None: calls.append(1) or (True, ""))
-    t = [1000.0]
-    import bot.router as br
-    monkeypatch.setattr(br, "_clock", lambda: t[0])
+    router.UNI_STEP_S = 0.01
     await router.on_callback("d:uni")
     await router.on_callback(f"ok:{dash.screen[1]}")
     assert await _until(lambda: dash.screen[0] == "confirm" and conf.peek(dash.screen[1]) and "Vraiment" in conf.peek(dash.screen[1]).text)
     await router.on_callback(f"ok:{dash.screen[1]}")
-    assert await _until(lambda: dash.screen[0] == "confirm" and conf.peek(dash.screen[1]) and "10 secondes" in conf.peek(dash.screen[1]).text)
-    t[0] += 3
-    await router.on_callback(f"ok:{dash.screen[1]}")                       # trop tôt : refusé, redemandé
-    assert await _until(lambda: dash.screen[0] == "confirm" and conf.peek(dash.screen[1]) is not None)
-    assert not calls
-    t[0] += 11
-    await router.on_callback(f"ok:{dash.screen[1]}")
+    assert await _until(lambda: getattr(router, "_uni", ("", 0))[1] > 0)                  # compte à rebours fini
+    assert "Bouton disponible dans <b>9</b> s" in sender.all_text()
+    assert await router.on_callback("d:unigo:mauvais") != "OK" and not calls
+    tok = router._uni[0]
+    assert await router.on_callback(f"d:unigo:{tok}") == "OK"
     assert await _until(lambda: calls == [1])

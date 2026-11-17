@@ -201,16 +201,17 @@ as_u mkdir -p "$PFX/drive_c/users/$U/AppData/Roaming/MetaQuotes/Terminal/Common/
 (cd "$BOT" && as_u "$BOT/.venv/bin/python" main.py --check) || warn "contrôle incomplet : corrige les erreurs ci-dessus puis relance ce script"
 
 # ---------------------------------------------------------------- droits limités du bot (🖥 Serveur dans Telegram)
-# Sans mot de passe, SEULEMENT : gérer un service, redémarrer le VPS, tout désinstaller. Rien d'autre en administrateur.
+# Sans mot de passe, SEULEMENT : réactiver les 2 services ScalpX au démarrage, redémarrer le VPS, mettre à jour
+# l'installation, tout désinstaller. Rien d'autre en administrateur.
 SC=/usr/bin/systemctl
 SUD=$(mktemp)
 cat > "$SUD" <<SUDEOF
 # ScalpX : commandes administrateur permises au bot (écrit par linux/install.sh)
-$U ALL=(root) NOPASSWD: $SC reboot, $SC start *, $SC stop *, $SC restart *, $SC enable *, $SC disable *, /usr/local/sbin/scalpx-uninstall "", /usr/local/sbin/scalpx-root-update ""
+$U ALL=(root) NOPASSWD: $SC reboot, $SC enable --now scalpx-bot.service, $SC enable --now scalpx-xvfb.service, /usr/local/sbin/scalpx-uninstall "", /usr/local/sbin/scalpx-root-update ""
 SUDEOF
 if visudo -cf "$SUD" >/dev/null; then
     install -m 440 -o root -g root "$SUD" /etc/sudoers.d/scalpx
-    ok "droits limités du bot installés (services, redémarrage du VPS, désinstallation)"
+    ok "droits limités du bot installés (démarrage auto, redémarrage du VPS, mise à jour, désinstallation)"
 else
     warn "règle sudo refusée par visudo : boutons 🖥 Serveur sans effet"
 fi

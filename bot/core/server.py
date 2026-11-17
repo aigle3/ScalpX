@@ -1,9 +1,9 @@
 """Bot 3.18.0 : 🖥 gestion du VPS Ubuntu depuis Telegram (Linux seulement).
 
-Lecture (sans droits) : CPU, RAM, disque, charge, température, processus les plus gourmands, services, démarrage auto.
+Lecture (sans droits) : CPU, RAM, disque, charge, température, processus les plus gourmands, démarrage auto.
 Actions (droits administrateur LIMITÉS, sans mot de passe) : l'installeur Linux écrit /etc/sudoers.d/scalpx qui autorise
-l'utilisateur du bot à lancer SEULEMENT `systemctl start|stop|restart|enable|disable <service>`, `systemctl reboot` et le
-script de désinstallation. Aucun mot de passe ne passe par Telegram. Services vitaux protégés (SSH, réseau, bot…).
+l'utilisateur du bot à lancer SEULEMENT : réactiver les deux services ScalpX au démarrage, `systemctl reboot`, la mise à
+jour root de l'installation et la désinstallation. Aucun mot de passe ne passe par Telegram.
 """
 from __future__ import annotations
 
@@ -18,20 +18,11 @@ SYSTEMCTL = "/usr/bin/systemctl"
 UNINSTALL = "/usr/local/sbin/scalpx-uninstall"
 ROOT_UPDATE = "/usr/local/sbin/scalpx-root-update"
 OWN = ("scalpx-bot.service", "scalpx-xvfb.service")
-ACTIONS = ("start", "stop", "restart", "enable", "disable")
-_RE_UNIT = re.compile(r"^[A-Za-z0-9@._:-]{1,120}\.service$")
-# jamais arrêtés / désactivés depuis Telegram : on perdrait l'accès au VPS ou le bot lui-même
-_PROTECTED = ("ssh", "sshd", "dbus", "systemd-", "networkd", "NetworkManager", "network", "resolved", "user@", "getty",
-              "polkit", "cloud-init", "netplan", "tailscaled", "wpa_supplicant") + tuple(u.removesuffix(".service") for u in OWN)
 
 
 def _run(args: list[str], timeout: float = 30) -> subprocess.CompletedProcess:
     return subprocess.run(args, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
 
-
-def protected(unit: str) -> bool:
-    name = unit.removesuffix(".service")
-    return any(name == p or name.startswith(p) for p in _PROTECTED)
 
 
 # ---------------------------------------------------------------- état du serveur
@@ -106,61 +97,16 @@ def stats(sample_s: float = 1.0, top: int = 6) -> Stats:
                  sorted(rows, key=lambda r: -r.cpu)[:top], sorted(rows, key=lambda r: -r.mem_mb)[:top])
 
 
-# ---------------------------------------------------------------- services
-@dataclass
-class Service:
-    unit: str
-    active: str           # active / failed / inactive
-    sub: str              # running / exited / dead…
-    enabled: str          # enabled / disabled / static…
-    mem_mb: float
-    desc: str
-
-
-def services(run=_run) -> list[Service]:
-    """Services chargés en cours d'exécution ou en échec, triés par mémoire (les plus gourmands d'abord)."""
-    r = run([SYSTEMCTL, "list-units", "--type=service", "--all", "--no-legend", "--plain", "--no-pager"])
-    rows = []
-    for line in (r.stdout or "").splitlines():
-        parts = line.split(None, 4)
-        if len(parts) >= 4 and parts[1] == "loaded" and (parts[3] == "running" or parts[2] == "failed"):
-            rows.append(parts + [""] * (5 - len(parts)))
-    if not rows:
-        return []
-    r = run([SYSTEMCTL, "show", *[p[0] for p in rows], "-p", "Id", "-p", "MemoryCurrent", "-p", "UnitFileState", "--no-pager"])
-    info: dict[str, dict[str, str]] = {}
-    cur: dict[str, str] = {}
-    for line in (r.stdout or "").splitlines() + [""]:
-        if not line.strip():
-            if cur.get("Id"):
-                info[cur["Id"]] = cur
-            cur = {}
-            continue
-        k, _, v = line.partition("=")
-        cur[k] = v
-    out = []
-    for unit, _, active, sub, desc in rows:
-        i = info.get(unit, {})
-        mem = i.get("MemoryCurrent", "")
-        out.append(Service(unit, active, sub, i.get("UnitFileState", "?"),
-                           int(mem) / 2**20 if mem.isdigit() and int(mem) < 2**60 else 0.0, desc.strip()))
-    return sorted(out, key=lambda s: (s.active != "failed", -s.mem_mb))
-
-
-def action(unit: str, act: str, run=_run) -> tuple[bool, str]:
-    """systemctl <act> <unit> en administrateur (sudo sans mot de passe, limité par /etc/sudoers.d/scalpx)."""
-    if act not in ACTIONS or not _RE_UNIT.match(unit):
-        return False, "action ou service invalide"
-    if act in ("stop", "disable", "restart") and protected(unit):
-        return False, "service vital protégé (accès au VPS ou bot)"
-    args = ["sudo", "-n", SYSTEMCTL, act] + (["--now"] if act in ("enable", "disable") else []) + [unit]
-    r = run(args, timeout=60)
-    if r.returncode == 0:
-        return True, "fait"
-    err = (r.stderr or r.stdout or "").strip()
-    if "password is required" in err or "a password" in err or "not allowed" in err:
-        return False, "droits administrateur non installés : relance linux/install.sh"
-    return False, err[-200:] or f"code {r.returncode}"
+# ---------------------------------------------------------------- démarrage automatique des services ScalpX
+def enable_own(run=_run) -> tuple[bool, str]:
+    """Bot et écran virtuel relancés au démarrage du VPS (sudo limité à ces deux commandes exactes)."""
+    errs = []
+    for unit in OWN:
+        r = run(["sudo", "-n", SYSTEMCTL, "enable", "--now", unit], timeout=60)
+        if r.returncode != 0:
+            err = (r.stderr or r.stdout or "").strip()
+            errs.append("droits administrateur absents : relance linux/install.sh" if "password" in err else f"{unit} : {err[-120:]}")
+    return not errs, "; ".join(errs) or "fait"
 
 
 def autostart(run=_run) -> dict[str, str]:

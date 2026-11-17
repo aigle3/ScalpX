@@ -22,7 +22,7 @@ Le script installe tout (Wine, Xvfb, Python, MT5, EA, bot, services, droits limi
 
 Ensuite tout se fait dans Telegram :
 - **🛠 Système → 🔑 Clés et jetons** : jeton de sauvegarde GitHub, healthchecks.io, jeton des mises à jour (ton message est effacé aussitôt) ;
-- **🛠 Système → 🖥 Serveur** : CPU, RAM, disque, processus, services (arrêter / désactiver), démarrage auto,
+- **🛠 Système → 🖥 Serveur** : CPU, RAM, disque, processus, démarrage auto,
   🔧 mise à jour de l'installation (droits administrateur, sans mot de passe), 🔁 redémarrage du VPS, 🧨 désinstallation complète ;
 - **♻️ Réinitialiser** : comptes et historique effacés, bot, BASE et presets gardés.
 
