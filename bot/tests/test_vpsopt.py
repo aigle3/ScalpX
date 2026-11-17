@@ -103,3 +103,20 @@ def test_preset_actif_recopie_pour_le_testeur(tmp_path):
     st.set_value("Martin", "fast", "12")                            # modification (toi ou l'optimiseur)
     assert "fast=12" in (common / EXPORT_NAME).read_text()
     assert PresetStore(tmp_path / "presets.json").export() is None  # sans dossier d'export : rien
+
+
+def test_blocage_de_la_boucle_trace_ecrite(tmp_path):
+    """Bot 3.14.2 : la surveillance de la boucle réarme une trace des fils (freeze_trace.log) à chaque tour."""
+    import asyncio
+    import faulthandler
+    from bot.app import loop_lag_watch
+
+    async def go():
+        t = asyncio.ensure_future(loop_lag_watch(0.01, tmp_path / "logs" / "freeze_trace.log"))
+        await asyncio.sleep(0.05)
+        t.cancel()
+    try:
+        asyncio.run(go())
+    finally:
+        faulthandler.cancel_dump_traceback_later()
+    assert (tmp_path / "logs" / "freeze_trace.log").exists()

@@ -204,6 +204,23 @@ def _safety_exit(delay: float, why: str) -> None:
     t.start()
 
 
+_FATAL_F = None
+
+
+def _enable_fatal_log(path: Path) -> None:
+    """Bot 3.14.2 : erreurs fatales de Python (hors exceptions) → pile de tous les fils dans `path` (fichier gardé ouvert)."""
+    global _FATAL_F
+    import faulthandler
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _FATAL_F = open(path, "a", encoding="utf-8")
+        _FATAL_F.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} démarrage pid {os.getpid()} ===\n")
+        _FATAL_F.flush()
+        faulthandler.enable(file=_FATAL_F, all_threads=True)
+    except OSError:
+        pass
+
+
 def main() -> int:
     t_start = time.monotonic()
     console = "--console" in sys.argv or sys.stdout is not None and sys.stdout.isatty()
@@ -218,6 +235,10 @@ def main() -> int:
     setup_logging(cfg, console)
     log = logging.getLogger("main")
     log.info("démarrage du processus (pid %d)", os.getpid())
+    # Bot 3.14.2 : plantage « muet » (le processus disparaît sans erreur dans les journaux, relancé par la surveillance) :
+    # une erreur fatale (violation d'accès, abandon, mémoire épuisée…) écrit désormais la pile de chaque fil dans
+    # data\logs\fatal.log, pour toute la vie du processus.
+    _enable_fatal_log(cfg.paths.data / "logs" / "fatal.log")
     # Bot 3.7.1 : démarrage resté bloqué sans aucune trace (VPS à 99 %) : si le bot n'est pas prêt au bout de 60 s,
     # la pile de chaque fil est écrite dans data\logs\startup_trace.log (toutes les 60 s) pour voir où il attend.
     import faulthandler
@@ -237,13 +258,15 @@ def main() -> int:
     if lock is None:
         log.critical("Un autre bot tourne déjà (verrou %s). Arrêt.", cfg.runtime.lock_port)
         return 3
+    # Bot 3.14.2 : le verrou répond tout de suite (avant le chargement des modules, jusqu'à 1 min sur un VPS chargé) :
+    # la surveillance ne prend plus un bot en train de démarrer pour un bot absent (relances en boucle)
+    quit_l = QuitListener(lock)
     from core.selfwatch import clear_restarting
     clear_restarting(ROOT)                          # redémarrage voulu terminé : la surveillance reprend normalement
     log.info("démarrage : verrou obtenu en %.1f s, chargement des modules…", time.monotonic() - t_start)
     from bot.app import JOB_KW, build_application
     log.info("démarrage : modules chargés en %.1f s, préparation (base, terminaux)…", time.monotonic() - t_start)
     app = build_application(cfg, lambda: make_ctx(cfg))
-    quit_l = QuitListener(lock)
     stopping = STOPPING
 
     async def j_quit(context) -> None:

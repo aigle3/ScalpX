@@ -338,16 +338,37 @@ def timed(fn):
     return run
 
 
-async def loop_lag_watch(step: float = 0.5) -> None:
+async def loop_lag_watch(step: float = 0.5, freeze_path: "Path | None" = None) -> None:
     """Détecteur de blocage : si la boucle du bot a été figée plus de SLOW_JOB_S (calcul ou accès disque fait dans la boucle),
     une ligne dit combien de temps et quelles tâches tournaient. C'est la vraie cause des « missed by » d'APScheduler."""
+    # Bot 3.14.2 : boucle figée plus de 30 s → pile de chaque fil écrite dans data\logs\freeze_trace.log (par un fil à part,
+    # pendant le blocage) : on voit enfin OÙ le bot attend ; la ligne du journal donne aussi la RAM et le CPU du VPS.
+    import faulthandler
+    freeze_f = None
+    if freeze_path is not None:
+        try:
+            freeze_path.parent.mkdir(parents=True, exist_ok=True)
+            freeze_f = open(freeze_path, "a", encoding="utf-8")
+        except OSError:
+            freeze_f = None
     while True:
+        if freeze_f is not None:
+            try:
+                faulthandler.dump_traceback_later(30, repeat=False, file=freeze_f)   # réarmé à chaque tour (0,5 s)
+            except (OSError, ValueError):
+                freeze_f = None
         t0 = time.monotonic()
         await asyncio.sleep(step)
         lag = time.monotonic() - t0 - step
         if lag > SLOW_JOB_S:
             who = ", ".join(sorted(RUNNING_JOBS)) or "aucune tâche périodique (bouton ou message Telegram ?)"
-            log.warning("boucle du bot bloquée %.1f s (en cours : %s)", lag, who)
+            try:
+                import psutil
+                vm = psutil.virtual_memory()
+                load = f" · VPS : RAM {vm.percent:.0f} % ({vm.available / 1048576:.0f} Mo libres), CPU {psutil.cpu_percent(None):.0f} %"
+            except Exception:
+                load = ""
+            log.warning("boucle du bot bloquée %.1f s (en cours : %s)%s", lag, who, load)
 JOB_KW_DAILY = {**JOB_KW, "misfire_grace_time": 300}        # tâches quotidiennes : jamais ratées pour quelques secondes de retard
 
 async def j_presets(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -580,7 +601,7 @@ async def post_init(app: Application) -> None:
     s: Services = app.bot_data["svc"]
     await app.bot.delete_my_commands()                  # aucune commande « / » : tout passe par des boutons
     app.create_task(startup(app))
-    app.create_task(loop_lag_watch())
+    app.create_task(loop_lag_watch(freeze_path=s.ctx.cfg.paths.data / "logs" / "freeze_trace.log"))
 
 
 def build_application(cfg: Config, ctx_factory) -> Application:
