@@ -14,6 +14,7 @@ la branche `stable` avance et le bot du VPS (qui ne lit QUE `stable`) propose «
 - `ea/MQL5/Presets/scalpx_v5.set` : préréglages (UTF-16 LE avec BOM).
 - `ea/version.txt` : version publiée de l'EA.
 - `INSTALL.bat`, `install.ps1`, `LISEZMOI.txt` : installation sur le VPS (Windows Server 2016, PowerShell 5.1).
+- `linux/` : installation sur un VPS Ubuntu (Wine + Xvfb + services systemd) : `install.sh` (LF, pas de CRLF), `LISEZMOI.md`.
 - `docs/CHANGELOG.md` : historique des modifications de l'EA.
 
 ## Règles
@@ -27,6 +28,6 @@ la branche `stable` avance et le bot du VPS (qui ne lit QUE `stable`) propose «
     entrée dans `docs/CHANGELOG.md`. Le VPS recompile lui-même (le .ex5 du dépôt n'est pas recopié lors des mises à jour).
   - Le message de commit commence par les versions touchées, ex. « Bot 1.2.0 : … » ou « EA 5.3.1 : … ».
   - Plateforme : un changement qui ne concerne qu'un VPS porte l'étiquette `[linux]` ou `[windows]` dans la 1re ligne
-    (ex. « Bot 3.14.0 [linux] : … ») : l'autre VPS ne se la voit pas proposer. Sans étiquette : proposée aux deux.
+    (ex. « Bot 3.15.0 [linux] : … ») : l'autre VPS ne se la voit pas proposer. Sans étiquette : proposée aux deux.
 - Le bot ne recopie jamais `.env`, `config.toml`, `data\`. Toute nouvelle option de config doit avoir une valeur par défaut dans `core/config.py`.
 - Mettre à jour `docs/CHANGELOG.md` et les tests à chaque changement ; messages de commit en français, courts (affichés dans Telegram).

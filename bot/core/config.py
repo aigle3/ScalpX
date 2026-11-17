@@ -8,16 +8,23 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 
+IS_WINDOWS = os.name == "nt"
+_MT5_ROOT = Path(r"C:\MT5") if IS_WINDOWS else Path.home() / "mt5"      # Bot 3.15.0 : Linux → ~/mt5
+
+
 def default_common_files() -> Path:
-    """%APPDATA%\\MetaQuotes\\Terminal\\Common\\Files"""
+    """%APPDATA%\\MetaQuotes\\Terminal\\Common\\Files (Linux : le même dossier dans le préfixe Wine)."""
+    if not IS_WINDOWS:
+        from mt5.wine import WineOptions, common_files
+        return common_files(WineOptions())
     appdata = os.environ.get("APPDATA", "")
     return Path(appdata) / "MetaQuotes" / "Terminal" / "Common" / "Files"
 
 
 class Paths(BaseModel):
-    base: Path = Path(r"C:\MT5\BASE")
-    instances: Path = Path(r"C:\MT5\instances")
-    archives: Path = Path(r"C:\MT5\archives")
+    base: Path = _MT5_ROOT / "BASE"
+    instances: Path = _MT5_ROOT / "instances"
+    archives: Path = _MT5_ROOT / "archives"
     common_files: Path | None = None       # None → %APPDATA%\MetaQuotes\Terminal\Common\Files
     data: Path = Path("data")              # base SQLite, logs, graphiques, verrou
 
@@ -99,7 +106,7 @@ class Update(BaseModel):
     branch: str = "main"
     settle_min: int = 2                    # un nouveau commit n'est proposé qu'après N minutes sans autre publication
     validated_only: bool = True            # ne télécharger que la branche « stable » (avancée par GitHub quand les tests passent)
-    source: str = r"C:\ScalpX\release"    # copie locale du paquet (téléchargée depuis GitHub)
+    source: str = r"C:\ScalpX\release" if IS_WINDOWS else str(Path.home() / "scalpx" / "release")   # copie locale du paquet (GitHub)
     check_s: int = 60                      # vérification toutes les N secondes
     enabled: bool = True
     cpu_free_pct: int = 30                 # Bot 3.8.2 : 30 % (70 avant) ; Bot 3.7.2 : avant de redémarrer le bot, fermer des terminaux un par un jusqu'à
@@ -130,6 +137,18 @@ class Plex(BaseModel):
     low_priority: bool = True              # serveur lancé en priorité basse (les terminaux MT5 passent avant)
 
 
+class Wine(BaseModel):
+    """Bot 3.15.0 : Linux seulement (ignoré sous Windows). MT5, MetaEditor et le testeur passent par Wine."""
+    cmd: str = "wine"                      # commande Wine
+    prefix: Path | None = None             # préfixe Wine (None → $WINEPREFIX, sinon ~/.wine)
+    display: str = ":99"                   # écran virtuel Xvfb (service scalpx-xvfb)
+    debug: str = "-all"                    # WINEDEBUG
+
+    def options(self):
+        from mt5.wine import WineOptions
+        return WineOptions(cmd=self.cmd, prefix=self.prefix, display=self.display, debug=self.debug)
+
+
 class Config(BaseModel):
     paths: Paths = Paths()
     mt5: MT5 = MT5()
@@ -142,6 +161,7 @@ class Config(BaseModel):
     backup: Backup = Backup()
     backtest: Backtest = Backtest()
     plex: Plex = Plex()
+    wine: Wine = Wine()
 
     # secrets (depuis .env, jamais depuis config.toml)
     token: str = ""
@@ -178,6 +198,9 @@ def load_config(config_path: Path, env_path: Path | None = None) -> Config:
     cfg.healthcheck_url = env.get("HEALTHCHECK_URL", os.environ.get("HEALTHCHECK_URL", "")).strip()
     chats = env.get("ALLOWED_CHAT_IDS", env.get("CHAT_ID", os.environ.get("ALLOWED_CHAT_IDS", "")))
     cfg.allowed_chats = [int(x) for x in chats.replace(";", ",").split(",") if x.strip().lstrip("-").isdigit()]
+    if not IS_WINDOWS and cfg.paths.common_files is None:      # Linux : Common\Files dans le préfixe Wine configuré
+        from mt5.wine import common_files
+        cfg.paths.common_files = common_files(cfg.wine.options())
     if not cfg.mt5.servers and cfg.mt5.default_server:
         cfg.mt5.servers = [cfg.mt5.default_server]
     return cfg

@@ -29,6 +29,8 @@ jobs:
       - name: Tests du bot
         working-directory: bot
         run: python -m pytest -q
+      - name: Syntaxe de l'installeur Linux
+        run: bash -n linux/install.sh
 
   compile-ea:
     runs-on: windows-latest
