@@ -261,6 +261,7 @@ void IoWarn(const string what)
 
 bool AFileWrite(const string name, const string content)
 {
+   if(g_btManual) return true;        // [ARCHI] 7.12.0 : testeur lancé à la main : aucun fichier écrit pour le bot
    string tmp = name + ".tmp";
    int h = FileOpen(tmp, FILE_WRITE | FILE_BIN | FILE_COMMON);
    if(h == INVALID_HANDLE) { g_ioErr = GetLastError(); return false; }
@@ -297,6 +298,7 @@ bool AFileRead(const string name, string &out)
 
 bool AFileAppend(const string name, const string line)
 {
+   if(g_btManual) return true;        // [ARCHI] 7.12.0 : testeur lancé à la main : aucun fichier écrit pour le bot
    int h = FileOpen(name, FILE_READ | FILE_WRITE | FILE_BIN | FILE_COMMON | FILE_SHARE_READ | FILE_SHARE_WRITE);
    if(h == INVALID_HANDLE) { g_ioErr = GetLastError(); return false; }
    FileSeek(h, 0, SEEK_END);

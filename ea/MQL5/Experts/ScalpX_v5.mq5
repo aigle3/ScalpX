@@ -17,7 +17,7 @@
 //|   SX_Panel.mqh     panneau d'informations dynamique              |
 //+------------------------------------------------------------------+
 #property copyright   "ScalpX"
-#property version     "7.11"
+#property version     "7.12"
 #property description "ScalpX v6.1.0 — EMA 10/20 + grille ATR + TP commun + filtres multi-timeframe, pilotage par bot central (fichiers)"
 
 // [SEUIL500] début : TEST UNIQUEMENT (test B-3 de la checklist). Décommenter pour simuler un glissement de 2.0 (devise du compte)
@@ -180,7 +180,7 @@ int OnInit()
    BtPreInit();                       // [ARCHI] 7.2.0 : backtest du bot ? (horloge simulée, identifiant bt_<id>)
    Log("Initialisation ScalpX " + SX_VERSION + " sur " + _Symbol);
    InitParams();
-   if(UseSavedParams)
+   if(UseSavedParams && !g_btManual)  // [ARCHI] 7.12.0 : testeur lancé à la main : uniquement les paramètres du test (.set)
    {
       int n = LoadParamsFrom(CfgName());
       if(n > 0) Log("Réglages restaurés depuis le fichier (" + IntegerToString(n) + " paramètres)");

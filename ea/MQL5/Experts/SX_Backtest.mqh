@@ -191,9 +191,12 @@ void BtNewsTick()
 //+------------------------------------------------------------------+
 bool BtPreInit()
 {
-   g_bt = (MQLInfoInteger(MQL_TESTER) != 0 && BacktestId != "");
+   // 7.12.0 : aussi dans le testeur MT5 lancé à la main (BacktestId vide) : même moteur (vraie stratégie : créneaux ou mode
+   // continu, objectif, seuil 500…), réglages = paramètres du test (.set), aucun fichier écrit, résultat dans le rapport MT5
+   g_bt = (MQLInfoInteger(MQL_TESTER) != 0);
    if(!g_bt) return false;
-   g_aid = "bt_" + BacktestId;
+   g_btManual = (BacktestId == "");
+   g_aid = "bt_" + (g_btManual ? "manuel" : BacktestId);
    g_btUsDst = BtHeureEteUS;
    if(BtGmtHiver != -99) g_btWinter = BtGmtHiver * 3600;
    return true;
@@ -227,8 +230,9 @@ int BtLoadParams()
 void BtInit()
 {
    if(!g_bt) return;
-   int n = BtLoadParams();
-   if(n < 0) g_btNote = "réglages du compte introuvables : valeurs par défaut de l'EA";
+   int n = g_btManual ? 0 : BtLoadParams();         // 7.12.0 : à la main : réglages = paramètres du test (.set)
+   if(g_btManual) g_btNote = "testeur MT5 lancé à la main : réglages des paramètres du test";
+   else if(n < 0) g_btNote = "réglages du compte introuvables : valeurs par défaut de l'EA";
    if(g_pVal[P_FAST] >= g_pVal[P_SLOW]) { g_pVal[P_FAST] = g_pDef[P_FAST]; g_pVal[P_SLOW] = g_pDef[P_SLOW]; }
    RebuildIndicators();                              // timeframes / périodes des réglages chargés
    g_configOK = true;
@@ -402,6 +406,11 @@ void BtOnDeal(ulong deal)
 void BtDeinit(int reason)
 {
    if(!g_bt) return;
+   if(g_btManual)                                    // 7.12.0 : résumé dans le journal du testeur (onglet Journal)
+      Log("Backtest terminé : " + IntegerToString(g_btGoals) + " objectif(s) lancé(s), " + IntegerToString(g_btWon) + " atteint(s), " +
+          IntegerToString(g_btCancel) + " annulé(s), " + IntegerToString(g_btCut) + " coupé(s), cycles 500 : " + IntegerToString(g_cycle) +
+          ", retraits " + DoubleToString(g_btWd, 2) + ", recharges " + DoubleToString(g_btDep, 2) + " (" + IntegerToString(g_btReloads) +
+          "), drawdown max " + DoubleToString(g_btMaxDD, 1) + " %, stop-out " + IntegerToString(g_btStopOuts));
    EvFlushPending();
    AFileWrite(BtFile("progress.json"), BtJson(false, 0));
    AFileWrite(BtFile("fin.json"), BtJson(true, reason));

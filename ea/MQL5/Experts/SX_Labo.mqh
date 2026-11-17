@@ -1337,7 +1337,7 @@ void LbUpdateK()
 
 void LaboInit()
 {
-   g_lbOn = g_archiOn || g_bt;                     // 7.2.0 : aussi dans le backtest du bot (mêmes scénarios, sur l'historique)
+   g_lbOn = g_archiOn || (g_bt && !g_btManual);    // 7.2.0 : aussi dans le backtest du bot ; 7.12.0 : pas dans le testeur lancé à la main
    if(!g_lbOn) return;
    for(int h = 0; h < 25; h++) { g_lbSlip[h] = 0; g_lbSlipN[h] = 0; }
    LrReset();
