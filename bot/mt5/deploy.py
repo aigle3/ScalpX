@@ -186,7 +186,7 @@ class DeployManager:
     async def _wait_new_version(self, inst: Instance, version: str, pre_etat: str | None, pre_cycle: int | None, since: float) -> tuple[bool, str]:
         """Le nouvel .ex5 tourne si un heartbeat postérieur à la relance arrive, connecté, avec état et cycle inchangés.
         La version affichée n'est pas exigée : une recompilation sans changement de version doit aussi passer."""
-        end = time.monotonic() + self.cfg.timing.verify_deploy_s
+        end = time.monotonic() + max(self.cfg.timing.verify_deploy_s, self.cfg.timing.create_timeout_s)   # Bot 3.10.2
         last = "aucun heartbeat"
         t0, shown = time.monotonic(), time.monotonic()
         while time.monotonic() < end:
@@ -279,7 +279,7 @@ class DeployManager:
             old = self.status.read(inst.id)
             self._old_ts = old.ts if old is not None else 0          # dernier heartbeat de l'ancien EA (ne doit pas compter)
             self.mgr.launch(inst)                                         # 7) sans /config (maintenance non persistée)
-            await self._step(inst, f"🚀 terminal relancé : attente du nouvel EA (au plus {self.cfg.timing.verify_deploy_s} s)")
+            await self._step(inst, f"🚀 terminal relancé : attente du nouvel EA (au plus {max(self.cfg.timing.verify_deploy_s, self.cfg.timing.create_timeout_s)} s)")
             ok, why = await self._wait_new_version(inst, version, pre_etat, pre_cycle, t0)   # 8)
             if ok:
                 self._back_s = int(time.time() - t0)
@@ -290,18 +290,11 @@ class DeployManager:
             self.db.set_desired(inst.id, DEMARRE)
             self.db.set_version(inst.id, self.last_version or version, "déploiement")
             return DeployOutcome(inst.id, "ok")
-        # 9) échec : restauration de l'ancien .ex5, relance, alerte
-        await self._step(inst, f"❌ {why} : restauration de l'ancien EA…")
-        await self.mgr.stop(inst, force=True, set_desired=None)
-        if backup and backup.is_file():
-            try:
-                self.install_ex5(inst, backup)
-            except Exception as exc:
-                log.error("restauration impossible pour %s : %s", inst.id, exc)
-        self.mgr.launch(inst)
-        await self._step(inst, "↩️ ancien EA restauré, terminal relancé")
+        # 9) échec : Bot 3.10.2, plus de retour à l'ancien EA (demandé) : le nouvel EA reste en place, le terminal n'est pas
+        # touché (il finit souvent de charger) ; compte remis « démarré » (surveillance normale), redémarrage à la main si besoin
         self.db.set_desired(inst.id, DEMARRE)
-        return DeployOutcome(inst.id, "failed", why + " — ancien .ex5 restauré")
+        await self._step(inst, f"❌ {why} : nouvel EA laissé en place — redémarre ce compte si besoin")
+        return DeployOutcome(inst.id, "failed", why + " — nouvel EA laissé en place, redémarre ce compte si besoin")
 
     # ---- série
     async def run(self, targets: list[str], progress: ProgressCb | None = None, dep_id: int | None = None) -> list[DeployOutcome]:
@@ -444,7 +437,8 @@ class DeployManager:
                 continue
             log.info("déploiement groupé %s : terminal relancé (%d/%d)", inst.label, k, len(todo))
             await show(inst.id, RUNNING, f"🚀 terminal relancé ({k}/{len(todo)}) : attente du nouvel EA")
-            deadline = time.monotonic() + self.cfg.timing.verify_deploy_s
+            # Bot 3.10.2 : au moins le délai de création (5 min) : sur un VPS chargé, un terminal met plus de 2 min à charger l'EA
+            deadline = time.monotonic() + max(self.cfg.timing.verify_deploy_s, self.cfg.timing.create_timeout_s)
             last, shown = "aucun heartbeat", time.monotonic()
             res: DeployOutcome | None = None
             while time.monotonic() < deadline:
@@ -469,23 +463,11 @@ class DeployManager:
                                                  f"(dernier signe : {last})")
                 await asyncio.sleep(1.0)
             outcomes[inst.id] = res or DeployOutcome(inst.id, "failed", f"heartbeat du nouvel EA non reçu ({last})")
-        # échecs : ancien .ex5 restauré, terminal relancé
-        bad = [i for i in stopped if outcomes[i.id].status == "failed"]
-        stagger = max(0, self.cfg.timing.launch_stagger_s)
-        for k, inst in enumerate(bad):
-            await show(inst.id, RUNNING, f"❌ {outcomes[inst.id].message} : restauration de l'ancien EA…")
-            await self.mgr.stop(inst, force=True, set_desired=None)
-            b = backups.get(inst.id)
-            if b and b.is_file():
-                try:
-                    self.install_ex5(inst, b)
-                except Exception as exc:
-                    log.error("restauration impossible pour %s : %s", inst.id, exc)
-            if k and stagger:
-                await asyncio.sleep(stagger)
-            self.mgr.launch(inst)
+        # échecs : Bot 3.10.2, plus de retour à l'ancien EA (demandé) : nouvel EA laissé en place, terminal non touché,
+        # compte remis « démarré » (surveillance normale) ; redémarrage du compte à la main si besoin
+        for inst in [i for i in stopped if outcomes[i.id].status == "failed"]:
             self.db.set_desired(inst.id, DEMARRE)
-            outcomes[inst.id].message += " — ancien .ex5 restauré"
+            outcomes[inst.id].message += " — nouvel EA laissé en place, redémarre ce compte si besoin"
             await show(inst.id, FAILED, outcomes[inst.id].message)
         dt = int(time.monotonic() - t_start)
         res = [outcomes[i.id] for i in insts]

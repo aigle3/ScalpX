@@ -412,9 +412,11 @@ async def test_deploiement_position_ouverte_en_attente(stack):
 
 
 @pytest.mark.asyncio
-async def test_deploiement_ex5_defectueux_restaure_et_stoppe(stack):
+async def test_deploiement_ex5_defectueux_laisse_le_nouvel_ea(stack):
+    """Bot 3.10.2 : plus de retour à l'ancien EA (demandé) : nouvel EA laissé en place, compte « démarré », à redémarrer à la main."""
     cfg, db, procs, status, cmdq, mgr, ea = stack
     cfg.timing.verify_deploy_s = 2
+    cfg.timing.create_timeout_s = 2
     a = seed(stack, 1, "Demo-Server 1")
     b = seed(stack, 2, "Demo-Server 1")
     publish(cfg, "5.1", "BAD-5.1")                                   # l'EA ne démarre pas (pas de heartbeat)
@@ -423,12 +425,11 @@ async def test_deploiement_ex5_defectueux_restaure_et_stoppe(stack):
         out = await DeployManager(cfg, db, mgr, status, cmdq).run([a.id, b.id])
     finally:
         await ea.stop()
-    assert [o.status for o in out] == ["failed", "failed"]            # Bot 3.7.0 : groupé, chaque compte restauré
-    assert (Path(a.folder) / "MQL5" / "Experts" / "ScalpX_v5.ex5").read_text() == "5.0"      # ancien .ex5 restauré
-    assert (Path(b.folder) / "MQL5" / "Experts" / "ScalpX_v5.ex5").read_text() == "5.0"
+    assert [o.status for o in out] == ["failed", "failed"]
     for i in (a, b):
-        assert mgr.is_running(i) and db.get(i.id).desired_state == DEMARRE and db.get(i.id).ea_version == "5.0"
-    assert all("restauré" in o.message for o in out)
+        assert (Path(i.folder) / "MQL5" / "Experts" / "ScalpX_v5.ex5").read_text() == "BAD-5.1"   # pas de restauration
+        assert mgr.is_running(i) and db.get(i.id).desired_state == DEMARRE
+    assert all("nouvel EA laissé en place" in o.message for o in out)
     assert db.deployments(1)[0]["status"] == "ECHEC"
 
 

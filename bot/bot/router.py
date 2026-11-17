@@ -820,7 +820,8 @@ class Router:
             except Exception:
                 log.debug("progression des terminaux", exc_info=True)
 
-        timeout = float(self.ctx.cfg.timing.verify_deploy_s)
+        t = self.ctx.cfg.timing
+        timeout = float(max(t.verify_deploy_s, t.create_timeout_s))   # Bot 3.10.2 : au moins 5 min (VPS chargé)
         for k, i in enumerate(insts, 1):
             name = f"<b>{esc(i.label)}</b>"
             await show(f"{name} ({k}/{n}) : {'arrêt' if verb == 'stop' else 'lancement'}…")
@@ -1610,7 +1611,7 @@ class Router:
                  "", f"{len(plan.targets)} compte(s) tournent avec l'ancien .ex5 :", esc(", ".join(names[:15]))]
         if plan.inputs_note:
             lines.append("\n" + esc(plan.inputs_note))
-        lines.append("\nMise à jour un compte à la fois, après fermeture des positions, avec retour à l'ancien .ex5 en cas d'échec.")
+        lines.append("\nEn cas d'échec, le nouvel EA reste en place : redémarre le compte concerné.")
         kb: Keyboard = [[(f"🚀 Déployer sur tous ({len(plan.targets)})", "dep:all")],
                         [("1️⃣ Un compte d'abord", "dep:one"), ("☑ Sélection", "dep:sel")],
                         [("⏰ Plus tard", "dep:close")]]
@@ -1724,7 +1725,7 @@ class Router:
         if wait:
             text += "\n⏸ Instances en attente (positions ouvertes) : relance « 🚀 Déployer l'EA » plus tard."
         if bad:
-            text += "\n❌ Échec : ancien .ex5 restauré, déploiement stoppé."
+            text += "\n❌ Échec : nouvel EA laissé en place ; redémarre le(s) compte(s) concerné(s) (fiche du compte → 🔄)."
         await self.sender.edit(self.chat_id, mid, text, None)
         detail = "\n".join(f"{view[o.iid][0]} {labels.get(o.iid, o.iid)} : {o.message or o.status}" for o in outcomes)
         await self._after_busy()
