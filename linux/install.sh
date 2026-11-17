@@ -90,8 +90,9 @@ ok "préfixe prêt (Windows 11)"
 if ! ls -d "$PFX/drive_c/Program Files (x86)/Microsoft/EdgeWebView" >/dev/null 2>&1; then
     echo "  Installation de Microsoft WebView2 (requis par l'installeur MT5)…"
     as_u curl -fsSL -o /tmp/webview2.exe "https://go.microsoft.com/fwlink/p/?LinkId=2124703" || die "téléchargement de WebView2 impossible"
-    as_u wine /tmp/webview2.exe /silent /install >/dev/null 2>&1 || true
-    as_u wineserver -w || true
+    as_u timeout 600 wine /tmp/webview2.exe /silent /install >/dev/null 2>&1 || true
+    as_u wineserver -k || true                         # services Edge restés lancés : « wineserver -w » attendrait sans fin
+    sleep 3
 fi
 ls -d "$PFX/drive_c/Program Files (x86)/Microsoft/EdgeWebView" >/dev/null 2>&1 && ok "WebView2 installé" || warn "WebView2 non détecté : l'installation de MT5 risque d'échouer"
 
