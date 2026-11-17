@@ -26,7 +26,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Dépendances (python-telegram-bot remplacé par le stub des tests)
-        run: pip install pydantic psutil matplotlib tzdata pytest
+        run: pip install pydantic psutil matplotlib tzdata cryptography pytest
       - name: Tests du bot
         working-directory: bot
         run: python -m pytest -q

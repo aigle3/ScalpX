@@ -222,7 +222,7 @@ async def h_doc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     s.router.awaiting_import = False
     s.router.awaiting_bulk = False
-    if (m.document.file_size or 0) > 200_000:
+    if (m.document.file_size or 0) > (200_000 if bulk else 20 * 2**20):   # Telegram : 20 Mo au plus pour un bot
         if bulk:
             await s.router.bulk_received("")
         else:
@@ -241,7 +241,7 @@ async def h_doc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await s.sender.delete(update.effective_chat.id, m.message_id)
     except Exception:
         pass
-    await s.router.preset_import(data.decode("utf-8-sig", errors="replace"))
+    await s.router.preset_import_file(data)                         # Bot 4.2.0 : tout fichier de sauvegarde, chiffré ou non
 
 
 async def h_cb(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -581,10 +581,11 @@ async def startup(app: Application) -> None:
     w = getattr(s.ctx.mgr.procs, "wine", None)                      # Bot 3.21.0 : choix WebView2 fait dans 🖥 Serveur
     if w is not None and s.ctx.db.meta_get("webview"):
         w.webview = s.ctx.db.meta_get("webview") == "on"
-    try:                                                            # Bot 3.19.0 : jetons manquants demandés dans Telegram
-        await s.router.ask_missing_keys()
+    try:                                                            # Bot 4.2.0 : ☁️ sauvegarde proposée si non activée
+        await s.router.offer_backup()
+        await s.router.backup_ready()                               # dépôt de sauvegarde retrouvé (ancienne installation)
     except Exception:
-        log.exception("demande des jetons manquants")
+        log.exception("sauvegarde : proposition / dépôt")
     try:
         from core import presets as cps
         gone = cps.remove_recommended(s.dash.store)                 # Bot 3.18.1 : preset « conseille » retiré (non voulu)
@@ -669,7 +670,9 @@ def build_application(cfg: Config, ctx_factory) -> Application:
     jq.run_repeating(timed(j_watchdog), interval=t.watchdog_interval_s, first=20, job_kwargs=JOB_KW)
     jq.run_repeating(timed(j_opt), interval=60, first=120, job_kwargs=JOB_KW)
     jq.run_repeating(timed(j_build), interval=20, first=40, job_kwargs=JOB_KW)
-    jq.run_repeating(timed(j_update), interval=max(20, cfg.update.check_s), first=60, job_kwargs=JOB_KW)
+    # Bot 4.2.0 : dépôt public lu sans jeton → 60 appels GitHub par heure au plus : vérification toutes les 5 min
+    upd_s = max(20, cfg.update.check_s) if cfg.github_token else max(300, cfg.update.check_s)
+    jq.run_repeating(timed(j_update), interval=upd_s, first=60, job_kwargs=JOB_KW)
     jq.run_repeating(timed(j_health), interval=60, first=15, job_kwargs=JOB_KW)
     jq.run_daily(timed(j_report), time=dtime(cfg.reports.daily_hour, 0), job_kwargs=JOB_KW_DAILY)
     if 0 <= cfg.reports.withdraw_reminder_hour <= 23:

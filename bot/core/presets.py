@@ -324,3 +324,53 @@ def parse_import(text: str) -> tuple[dict[str, dict[str, str]], int]:
     if not presets:
         raise ValueError("aucun réglage ScalpX reconnu")
     return presets, unknown
+
+
+# ---- Bot 4.2.0 : 📥 Importer accepte TOUS les fichiers de sauvegarde
+def import_text_from(blob: bytes, key_b64: str = "", password: str = "") -> str:
+    """Fichier reçu (📥 Importer, ☁️ Restaurer) → texte au format de 📤 Exporter. Formats acceptés :
+    - texte exporté (`scalpx_*.txt`, `presets.txt` de la sauvegarde GitHub) ou fichier `# preset=` du testeur ;
+    - `presets.json` du dossier data du bot ;
+    - sauvegarde complète `sauvegarde.tar.gz` (presets.json qu'elle contient) ;
+    - les mêmes chiffrés (`presets.enc`, `sauvegarde.enc`) : clé de ce serveur ou mot de passe.
+    ValueError lisible sinon (« mot de passe requis » : redemander le mot de passe)."""
+    from core import crypt
+    import io
+    import tarfile
+    if not blob:
+        raise ValueError("fichier vide")
+    if len(blob) > 60 * 2**20:
+        raise ValueError("fichier trop gros")
+    if crypt.is_encrypted(blob):
+        blob = crypt.decrypt(blob, key_b64, password)
+    if blob[:2] == b"\x1f\x8b":                                     # sauvegarde complète (tar.gz)
+        try:
+            with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tar:
+                if "presets.json" not in tar.getnames():
+                    raise ValueError("cette sauvegarde ne contient pas de presets")
+                blob = tar.extractfile("presets.json").read()
+        except (tarfile.TarError, OSError, KeyError) as exc:
+            raise ValueError(f"archive illisible : {exc}") from exc
+    try:
+        text = blob.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        try:
+            text = blob.decode("utf-16")                             # .set de MT5 (UTF-16)
+        except UnicodeDecodeError as exc:
+            raise ValueError("fichier ni texte ni sauvegarde ScalpX") from exc
+    if text.lstrip().startswith("{"):                               # presets.json
+        try:
+            d = json.loads(text)
+            pres = d.get("presets") if isinstance(d, dict) else None
+            if not isinstance(pres, dict):
+                raise ValueError
+        except ValueError as exc:
+            raise ValueError("JSON qui n'est pas un fichier de presets") from exc
+        out = [EXPORT_HEADER, ""]
+        for n, vals in pres.items():
+            if isinstance(vals, dict):
+                out.append(f"[preset={str(n)[:60]}]")
+                out += [f"{k}={v}" for k, v in vals.items() if k]
+                out.append("")
+        return "\n".join(out)
+    return text

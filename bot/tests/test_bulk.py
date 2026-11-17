@@ -8,10 +8,10 @@ from bot import bulk
 
 
 def test_lecture_du_fichier():
-    rows, errors = bulk.parse("# mes comptes\n\n52039799:mdp:avec:deux:RoboForex-Pro\r\n52039800:abc:RoboForex-ECN\n"
-                              "abc:x:Srv\n52039801:x\n52039799:autre:RoboForex-Pro\n52039802::RoboForex-Pro\n")
-    assert [(r.login, r.password, r.server) for r in rows] == [("52039799", "mdp:avec:deux", "RoboForex-Pro"),
-                                                            ("52039800", "abc", "RoboForex-ECN")]
+    rows, errors = bulk.parse("# mes comptes\n\n11110005:mdp:avec:deux:RoboForex-Pro\r\n11110006:abc:RoboForex-ECN\n"
+                              "abc:x:Srv\n11110007:x\n11110005:autre:RoboForex-Pro\n11110008::RoboForex-Pro\n")
+    assert [(r.login, r.password, r.server) for r in rows] == [("11110005", "mdp:avec:deux", "RoboForex-Pro"),
+                                                            ("11110006", "abc", "RoboForex-ECN")]
     assert len(errors) == 4 and not any("mdp" in e or "autre" in e for e in errors)      # jamais de mot de passe
     assert "ligne 5" in errors[0] and "double" in errors[2]
 

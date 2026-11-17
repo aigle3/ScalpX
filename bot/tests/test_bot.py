@@ -1450,17 +1450,17 @@ async def test_alertes_identiques_une_seule_pour_tout_le_systeme():
     n = Notifier(s, 1, hold_s=10, total=lambda: 4)
     foot = "\n🕐 13:30 (heure de France)\n⚠️ Volatilité attendue, spreads élargis possibles.\n⛔ Filtre News actif : pas de nouvelle entrée."
     news = ["🔴 USD · Core PCE m/m", "🔴 USD · Core PCE y/y", "🔴 USD · GDP q/q", "🔴 USD · GDP Sales q/q", "🔴 USD · Jobless Claims"]
-    for acc in ("37344723", "52030694", "52030697", "52030842"):
+    for acc in ("11110001", "11110002", "11110003", "11110004"):
         for x in news:
             await n.emit(Notice(acc, acc, "NOTIF", "📰 NEWS DANS 1 h 00\n━━━━━━━━━━━━━━━━━━\n" + x + foot, 1))
-    await n.emit(Notice("52030694", "52030694", "NOTIF", "🎯 Objectif atteint", 1))
+    await n.emit(Notice("11110002", "11110002", "NOTIF", "🎯 Objectif atteint", 1))
     assert await n.flush() == 0                                    # attend les messages des autres comptes
     for k in n._queued:
         n._queued[k] -= 11
     assert await n.flush() == 1
     text = s.sent[-1][1]
     assert text.count("📰 NEWS DANS 1 h 00") == 1 and all(x in text for x in news) and text.count("🕐 13:30") == 1
-    assert "🌐 Tous les comptes (4)" in text and "<b>52030694</b>\n🎯 Objectif atteint" in text
+    assert "🌐 Tous les comptes (4)" in text and "<b>11110002</b>\n🎯 Objectif atteint" in text
     # 2 comptes sur 4 : nommés ; critique : part sans attendre
     await n.emit(Notice("a", "A", "NOTIF", "⚠️ AUCUN TICK", 2))
     await n.emit(Notice("b", "B", "NOTIF", "⚠️ AUCUN TICK", 2))
@@ -1635,7 +1635,7 @@ async def test_reinitialisation_et_sauvegarde_github_depuis_le_bot(svc, monkeypa
     # ☁️ sauvegarde
     pushed = []
     monkeypatch.setattr(ghbackup, "push", lambda cfg, text, http=None: pushed.append(text) or "")
-    ctx.cfg.backup_token, ctx.cfg.update.github = "tok", "aigle3/ScalpX"
+    ctx.cfg.backup_token, ctx.cfg.backup_repo = "tok", "aigle3/scalpx-sauvegarde"
     await router.backup_presets()
     await router.backup_presets()                                          # inchangé : pas de 2e envoi
     assert len(pushed) == 1 and "[preset=Martin]" in pushed[0]
@@ -1645,22 +1645,33 @@ async def test_reinitialisation_et_sauvegarde_github_depuis_le_bot(svc, monkeypa
 
 
 async def test_jeton_de_sauvegarde_et_desinstallation_apres_10_s(svc, monkeypatch):
-    """Bot 3.18.0 : jeton envoyé par message → .env ; 🧨 trois confirmations, la dernière refusée avant 10 s."""
+    """Bot 4.2.0 : jeton envoyé → dépôt privé trouvé / créé (BACKUP_REPO) → mot de passe → BACKUP_KEY, sauvegarde
+    chiffrée ; Bot 3.18.0 : 🧨 trois confirmations, la dernière refusée avant 10 s."""
     ctx, sender, dash, router, notifier, ea, conf = svc
-    from core import envfile, ghbackup, server as sv
-    from bot import system
+    from core import crypt, envfile, fullbackup, ghbackup, server as sv
     written = {}
     monkeypatch.setattr(envfile, "set_key", lambda path, k, v: written.update({k: v}))
-    monkeypatch.setattr(ghbackup, "push", lambda cfg, text, http=None: "")
+    pushed = []
+    monkeypatch.setattr(ghbackup, "push", lambda cfg, text, http=None: pushed.append(("presets", cfg.backup_key)) or "")
+    monkeypatch.setattr(fullbackup, "push", lambda cfg, data, http=None: pushed.append(("complète", cfg.backup_key)) or "")
+    monkeypatch.setattr(ghbackup, "ensure_repo", lambda cfg, http=None: ("moi/scalpx-sauvegarde", ""))
     dash.store.put("Martin", {"fast": "12"})
-    ctx.cfg.update.github = "aigle3/ScalpX"
     await router.on_callback("d:kset:BACKUP_TOKEN")
     await router.on_text("pas un jeton")
     assert not written and not ctx.cfg.backup_token
-    await router.on_callback("d:bkt")
-    await router.on_text("github_pat_" + "A" * 40)
-    assert written == {"BACKUP_TOKEN": "github_pat_" + "A" * 40} and ctx.cfg.backup_token.startswith("github_pat_")
-    assert ctx.db.meta_get("ghb_ts")
+    await router.on_callback("d:kset:BACKUP_TOKEN")
+    await router.on_text("ghp_" + "A" * 36)
+    assert written["BACKUP_TOKEN"] == "ghp_" + "A" * 36 and written["BACKUP_REPO"] == "moi/scalpx-sauvegarde"
+    assert router.awaiting_token == "BACKUP_PASSWORD" and dash.screen[0] == "bkp"
+    await router.on_text("court")                                           # refusé : 8 caractères au moins
+    assert router.awaiting_token == "BACKUP_PASSWORD" and "BACKUP_KEY" not in written
+    await router.on_text("motdepasse-1")
+    assert ctx.cfg.backup_key and written["BACKUP_KEY"] == ctx.cfg.backup_key
+    assert crypt.decrypt(crypt.encrypt(b"ok", ctx.cfg.backup_key), password="motdepasse-1") == b"ok"
+    assert ("complète", ctx.cfg.backup_key) in pushed and ("presets", ctx.cfg.backup_key) in pushed
+    assert "motdepasse-1" not in sender.all_text()
+    text, _ = dash.render()
+    assert "moi/scalpx-sauvegarde" in text and "actif" in text
     calls = []
     monkeypatch.setattr(sv, "uninstall", lambda run=None: calls.append(1) or (True, ""))
     router.UNI_STEP_S = 0.01
@@ -1677,35 +1688,42 @@ async def test_jeton_de_sauvegarde_et_desinstallation_apres_10_s(svc, monkeypatc
 
 
 
-async def test_jetons_manquants_demandes_dans_telegram(svc):
-    """Bot 3.19.0 : l'installeur ne demande que Telegram ; les jetons GitHub absents sont demandés par le bot (1×/jour)."""
+async def test_sauvegarde_proposee_une_fois_par_jour_et_jamais(svc):
+    """Bot 4.2.0 : sauvegarde non activée → proposée (1×/jour) ; « Jamais » arrête ; jeton présent → rien."""
     ctx, sender, dash, router, notifier, ea, conf = svc
-    ctx.cfg.github_token, ctx.cfg.backup_token = "", ""
-    assert await router.ask_missing_keys() == ["GITHUB_TOKEN", "BACKUP_TOKEN"]
-    assert "Il me manque des jetons" in sender.all_text()
-    assert await router.ask_missing_keys() == []                              # déjà demandé aujourd'hui
-    ctx.cfg.github_token = "github_pat_x"
-    assert await router.ask_missing_keys(force=True) == ["BACKUP_TOKEN"]
-    ctx.cfg.backup_token = "github_pat_y"
-    assert await router.ask_missing_keys(force=True) == []
+    ctx.cfg.backup_token = ""
+    assert await router.offer_backup() and "Activer la sauvegarde sur GitHub" in sender.all_text()
+    assert not await router.offer_backup()                                    # déjà proposé aujourd'hui
+    await router.on_callback("d:bknever")
+    assert not await router.offer_backup(force=False)
+    ctx.cfg.backup_token = "ghp_x"
+    assert not await router.offer_backup(force=True)
 
 
-async def test_comptes_par_fichier_depuis_le_bot(svc, monkeypatch):
-    """Bot 3.20.0 : 📄 → texte collé → récapitulatif sans mot de passe → ✅ 2 à la fois → créations (exclusive=False)."""
+async def test_import_d_une_sauvegarde_chiffree_demande_le_mot_de_passe(svc):
+    """Bot 4.2.0 : 📥 fichier chiffré (presets.enc d'un autre serveur) → mot de passe demandé, message effacé, presets importés."""
     ctx, sender, dash, router, notifier, ea, conf = svc
-    from types import SimpleNamespace as NS
-    calls = []
+    from core import crypt, presets as ps
+    blob = crypt.encrypt(b"# ScalpX presets\n[preset=Martin]\nfast=12\n", crypt.new_key("motdepasse-1"))
+    ctx.cfg.backup_key = ""
+    await router.preset_import_file(blob)
+    assert router.awaiting_token == "IMPORT_PASSWORD" and "Martin" not in dash.store.presets
+    await router.on_text("mauvais-mdp")
+    assert router.awaiting_token == "IMPORT_PASSWORD"                          # redemandé
+    await router.on_text("motdepasse-1")
+    assert await _until(lambda: dash.store.presets.get("Martin") == {"fast": "12"})
+    assert "motdepasse-1" not in sender.all_text()
 
-    async def fake_create(login, pw, server, alias="", progress=None, keep_on_refusal=False, exclusive=True):
-        calls.append((login, pw, server, exclusive))
-        return NS(ok=True, iid=f"{login}_{server}", message="")
-    monkeypatch.setattr(ctx.creator, "create", fake_create)
-    await router.on_callback("d:bulk")
-    assert router.awaiting_bulk
-    await router.on_text("7001:mdpA:Demo-Server\n7002:mdp:B:Demo-Server\n")
-    assert not router.awaiting_bulk and "mdp" not in sender.all_text() and "2 compte(s) à créer" in sender.all_text()
-    tok = router._bulk.token
-    assert await router.on_callback(f"d:bkgo:{tok}:2") == "C'est parti"
-    assert await _until(lambda: len(calls) == 2 and "Création terminée" in sender.all_text())
-    assert sorted(calls) == [("7001", "mdpA", "Demo-Server", False), ("7002", "mdp:B", "Demo-Server", False)]
-    assert "mdp" not in sender.all_text()
+
+async def test_un_autre_bouton_annule_la_saisie_du_mot_de_passe(svc, monkeypatch):
+    """Bot 4.2.0 : 🔒 demandé puis navigation ailleurs → le texte suivant n'est jamais pris pour une clé."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    from core import envfile
+    written = {}
+    monkeypatch.setattr(envfile, "set_key", lambda path, k, v: written.update({k: v}))
+    await router.on_callback("d:bkpw")
+    assert router.awaiting_token == "BACKUP_PASSWORD"
+    await router.on_callback("s:l")
+    assert router.awaiting_token == ""
+    await router.on_text("NomDePreset1")
+    assert "BACKUP_KEY" not in written and not ctx.cfg.backup_key

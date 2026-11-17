@@ -176,9 +176,8 @@ ENVF="$BOT/.env"
 envget() { sed -n "s/^$1=//p" "$ENVF" 2>/dev/null | head -1 | tr -d '\r'; }
 umask 077; touch "$ENVF"; umask 022
 chown "$U:$U" "$ENVF"; chmod 600 "$ENVF"
-# Valeurs déjà obtenues par l'installation rapide (linux/installer.sh, qui les a demandées dans Telegram) : écrites
-# telles quelles, aucune question (et le bot ne redemande pas le jeton GitHub).
-for k in TELEGRAM_TOKEN ALLOWED_CHAT_IDS GITHUB_TOKEN; do
+# Valeurs déjà obtenues par l'installation en une ligne (linux/installer.sh) : écrites telles quelles, aucune question.
+for k in TELEGRAM_TOKEN ALLOWED_CHAT_IDS; do
     v="${!k:-}"
     if [ -n "$v" ] && [ -z "$(envget "$k")" ] && [[ "$v" =~ ^[A-Za-z0-9:_,-]+$ ]]; then echo "$k=$v" >> "$ENVF"; fi
 done
@@ -197,7 +196,7 @@ if [ -z "$chat" ]; then
     [ -n "$chat" ] || die "chat_id requis"
     echo "ALLOWED_CHAT_IDS=$chat" >> "$ENVF"
 fi
-ok ".env prêt (lisible par $U seulement) : jetons GitHub et healthchecks.io à donner dans Telegram quand le bot les demande"
+ok ".env prêt (lisible par $U seulement) : sauvegarde GitHub et healthchecks.io se règlent ensuite dans Telegram"
 
 CFG="$BOT/config.toml"
 if [ -n "$NEWCFG" ]; then                                # config.toml neuf : chemins de cet utilisateur

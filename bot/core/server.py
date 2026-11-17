@@ -53,7 +53,7 @@ class Stats:
 
 def proc_label(name: str, cmdline: list[str]) -> str:
     """Nom lisible : sous Wine les processus s'appellent « main » ou « CrBrowserMain » ; on montre l'exécutable Windows
-    et le compte (dossier de l'instance) : « terminal64 · 52039799_RoboForex_Pro », « WebView2 · 52039799_… »."""
+    et le compte (dossier de l'instance) : « terminal64 · 11110005_RoboForex_Pro », « WebView2 · 11110005_… »."""
     joined = " ".join(cmdline or [])
     m = re.search(r"([^\\/\s\"]+)\.exe\b", (cmdline or [""])[0]) if cmdline else None
     exe = m.group(1) if m else ""

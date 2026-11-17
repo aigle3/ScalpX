@@ -3,4 +3,5 @@ psutil>=5.9
 pydantic>=2.5
 matplotlib>=3.8
 tzdata>=2024.1
+cryptography>=42
 pytest>=8.0

@@ -9,7 +9,7 @@ tout passe par des fichiers dans `Common/Files` du préfixe Wine
 Telegram ⇄ bot Python ⇄ fichiers Common\Files ⇄ EA (un par terminal)
               │
               ├─ crée / lance / arrête les terminaux ~/mt5/instances/<login>_<serveur>/ (copies de ~/mt5/BASE) par Wine
-              └─ se met à jour depuis GitHub (dépôt privé, jeton en lecture seule)
+              └─ se met à jour depuis GitHub (dépôt public, branche stable, sans jeton)
 ```
 
 | Fichier (Common\Files) | Sens | Rôle |
@@ -28,7 +28,7 @@ Voir `linux/LISEZMOI.md` : `sudo bash linux/install.sh` installe tout (Wine, Xvf
 services systemd `scalpx-xvfb` et `scalpx-bot`, droits administrateur limités) et ne demande que le token Telegram et le
 chat_id. Les jetons GitHub et healthchecks.io se donnent ensuite dans Telegram (🛠 Système → 🔑 Clés et jetons).
 
-- `.env` : `TELEGRAM_TOKEN`, `ALLOWED_CHAT_IDS`, `GITHUB_TOKEN`, `BACKUP_TOKEN`, `HEALTHCHECK_URL` (jamais recopiés par les mises à jour).
+- `.env` : `TELEGRAM_TOKEN`, `ALLOWED_CHAT_IDS`, `GITHUB_TOKEN` (facultatif, dépôt public), `BACKUP_TOKEN`, `BACKUP_REPO`, `BACKUP_KEY` (clé de chiffrement dérivée du mot de passe), `HEALTHCHECK_URL` (jamais recopiés par les mises à jour).
 - `config.toml` : chemins, `[wine]` (préfixe, écran `:99`, WebView2), symbole/période, délais, `[update]`. Toute option a une valeur par défaut.
 - Production : service systemd `scalpx-bot` (`Restart=always`, `KillMode=process` : un redémarrage du bot ne ferme pas
   les terminaux). Contrôle : `.venv/bin/python main.py --check`. Journaux : `data/logs/bot.log`, `compile.log`, `crash.log`
@@ -75,7 +75,7 @@ chat_id. Les jetons GitHub et healthchecks.io se donnent ensuite dans Telegram (
 - **🛠 Système** : versions bot/EA, VPS, BASE, GitHub (et expiration du jeton), surveillance externe, dernière sauvegarde,
   ⬆ mises à jour, 🔨 compiler l'EA, 📜 journaux, 🔄 redémarrer le bot, ⏪ revenir à la version précédente.
 - **Surveillance externe** : `HEALTHCHECK_URL` (🔑 Clés et jetons, ex. healthchecks.io) reçoit un ping par minute ; s'il cesse, le service prévient.
-- **Sauvegarde** de l'historique (`scalpx.db`) chaque nuit dans `data/backups` (14 conservées) et ☁️ sauvegarde complète (base + presets) sur GitHub.
+- **Sauvegarde** de l'historique (`scalpx.db`) chaque nuit dans `data/backups` (14 conservées) et ☁️ sauvegarde complète (base + presets), chiffrée, dans un dépôt privé de l'utilisateur créé par le bot.
 - **Watchdog** : relance les terminaux DEMARRE disparus (3 fois par heure max, puis alerte) ; un arrêt volontaire n'est jamais relancé.
   Terminal vivant mais **EA muet** (plus de heartbeat) depuis `muet_restart_s` (300 s par défaut, 0 = jamais) : arrêt forcé puis relance, avec la même limite de 3 relances par heure (puis alerte « je n'insiste plus »). Les positions restent chez le broker et l'EA reprend dès son retour.
 - **🧾 Journal des actions** (🛠 Système) : tout ce qui est demandé depuis Telegram et change quelque chose (réglages, pause, objectif, fermeture, lancer/arrêter/redémarrer/supprimer un terminal) avec l'heure, le compte et le résultat ; la même action sur plusieurs comptes tient sur une ligne ; 30 jours conservés. Les simples consultations n'y figurent pas.
@@ -121,7 +121,7 @@ Avant chaque lancement, le bot vide le profil `Default` du terminal de l'instanc
 | Création : « compte non connecté » | mot de passe ou nom de serveur différent de celui de MT5 |
 | 🟠 « EA en double » | un graphique de plus porte l'EA dans l'instance |
 | Bot : « Conflit 409 » | un autre bot utilise le même token |
-| Mises à jour : « jeton GitHub refusé » | `GITHUB_TOKEN` expiré : en créer un nouveau (lecture seule) dans `.env`, puis 🔄 Redémarrer |
+| Mises à jour : « jeton GitHub refusé » | `GITHUB_TOKEN` (facultatif) expiré : 🔑 Clés et jetons → effacer ou en envoyer un nouveau |
 | Mot de passe changé chez le broker | fiche compte → **🔑 Reconnecter** |
 
 ## Développement

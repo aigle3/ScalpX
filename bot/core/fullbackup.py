@@ -10,7 +10,6 @@ de passe (MT5 garde les siens ; sur un serveur neuf, les comptes se recréent av
 """
 from __future__ import annotations
 
-import base64
 import io
 import json
 import logging
@@ -27,6 +26,7 @@ from core.config import Config
 
 log = logging.getLogger(__name__)
 PATH = "sauvegarde.tar.gz"
+PATH_ENC = "sauvegarde.enc"
 PENDING = "restauration.tar.gz"
 MAX_BYTES = 45 * 2**20                      # API GitHub : fichiers de 100 Mo au plus, base64 compris
 MEMBERS = ("scalpx.db", "presets.json", "manifeste.json")
@@ -79,49 +79,20 @@ def check(data: bytes) -> dict:
 
 
 def push(cfg: Config, data: bytes, http=None) -> str:
-    """Écrit sauvegarde.tar.gz dans le dépôt de sauvegarde ('' si OK, sinon l'erreur)."""
+    """Archive → `sauvegarde.enc` (chiffrée si BACKUP_KEY) ou `sauvegarde.tar.gz` ('' si OK, sinon l'erreur)."""
     from core import ghbackup
-    rp = ghbackup.repo(cfg)
-    if not rp:
-        return "sauvegarde GitHub non configurée (BACKUP_TOKEN)"
     if len(data) > MAX_BYTES:
         return f"sauvegarde trop grosse ({len(data) / 2**20:.0f} Mo)"
-    call = http or (lambda m, u, b=None: ghbackup._req(cfg, m, u, b))
-    url = f"{ghbackup.API}/repos/{rp}/contents/{PATH}"
-    try:
-        code, cur = call("GET", url)
-        if code not in (200, 404):
-            return ghbackup.explain(code)
-        body = {"message": f"Sauvegarde complète ({socket.gethostname()})", "content": base64.b64encode(data).decode("ascii")}
-        if code == 200 and cur.get("sha"):
-            body["sha"] = cur["sha"]
-        code, _ = call("PUT", url, body)
-        return "" if code in (200, 201) else ghbackup.explain(code)
-    except (urllib.error.URLError, OSError, ValueError) as exc:
-        return f"GitHub injoignable : {exc}"
+    if cfg.backup_key:
+        from core import crypt
+        return ghbackup.put(cfg, PATH_ENC, crypt.encrypt(data, cfg.backup_key), "Sauvegarde complète (chiffrée)", http)
+    return ghbackup.put(cfg, PATH, data, "Sauvegarde complète", http)
 
 
 def fetch(cfg: Config, http=None) -> tuple[bytes, str]:
-    """(archive, erreur) : contenu brut (Accept raw : marche au-delà de 1 Mo)."""
+    """(archive BRUTE, chiffrée ou non, erreur)."""
     from core import ghbackup
-    rp = ghbackup.repo(cfg)
-    if not rp:
-        return b"", "sauvegarde GitHub non configurée (BACKUP_TOKEN)"
-    url = f"{ghbackup.API}/repos/{rp}/contents/{PATH}"
-    if http is not None:
-        code, cur = http("GET", url)
-        return (base64.b64decode(cur.get("content", "")), "") if code == 200 else (b"", ghbackup.explain(code))
-    import urllib.request
-    from core.github import _ssl_context
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {cfg.backup_token}", "User-Agent": "scalpx-bot",
-                                               "Accept": "application/vnd.github.raw", "X-GitHub-Api-Version": "2022-11-28"})
-    try:
-        with urllib.request.urlopen(req, timeout=120, context=_ssl_context()) as r:
-            return r.read(), ""
-    except urllib.error.HTTPError as e:
-        return b"", ("aucune sauvegarde complète dans le dépôt" if e.code == 404 else ghbackup.explain(e.code))
-    except (urllib.error.URLError, OSError) as exc:
-        return b"", f"GitHub injoignable : {exc}"
+    return ghbackup.get_first(cfg, (PATH_ENC, PATH), http)
 
 
 def stage(data_dir: Path, data: bytes) -> Path:

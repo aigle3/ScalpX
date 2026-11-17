@@ -10,20 +10,20 @@ et le bot Telegram central en **service systemd**.
 ## Installation (une seule commande, aucun jeton dedans)
 Sur le serveur neuf, connecté en root (ou avec sudo) :
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aigle3/scalpx-installation/main/installer.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/aigle3/ScalpX/stable/linux/installer.sh | sudo bash
 ```
 1. Le script demande le **token du bot Telegram** et ton **chat_id** (les deux seules questions).
-2. Le bot t'écrit dans Telegram : tu lui envoies ton **jeton GitHub** (lecture du dépôt ScalpX) ; il l'efface aussitôt et
-   le garde pour les mises à jour (il ne te le redemandera pas).
+2. Aucun jeton GitHub : le dépôt ScalpX est public (installation et mises à jour sans jeton).
 3. Tout s'installe (Wine, Xvfb, Python, MT5, EA, bot, services, droits limités du bot), l'avancement s'affiche dans
    Telegram ; le paquet téléchargé est supprimé à la fin.
-4. Dans Telegram : ☁️ Restaurer (🛠 Système) puis 📄 Comptes (fichier). Le bot te demande aussi le jeton de sauvegarde.
+4. Dans Telegram, le bot propose **☁️ Activer la sauvegarde sur GitHub** (voir plus bas), puis ☁️ Restaurer (🛠 Système)
+   et 📄 Comptes (fichier) si tu repars d'une sauvegarde.
 
 Relancer l'installation (sans jeton : le bot garde toujours la dernière version téléchargée) :
 `sudo bash /home/scalpx/scalpx/release/linux/install.sh` — ou, une fois les droits du bot en place, 🛠 Système → 🔧.
 
 Ensuite tout se fait dans Telegram :
-- **🛠 Système → 🔑 Clés et jetons** : jeton de sauvegarde GitHub, healthchecks.io, jeton des mises à jour (ton message est effacé aussitôt) ;
+- **🛠 Système → 🔑 Clés et jetons** : jeton de sauvegarde GitHub, healthchecks.io, jeton des mises à jour (facultatif ; ton message est effacé aussitôt) ;
 - **🛠 Système → 🖥 Serveur** : CPU, RAM, disque, processus, démarrage auto,
   🔧 mise à jour de l'installation (droits administrateur, sans mot de passe), 🔁 redémarrage du VPS, 🧨 désinstallation complète ;
 - **🖥 Serveur → ♻️ Réinitialiser** : comptes et historique effacés, bot, BASE et presets gardés ;
@@ -53,12 +53,19 @@ sudo -u scalpx bash -c 'cd ~/scalpx/bot && .venv/bin/python main.py --check'   #
 - Redémarrage du bot (mise à jour, bouton 🔄) : le bot s'arrête et systemd le relance. Les terminaux continuent de tourner.
 - Le VPS redémarre : Xvfb puis le bot démarrent seuls, et le bot relance les terminaux.
 
-## Sauvegarde sur GitHub
-Dépôt privé `scalpx-sauvegarde` + jeton fine-grained limité à ce dépôt (Contents : Read and write), envoyé au bot
-par 🔑 Clés et jetons → BACKUP_TOKEN.
-- presets réécrits à chaque changement (💾 Presets → ☁️ Restaurer depuis GitHub) ;
-- sauvegarde complète chaque nuit (historique, optimiseur, presets ; 🛠 Système → ☁️ Restaurer sur un serveur neuf,
-  puis 📄 pour recréer les comptes : leur historique est repris).
+## Sauvegarde sur GitHub (privée, sur TON compte, chiffrée)
+🛠 Système → ☁️ Sauvegarde GitHub, ou le bouton ✅ Activer proposé après l'installation :
+1. Crée un **jeton classique** (github.com → Settings → Developer settings → Personal access tokens → Tokens (classic),
+   case **repo**) et envoie-le au bot (message effacé aussitôt).
+2. Le bot crée le dépôt **privé** `<ton-compte>/scalpx-sauvegarde` (ou le reprend ; si le nom est pris par un dépôt
+   public, il essaie `scalpx-sauvegarde-2`… `-6`). Variante : crée toi-même un dépôt privé et donne un jeton
+   fine-grained limité à ce dépôt (Contents : Read and write).
+3. Il demande un **mot de passe** (8 caractères au moins) : les sauvegardes sont chiffrées (AES-256-GCM). Le mot de
+   passe n'est jamais gardé ; sans lui, la sauvegarde est illisible.
+- presets réécrits à chaque changement (`presets.enc`) ; sauvegarde complète chaque nuit (`sauvegarde.enc`) ;
+- 📥 Importer accepte tous ces fichiers (chiffrés ou non, texte, presets.json, sauvegarde complète) : le mot de passe
+  est demandé si besoin ;
+- serveur neuf : même jeton → 🛠 Système → ☁️ Restaurer → mot de passe, puis 📄 pour recréer les comptes.
 
 ## Sécurité
 Ferme l'accès SSH par mot de passe (clé uniquement) et n'ouvre aucun autre port : le bot n'en a pas besoin (il contacte

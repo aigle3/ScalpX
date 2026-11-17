@@ -160,6 +160,9 @@ class Dashboard:
             return self._render_actions()
         if kind == "rpt":
             return self._render_reports()
+        if kind == "bkp":                                   # Bot 4.2.0 : ☁️ sauvegarde GitHub
+            from .system import backup_screen
+            return backup_screen(self.ctx, self._flash_text())
         if kind == "key":                                   # Bot 3.18.0 : 🔑 clés et jetons
             from .system import keys_screen
             return keys_screen(self.ctx, self._flash_text())

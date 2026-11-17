@@ -48,17 +48,47 @@ def test_archive_refusee(tmp_path):
 
 
 def test_envoi_et_lecture_github(tmp_path, cfg):
-    cfg.backup_token, cfg.update.github = "tok", "aigle3/ScalpX"
+    cfg.backup_token, cfg.backup_repo = "tok", "aigle3/scalpx-sauvegarde"
     db = _db(tmp_path / "s.db", tmp_path)
     data = fb.build(db, tmp_path)
     store = {}
 
     def http(method, url, body=None):
-        assert url.endswith("/repos/aigle3/scalpx-sauvegarde/contents/sauvegarde.tar.gz")
+        assert "/repos/aigle3/scalpx-sauvegarde/contents/sauvegarde." in url
+        name = url.rsplit("/", 1)[1]
         if method == "GET":
-            return (200, {"sha": "s", "content": base64.b64encode(store["d"]).decode()}) if "d" in store else (404, {})
-        store["d"] = base64.b64decode(body["content"])
+            return (200, {"sha": "s", "content": base64.b64encode(store[name]).decode()}) if name in store else (404, {})
+        store[name] = base64.b64decode(body["content"])
         return 201, {}
-    assert fb.push(cfg, data, http) == "" and store["d"] == data
+    assert fb.push(cfg, data, http) == "" and store["sauvegarde.tar.gz"] == data
     got, err = fb.fetch(cfg, http)
     assert err == "" and got == data
+    from core import crypt, presets as ps                              # chiffrée : .enc lu en premier, illisible sans clé
+    cfg.backup_key = crypt.new_key("motdepasse-1")
+    assert fb.push(cfg, data, http) == ""
+    got, err = fb.fetch(cfg, http)
+    assert crypt.is_encrypted(got) and crypt.decrypt(got, password="motdepasse-1") == data
+    assert fb.check(crypt.decrypt(got, cfg.backup_key))["comptes"] == 1
+
+
+def test_importer_accepte_tous_les_formats_de_sauvegarde(tmp_path):
+    """Bot 4.2.0 : 📥 Importer lit le texte exporté, presets.txt / presets.enc de GitHub, presets.json et la sauvegarde
+    complète (tar.gz ou .enc) : les presets reviennent à l'identique."""
+    from core import crypt, presets as ps
+    st = ps.PresetStore(tmp_path / "presets.json")
+    st.put("Martin", {"fast": "12", "lot": "0.02"})
+    st.put("🧩 Base avant optimisation", {"fast": "9"})
+    want = {"Martin": {"fast": "12", "lot": "0.02"}, "🧩 Base avant optimisation": {"fast": "9"}}
+    txt = ps.export_text(st, st.names()).encode("utf-8")
+    db = _db(tmp_path / "s.db", tmp_path)
+    full = fb.build(db, tmp_path)
+    key = crypt.new_key("motdepasse-1")
+    for blob in (txt, (tmp_path / "presets.json").read_bytes(), full,
+                 crypt.encrypt(txt, key), crypt.encrypt(full, key)):
+        text = ps.import_text_from(blob, key_b64=key) if crypt.is_encrypted(blob) else ps.import_text_from(blob)
+        assert ps.parse_import(text)[0] == want
+    with pytest.raises(ValueError, match="mot de passe requis"):
+        ps.import_text_from(crypt.encrypt(txt, key))
+    assert ps.parse_import(ps.import_text_from(crypt.encrypt(txt, key), password="motdepasse-1"))[0] == want
+    with pytest.raises(ValueError):
+        ps.parse_import(ps.import_text_from(b"\x00\x01binaire"))

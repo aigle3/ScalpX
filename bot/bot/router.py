@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 
 # Bot 3.18.0 : clés de .env saisies depuis Telegram : nom → (attribut de Config, description, format accepté)
 SECRETS = {
-    "GITHUB_TOKEN": ("github_token", "jeton GitHub de lecture des mises à jour, github_pat_…", r"(github_pat_[A-Za-z0-9_]{20,255}|ghp_[A-Za-z0-9]{30,255})"),
+    "GITHUB_TOKEN": ("github_token", "facultatif (dépôt public) : jeton GitHub de lecture, mises à jour vérifiées chaque minute au lieu de 5", r"(github_pat_[A-Za-z0-9_]{20,255}|ghp_[A-Za-z0-9]{30,255})"),
     "BACKUP_TOKEN": ("backup_token", "jeton GitHub de sauvegarde des presets, github_pat_…", r"(github_pat_[A-Za-z0-9_]{20,255}|ghp_[A-Za-z0-9]{30,255})"),
     "HEALTHCHECK_URL": ("healthcheck_url", "adresse https://hc-ping.com/…", r"https://[A-Za-z0-9.-]+(/[A-Za-z0-9._~/-]*)?"),
 }
@@ -56,6 +56,7 @@ class Router:
         self.awaiting_preset: tuple[str, str] | None = None   # (compte modèle, preset remplacé) : nom attendu (texte)
         self.awaiting_goal: str | None = None               # compte (ou ALL_ID) dont on attend l'objectif (message texte)
         self.awaiting_import = False                        # Bot 3.16.0 : fichier / texte de presets attendu (📥 Importer)
+        self._pending_import = self._pending_restore = b""   # Bot 4.2.0 : fichier chiffré en attente de son mot de passe
         self.awaiting_token = ""                            # Bot 3.18.0 : clé de .env attendue (message texte), ex. BACKUP_TOKEN
         self.awaiting_bulk = False                          # Bot 3.20.0 : fichier de comptes attendu (📄)
         self._bulk = None                                   # lot de comptes en attente de confirmation (mots de passe en mémoire)
@@ -88,6 +89,11 @@ class Router:
         """Traite un callback_data. Renvoie un court texte pour query.answer()."""
         parts = data.split(":")
         head = parts[0]
+        if self.awaiting_token and data not in ("d:bkp", "d:key", "d:noop"):
+            # Bot 4.2.0 : tout autre bouton annule la saisie attendue (jeton / mot de passe) : un texte tapé plus tard
+            # (nom de preset…) ne doit jamais devenir un jeton ou une clé de chiffrement.
+            self.awaiting_token = ""
+            self._pending_import = self._pending_restore = b""
         try:
             if head == "d":
                 return await self._dash_cb(parts, message_id)
@@ -194,6 +200,26 @@ class Router:
             return await self._uninstall_cb(sub, p)
         elif sub in ("srv", "sva", "rbt", "uni", "rup", "wvw"):  # Bot 3.18.0 : 🖥 Serveur (Linux)
             return await self._server_cb(sub, p)
+        elif sub == "bkp":                                      # Bot 4.2.0 : ☁️ écran Sauvegarde
+            self.dash.goto("bkp")
+        elif sub == "bknever":
+            self.ctx.db.meta_set("backup_never", "1")
+            self.dash.flash("☁️ Je ne te le proposerai plus : 🛠 Système → ☁️ Sauvegarde pour l'activer plus tard.")
+        elif sub == "bkpw":                                     # mot de passe de chiffrement (nouveau ou changé)
+            self.awaiting_token = "BACKUP_PASSWORD"
+            self.dash.goto("bkp")
+            self.dash.flash("🔒 Envoie un <b>mot de passe</b> (8 caractères au moins). Ton message est effacé ; "
+                            "note-le bien : sans lui, la sauvegarde est illisible.", 300)
+        elif sub == "bkplain":
+            self.awaiting_token = ""
+            self.ctx.db.meta_set("backup_plain", "1")
+            self.dash.goto("bkp")
+            self.dash.flash("☁️ Sauvegarde sans chiffrement (dépôt privé) : 🔒 Chiffrer reste possible ici.")
+            self._bg(self._after_plain())
+            return ""
+        elif sub == "bkoff":                                    # désactiver : jeton et clé retirés du .env (dépôt gardé)
+            return await self._ask("☁️ <b>Désactiver la sauvegarde ?</b>\nLe bot oublie le jeton, le dépôt et la clé ; le dépôt "
+                                   "GitHub et ses sauvegardes restent sur ton compte.", self._backup_off, ("bkp",), "🚫 Désactiver")
         elif sub == "fbk":                                      # Bot 3.21.0 : ☁️ sauvegarder maintenant
             self.dash.flash("⏳ Sauvegarde complète en cours…")
             await self.dash.refresh(force=True)
@@ -444,7 +470,10 @@ class Router:
             return
         if self.awaiting_token:
             key, self.awaiting_token = self.awaiting_token, ""
-            await self.set_secret(key, text.strip())
+            if key in SECRETS:
+                await self.set_secret(key, text.strip())
+            else:                                               # Bot 4.2.0 : mots de passe (chiffrement, import, restauration)
+                await self._password_received(key, text.strip())
             return
         if self.awaiting_import:
             self.awaiting_import = False
@@ -1128,23 +1157,6 @@ class Router:
         self._bg(go())
         return "C'est parti"
 
-    async def ask_missing_keys(self, force: bool = False) -> list[str]:
-        """Bot 3.19.0 : au démarrage, jetons absents du .env → demandés ici (une fois par jour au plus). L'installeur ne
-        demande que le token Telegram et le chat_id ; tout le reste passe par Telegram. Renvoie les clés demandées."""
-        cfg, db = self.ctx.cfg, self.ctx.db
-        missing = [k for k in ("GITHUB_TOKEN", "BACKUP_TOKEN") if not getattr(cfg, SECRETS[k][0], "")]
-        today = time.strftime("%Y-%m-%d")
-        if not missing or (not force and db.meta_get("keys_asked") == today):
-            return []
-        db.meta_set("keys_asked", today)
-        what = {"GITHUB_TOKEN": "mises à jour du bot et de l'EA (jeton de lecture du dépôt ScalpX)",
-                "BACKUP_TOKEN": "sauvegarde automatique de tes presets (jeton d'écriture du dépôt scalpx-sauvegarde)"}
-        await self.sender.send(self.chat_id, "🔑 <b>Il me manque " + ("un jeton" if len(missing) == 1 else "des jetons") + "</b>\n"
-                               + "\n".join(f"• <b>{k}</b> : {what[k]}" for k in missing)
-                               + "\nTouche le bouton, puis envoie le jeton : il est enregistré et ton message effacé aussitôt.",
-                               [[(f"➕ {k}", f"d:kset:{k}")] for k in missing] + [[("⏰ Plus tard", "d:close")]], False)
-        return missing
-
     async def set_secret(self, key: str, value: str) -> None:
         """Clé de .env reçue par message (déjà effacé de la conversation) : vérifiée, écrite, prise en compte tout de suite."""
         from core import envfile
@@ -1167,13 +1179,31 @@ class Router:
         self.ctx.db.add_action("", f"{key} {'RETIRÉ' if clear else 'ENREGISTRÉ'}", True, "")
         msg = f"✅ {key} {'retiré' if clear else 'enregistré'}."
         if key == "BACKUP_TOKEN" and value:
-            self.ctx.db.meta_set("ghb_hash", "")                # sauvegarde refaite tout de suite avec le nouveau jeton
+            from core import envfile as _ef
+            self.ctx.cfg.backup_repo = ""                       # nouveau jeton : dépôt retrouvé ou créé sur SON compte
+            try:
+                await asyncio.to_thread(_ef.set_key, BOT_ROOT / ".env", "BACKUP_REPO", "")
+            except (OSError, ValueError):
+                pass
+            self.ctx.db.meta_set("ghb_hash", "")
             self.ctx.db.meta_set("ghb_err", "")
-            self.dash.flash("⏳ Jeton enregistré : première sauvegarde des presets…")
+            self.dash.goto("bkp")
+            self.dash.flash("⏳ Jeton enregistré : recherche ou création du dépôt privé de sauvegarde…")
             await self.dash.refresh(force=True)
-            await self.backup_presets()
-            err = self.ctx.db.meta_get("ghb_err")
-            msg = f"❌ Jeton enregistré mais sauvegarde refusée : {esc(err)}" if err else "✅ Jeton enregistré, presets sauvegardés sur GitHub."
+            if not await self.backup_ready():
+                msg = f"❌ {esc(self.ctx.db.meta_get('ghb_err') or 'dépôt de sauvegarde indisponible')}"
+            elif not self.ctx.cfg.backup_key and self.ctx.db.meta_get("backup_plain") != "1":
+                self.awaiting_token = "BACKUP_PASSWORD"
+                msg = (f"✅ Dépôt privé <b>{esc(self.ctx.cfg.backup_repo)}</b> prêt.\n🔒 Envoie maintenant un <b>mot de passe</b> "
+                       "(8 caractères au moins) pour chiffrer la sauvegarde — ou touche « Sans chiffrement ».")
+            else:
+                await self.backup_presets()
+                await self.full_backup()
+                err = self.ctx.db.meta_get("ghb_err") or self.ctx.db.meta_get("fbk_err")
+                msg = f"❌ {esc(err)}" if err else f"✅ Sauvegarde active dans <b>{esc(self.ctx.cfg.backup_repo)}</b>."
+            self.dash.flash(msg, 300)
+            await self.dash.refresh(force=True)
+            return
         elif key == "GITHUB_TOKEN":
             self.ctx.db.meta_set("gh_err", "")
             msg += " Les mises à jour sont vérifiées à la prochaine minute."
@@ -1352,8 +1382,8 @@ class Router:
         from core import fullbackup, ghbackup
         from core.version import bot_version
         cfg, db = self.ctx.cfg, self.ctx.db
-        if not ghbackup.repo(cfg):
-            return "sauvegarde GitHub non configurée : 🔑 Clés et jetons → BACKUP_TOKEN"
+        if not await self.backup_ready():
+            return db.meta_get("ghb_err") or "sauvegarde GitHub non activée : 🛠 Système → ☁️ Sauvegarde"
         try:
             data = await asyncio.to_thread(fullbackup.build, db, cfg.paths.data, bot_version())
             err = await asyncio.to_thread(fullbackup.push, cfg, data)
@@ -1371,13 +1401,32 @@ class Router:
         log.info("sauvegarde complète envoyée sur GitHub (%d Ko)", len(data) // 1024)
         return ""
 
-    async def _full_restore_ask(self) -> None:
-        from core import fullbackup
-        self.dash.goto("sys")
-        self.dash.flash("⏳ Téléchargement de la sauvegarde complète…")
-        await self.dash.refresh(force=True)
-        data, err = await asyncio.to_thread(fullbackup.fetch, self.ctx.cfg)
-        man = {}
+    async def _full_restore_ask(self, password: str = "", blob: bytes = b"") -> None:
+        from core import crypt, fullbackup
+        self.dash.goto("bkp")
+        if not blob:
+            if not await self.backup_ready():
+                self.dash.flash("❌ Sauvegarde GitHub non activée : ☁️ Sauvegarde → 🔑 jeton d'abord.")
+                await self.dash.refresh(force=True)
+                return
+            self.dash.flash("⏳ Téléchargement de la sauvegarde complète…")
+            await self.dash.refresh(force=True)
+            blob, err = await asyncio.to_thread(fullbackup.fetch, self.ctx.cfg)
+        else:
+            err = ""
+        data, man = b"", {}
+        if not err:
+            try:
+                data = crypt.decrypt(blob, self.ctx.cfg.backup_key, password)
+            except ValueError as exc:
+                if "requis" in str(exc) or (password and "incorrect" in str(exc)):
+                    self._pending_restore = blob
+                    self.awaiting_token = "RESTORE_PASSWORD"
+                    self.dash.flash(("❌ Mot de passe incorrect. " if password else "")
+                                    + "🔒 Sauvegarde chiffrée : envoie son <b>mot de passe</b> (ton message est effacé).", 300)
+                    await self.dash.refresh(force=True)
+                    return
+                err = str(exc)
         if not err:
             try:
                 man = await asyncio.to_thread(fullbackup.check, data)
@@ -1398,31 +1447,150 @@ class Router:
                         f"bot {esc(str(man.get('version_bot', '?')))}, {man.get('comptes', 0)} compte(s).\n"
                         "Remplace l'historique, l'état de l'optimiseur et les presets de ce serveur (les actuels sont gardés "
                         "à côté). Les comptes sans terminal ici seront archivés : recrée-les avec 📄 ou ➕ (historique repris).",
-                        go, ("sys",), "☁️ Restaurer")
+                        go, ("bkp",), "☁️ Restaurer")
 
     async def preset_restore_github(self) -> None:
         from core import ghbackup
         self.dash.goto("psl")
+        if not await self.backup_ready():
+            self.dash.flash("❌ Sauvegarde GitHub non activée : 🛠 Système → ☁️ Sauvegarde.")
+            await self.dash.refresh(force=True)
+            return
         self.dash.flash("⏳ Lecture de la sauvegarde GitHub…")
         await self.dash.refresh(force=True)
-        text, err = await asyncio.to_thread(ghbackup.fetch, self.ctx.cfg)
+        blob, err = await asyncio.to_thread(ghbackup.fetch, self.ctx.cfg)
         if err:
             self.dash.flash(f"❌ {esc(err)}")
             await self.dash.refresh(force=True)
             return
+        await self.preset_import_file(blob)
+
+    async def preset_import_file(self, blob: bytes, password: str = "") -> None:
+        """Bot 4.2.0 : 📥 n'importe quel fichier de sauvegarde (texte, presets.json, sauvegarde complète, chiffrés)."""
+        try:
+            text = await asyncio.to_thread(pui.ps.import_text_from, blob, self.ctx.cfg.backup_key, password)
+        except ValueError as exc:
+            self.dash.goto("psl")
+            if "mot de passe" in str(exc):
+                self._pending_import = blob
+                self.awaiting_token = "IMPORT_PASSWORD"
+                self.dash.flash(("❌ Mot de passe incorrect. " if password else "")
+                                + "🔒 Fichier chiffré : envoie son <b>mot de passe</b> (ton message est effacé).", 300)
+            else:
+                self.dash.flash(f"❌ Import impossible : {esc(str(exc))}.")
+            await self.dash.refresh(force=True)
+            return
         await self.preset_import(text)
 
+    # ---- Bot 4.2.0 : ☁️ sauvegarde GitHub propre à l'utilisateur (dépôt privé créé par le bot, chiffrement)
+    async def backup_ready(self) -> bool:
+        """Jeton présent → dépôt connu (sinon trouvé ou créé, puis noté dans .env). Jamais d'exception."""
+        from core import envfile, ghbackup
+        from .system import BOT_ROOT
+        cfg = self.ctx.cfg
+        if not cfg.backup_token:
+            return False
+        if ghbackup.repo(cfg):
+            return True
+        name, err = await asyncio.to_thread(ghbackup.ensure_repo, cfg)
+        if err:
+            if err != self.ctx.db.meta_get("ghb_err"):
+                self.ctx.db.meta_set("ghb_err", err)
+            return False
+        cfg.backup_repo = name
+        try:
+            await asyncio.to_thread(envfile.set_key, BOT_ROOT / ".env", "BACKUP_REPO", name)
+        except (OSError, ValueError):
+            log.exception("BACKUP_REPO non écrit dans .env")
+        self.ctx.db.meta_set("ghb_err", "")
+        self.ctx.db.add_action("", "DÉPÔT DE SAUVEGARDE", True, name)
+        return True
+
+    async def offer_backup(self, force: bool = False) -> bool:
+        """Au démarrage (une fois par jour) : sauvegarde non activée → proposition. « Jamais » arrête les propositions."""
+        db = self.ctx.db
+        today = time.strftime("%Y-%m-%d")
+        if self.ctx.cfg.backup_token or (not force and (db.meta_get("backup_never") == "1" or db.meta_get("backup_offer") == today)):
+            return False
+        db.meta_set("backup_offer", today)
+        await self.sender.send(self.chat_id, "☁️ <b>Activer la sauvegarde sur GitHub ?</b>\nTes presets (Martin…), l'historique "
+                               "et l'état de l'optimiseur, dans un dépôt <b>privé</b> de TON compte GitHub, chiffrés par ton mot "
+                               "de passe. Indispensable pour repartir sur un nouveau serveur.",
+                               [[("✅ Activer", "d:bkp")], [("⏰ Plus tard", "d:close"), ("🚫 Jamais", "d:bknever")]], False)
+        return True
+
+    async def _after_plain(self) -> None:
+        await self.backup_presets()
+        await self.full_backup()
+        await self.dash.refresh(force=True)
+
+    async def _backup_off(self) -> None:
+        from core import envfile
+        from .system import BOT_ROOT
+        for k in ("BACKUP_TOKEN", "BACKUP_REPO", "BACKUP_KEY"):
+            try:
+                await asyncio.to_thread(envfile.set_key, BOT_ROOT / ".env", k, "")
+            except (OSError, ValueError):
+                log.exception("%s non effacé du .env", k)
+        cfg = self.ctx.cfg
+        cfg.backup_token = cfg.backup_repo = cfg.backup_key = ""
+        for k in ("ghb_hash", "ghb_err", "fbk_err", "backup_plain"):
+            self.ctx.db.meta_set(k, "")
+        self.ctx.db.meta_set("backup_never", "1")
+        self.ctx.db.add_action("", "SAUVEGARDE DÉSACTIVÉE", True, "")
+        self.dash.goto("bkp")
+        self.dash.flash("☁️ Sauvegarde désactivée.")
+        await self.dash.refresh(force=True)
+
+    async def _password_received(self, kind: str, pw: str) -> None:
+        """Mot de passe reçu (message déjà effacé) : chiffrement de la sauvegarde, import ou restauration chiffrés."""
+        from core import crypt, envfile
+        from .system import BOT_ROOT
+        if kind == "IMPORT_PASSWORD":
+            blob, self._pending_import = self._pending_import, b""
+            await self.preset_import_file(blob, pw)
+            return
+        if kind == "RESTORE_PASSWORD":
+            blob, self._pending_restore = self._pending_restore, b""
+            await self._full_restore_ask(pw, blob)
+            return
+        # BACKUP_PASSWORD : nouvelle clé de chiffrement
+        self.dash.goto("bkp")
+        if len(pw) < 8:
+            self.awaiting_token = "BACKUP_PASSWORD"
+            self.dash.flash("❌ 8 caractères au moins. Renvoie un mot de passe.", 300)
+            await self.dash.refresh(force=True)
+            return
+        key = await asyncio.to_thread(crypt.new_key, pw)
+        del pw
+        try:
+            await asyncio.to_thread(envfile.set_key, BOT_ROOT / ".env", "BACKUP_KEY", key)
+        except (OSError, ValueError) as exc:
+            self.dash.flash(f"❌ .env non modifié : {esc(str(exc))}")
+            await self.dash.refresh(force=True)
+            return
+        self.ctx.cfg.backup_key = key
+        self.ctx.db.meta_set("ghb_hash", "")
+        self.ctx.db.add_action("", "SAUVEGARDE CHIFFRÉE", True, "")
+        self.dash.flash("⏳ 🔒 Chiffrement activé : nouvelle sauvegarde complète…")
+        await self.dash.refresh(force=True)
+        err = await self.full_backup()
+        await self.backup_presets()
+        self.dash.flash("✅ Sauvegarde chiffrée envoyée. <b>Note ce mot de passe</b> : sans lui, impossible de restaurer sur un "
+                        "nouveau serveur." if not err else f"❌ {esc(err)}")
+        await self.dash.refresh(force=True)
+
     async def backup_presets(self) -> None:
-        """Toutes les 5 min : presets changés → presets.txt réécrit sur GitHub (une alerte par problème)."""
+        """Toutes les 5 min : presets changés → réécrits sur GitHub (chiffrés si activé ; une alerte par problème)."""
         from core import ghbackup
-        if not ghbackup.repo(self.ctx.cfg):
+        if not await self.backup_ready():
             return
         store = self.dash.store
         names = store.names()
         if not names:
             return
         text = pui.ps.export_text(store, names)
-        h = ghbackup.digest(text)
+        h = ghbackup.digest(text + ("|chiffré" if self.ctx.cfg.backup_key else ""))
         db = self.ctx.db
         if h == db.meta_get("ghb_hash"):
             return
