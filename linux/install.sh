@@ -21,10 +21,18 @@ SETUP_URLS="${MT5_SETUP_URL:-https://download.mql5.com/cdn/web/metaquotes.softwa
 PKG="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"          # racine du paquet (dossiers bot/, ea/, linux/)
 AUTO=""; [ "${1:-}" = "--auto" ] && AUTO=1                         # --auto : relancé par le bot (🔧), aucune question
 
-step() { echo; echo -e "\e[36m=== $*\e[0m"; }
+# Suivi dans Telegram (si le .env du bot a déjà le token et le chat_id : relance, 🔧) : chaque étape, les erreurs, la fin.
+tg() {
+    local f="/home/${SCALPX_USER:-scalpx}/scalpx/bot/.env" tk ch
+    tk=$(sed -n 's/^TELEGRAM_TOKEN=//p' "$f" 2>/dev/null | head -1 | tr -d '\r"'"'"' ')
+    ch=$(sed -n 's/^ALLOWED_CHAT_IDS=//p' "$f" 2>/dev/null | head -1 | tr -d '\r"'"'"' '); ch="${ch%%,*}"
+    [ -n "$tk" ] && [ -n "$ch" ] && curl -s --max-time 15 -o /dev/null "https://api.telegram.org/bot$tk/sendMessage" \
+        --data-urlencode "chat_id=$ch" --data-urlencode "text=$1" -d parse_mode=HTML -d disable_notification="${2:-true}" || true
+}
+step() { echo; echo -e "\e[36m=== $*\e[0m"; tg "🔧 Installation : $*"; }
 ok()   { echo -e "  \e[32m[OK]\e[0m $*"; }
-warn() { echo -e "  \e[33m[!]\e[0m  $*"; }
-die()  { echo -e "  \e[31m[ERREUR]\e[0m $*"; exit 1; }
+warn() { echo -e "  \e[33m[!]\e[0m  $*"; tg "⚠️ Installation : $*"; }
+die()  { echo -e "  \e[31m[ERREUR]\e[0m $*"; tg "❌ <b>Installation arrêtée</b> : $*" false; exit 1; }
 ask()  { local r=""; [ -n "$AUTO" ] || read -rp "  $1 " r </dev/tty || true; echo "$r"; }
 as_u() { sudo -u "$U" -H env WINEPREFIX="$PFX" WINEARCH=win64 DISPLAY="$DISP" WINEDEBUG=-all "$@"; }
 
@@ -243,6 +251,7 @@ sed -e "s#@USER@#$U#g" -e "s#@BOT@#$BOT#g" -e "s#@PFX@#$PFX#g" -e "s#@DISP@#$DIS
     "$PKG/linux/scalpx-bot.service" > /etc/systemd/system/scalpx-bot.service
 systemctl daemon-reload
 systemctl enable scalpx-bot.service >/dev/null
+tg "✅ <b>Installation terminée</b> ($(hostname)) : le bot redémarre (≈ 10 s)." false
 systemctl restart scalpx-bot.service
 sleep 5
 systemctl is-active --quiet scalpx-bot.service && ok "bot démarré : ouvre Telegram" || warn "bot non démarré : journalctl -u scalpx-bot -n 50"
