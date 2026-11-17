@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ScalpX — installation sur un VPS Ubuntu (22.04 ou 24.04), tout sur la même machine :
+# ScalpX — installation sur un VPS Ubuntu (22.04, 24.04 ou 26.04), tout sur la même machine :
 # Wine + écran virtuel Xvfb + MT5 (dossier BASE) + bot Telegram central (service systemd).
 #
 #   sudo bash linux/install.sh
@@ -39,12 +39,23 @@ dpkg --add-architecture i386
 apt-get update -qq
 apt-get install -y -qq ca-certificates curl wget gnupg xvfb xauth cabextract python3 python3-venv >/dev/null
 if ! command -v wine >/dev/null; then
+    # WineHQ (version récente) ; clé convertie en binaire (Ubuntu 26.04 refuse la clé texte).
+    # Dépôt absent ou refusé pour cette version d'Ubuntu : Wine d'Ubuntu à la place.
+    SRC="/etc/apt/sources.list.d/winehq-${VERSION_CODENAME}.sources"
     mkdir -pm755 /etc/apt/keyrings
-    wget -qO /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key
-    wget -qNP /etc/apt/sources.list.d/ "https://dl.winehq.org/wine-builds/ubuntu/dists/${VERSION_CODENAME}/winehq-${VERSION_CODENAME}.sources"
-    apt-get update -qq
-    apt-get install -y -qq --install-recommends winehq-stable >/dev/null
+    if wget -qO- https://dl.winehq.org/wine-builds/winehq.key | gpg --dearmor --yes -o /etc/apt/keyrings/winehq-archive.key \
+       && wget -qNP /etc/apt/sources.list.d/ "https://dl.winehq.org/wine-builds/ubuntu/dists/${VERSION_CODENAME}/winehq-${VERSION_CODENAME}.sources" \
+       && apt-get update -qq && apt-get install -y -qq --install-recommends winehq-stable >/dev/null; then
+        ok "Wine de WineHQ"
+    else
+        warn "dépôt WineHQ indisponible pour Ubuntu ${VERSION_ID} : Wine d'Ubuntu à la place"
+        rm -f "$SRC"
+        apt-get update -qq
+        apt-get install -y -qq wine >/dev/null
+        apt-get install -y -qq wine64 wine32:i386 >/dev/null 2>&1 || true     # 22.04 / 24.04 : paquets séparés
+    fi
 fi
+command -v wine >/dev/null || die "Wine non installé"
 ok "$(wine --version)"
 PY=python3
 if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))'; then

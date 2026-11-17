@@ -5,7 +5,7 @@ et le bot Telegram central en **service systemd**. Le bot, l'EA et les mises à 
 comme sous Windows.
 
 ## Prérequis
-- Ubuntu **24.04** conseillé (22.04 accepté), 64 bits, sans bureau graphique. 8 Go de RAM pour une dizaine de comptes.
+- Ubuntu **24.04 ou 26.04** (22.04 accepté), 64 bits, sans bureau graphique. 8 Go de RAM pour une dizaine de comptes.
 - Accès root (sudo).
 
 ## Installation
