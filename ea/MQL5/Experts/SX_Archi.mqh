@@ -1335,25 +1335,37 @@ void CloseOtherCharts()
 // [ARCHI] début : 7.11.0 : Market Watch réduit au symbole du robot. Chaque symbole affiché reçoit ses cotations en continu
 // (calcul et réseau inutiles, multipliés par le nombre de terminaux). Un symbole encore utilisé par MT5 (position, conversion
 // de devise, graphique) refuse d'être masqué : il reste, sans erreur. Réel seulement (jamais dans le testeur).
-void TrimMarketWatch()
+// 7.11.1 : plus fait au démarrage (OnInit) mais 60 s après, par petits lots (5 symboles par seconde) depuis le timer :
+// le démarrage de l'EA et son premier statut ne peuvent plus être retardés par un terminal encore occupé à se charger.
+ulong g_mwStartMs = 0;                // 0 = pas encore programmé
+bool  g_mwDone    = false;
+int   g_mwIdx     = -2;               // prochain symbole à essayer (on descend : masquer ne décale pas les précédents)
+int   g_mwHidden  = 0;
+void TrimMarketWatchTick()
 {
-   if(MQLInfoInteger(MQL_TESTER)) return;
-   int hidden = 0;
-   for(int i = SymbolsTotal(true) - 1; i >= 0; i--)
+   if(g_mwDone || MQLInfoInteger(MQL_TESTER)) return;
+   ulong now = GetTickCount64();
+   if(g_mwStartMs == 0) { g_mwStartMs = now + 60000; return; }
+   if(now < g_mwStartMs) return;
+   if(g_mwIdx == -2) g_mwIdx = SymbolsTotal(true) - 1;
+   for(int k = 0; k < 5 && g_mwIdx >= 0; k++, g_mwIdx--)   // 5 par seconde ; chaque symbole essayé une seule fois
    {
-      string s = SymbolName(i, true);
+      string s = SymbolName(g_mwIdx, true);
       if(s == "" || s == _Symbol) continue;
-      if(SymbolSelect(s, false)) hidden++;
+      if(SymbolSelect(s, false)) g_mwHidden++;
    }
    ResetLastError();
-   if(hidden > 0) Log("Market Watch : " + IntegerToString(hidden) + " symbole(s) masqué(s), seul " + _Symbol + " reste (moins de CPU)");
+   if(g_mwIdx < 0)
+   {
+      g_mwDone = true;
+      if(g_mwHidden > 0) Log("Market Watch : " + IntegerToString(g_mwHidden) + " symbole(s) masqué(s), seul " + _Symbol + " reste (moins de CPU)");
+   }
 }
 // [ARCHI] fin
 
 void ArchiInit()
 {
    if(!g_archiOn) return;
-   TrimMarketWatch();                 // [ARCHI] 7.11.0
    StateLoad();
    StateSave();
    // 6.2.0 : fenêtre de lancement portée de 5 à 10 min. Une seule fois par compte : l'ancienne valeur par défaut (5) passe à 10 ;
@@ -1422,6 +1434,7 @@ void ArchiTimer()
       SlotEntryTick();                   // [ARCHI] 6.6.0 : fenêtre d'entrée après le créneau
       CutTick();                         // [ARCHI] 7.0.0 : coupure de l'objectif
       RepriseRetraitTimer();             // [ARCHI] 7.8.5 : reprise après retrait détectée aussi sans tick (marché fermé le week-end)
+      TrimMarketWatchTick();             // [ARCHI] 7.11.1 : Market Watch réduit, 60 s après le démarrage, par petits lots
       //--- cohérence avec le panneau / l'ancien code : arrêt manuel <-> PAUSE
       if(g_state == ST_ACTIF && g_stoppedManually) SetState(ST_PAUSE, true, "Arrêt manuel détecté");
       else if(g_state == ST_PAUSE && !g_stoppedManually && g_enabled) SetState(ST_ACTIF, true, "Reprise manuelle détectée");
