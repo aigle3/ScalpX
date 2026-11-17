@@ -1675,3 +1675,39 @@ async def test_reinitialisation_et_sauvegarde_github_depuis_le_bot(svc, monkeypa
     dash.store.set_value("Martin", "fast", "14")
     await router.backup_presets()
     assert len(pushed) == 2 and "fast=14" in pushed[1]
+
+
+async def test_jeton_de_sauvegarde_et_desinstallation_apres_10_s(svc, monkeypatch):
+    """Bot 3.18.0 : jeton envoyé par message → .env ; 🧨 trois confirmations, la dernière refusée avant 10 s."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    from core import envfile, ghbackup, server as sv
+    from bot import system
+    written = {}
+    monkeypatch.setattr(envfile, "set_key", lambda path, k, v: written.update({k: v}))
+    monkeypatch.setattr(ghbackup, "push", lambda cfg, text, http=None: "")
+    dash.store.put("Martin", {"fast": "12"})
+    ctx.cfg.update.github = "aigle3/ScalpX"
+    await router.on_callback("d:kset:BACKUP_TOKEN")
+    await router.on_text("pas un jeton")
+    assert not written and not ctx.cfg.backup_token
+    await router.on_callback("d:bkt")
+    await router.on_text("github_pat_" + "A" * 40)
+    assert written == {"BACKUP_TOKEN": "github_pat_" + "A" * 40} and ctx.cfg.backup_token.startswith("github_pat_")
+    assert ctx.db.meta_get("ghb_ts")
+    calls = []
+    monkeypatch.setattr(sv, "uninstall", lambda run=None: calls.append(1) or (True, ""))
+    t = [1000.0]
+    import bot.router as br
+    monkeypatch.setattr(br, "_clock", lambda: t[0])
+    await router.on_callback("d:uni")
+    await router.on_callback(f"ok:{dash.screen[1]}")
+    assert await _until(lambda: dash.screen[0] == "confirm" and conf.peek(dash.screen[1]) and "Vraiment" in conf.peek(dash.screen[1]).text)
+    await router.on_callback(f"ok:{dash.screen[1]}")
+    assert await _until(lambda: dash.screen[0] == "confirm" and conf.peek(dash.screen[1]) and "10 secondes" in conf.peek(dash.screen[1]).text)
+    t[0] += 3
+    await router.on_callback(f"ok:{dash.screen[1]}")                       # trop tôt : refusé, redemandé
+    assert await _until(lambda: dash.screen[0] == "confirm" and conf.peek(dash.screen[1]) is not None)
+    assert not calls
+    t[0] += 11
+    await router.on_callback(f"ok:{dash.screen[1]}")
+    assert await _until(lambda: calls == [1])

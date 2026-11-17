@@ -8,27 +8,27 @@ comme sous Windows.
 - Ubuntu **24.04 ou 26.04** (22.04 accepté), 64 bits, sans bureau graphique. 8 Go de RAM pour une dizaine de comptes.
 - Accès root (sudo).
 
-## Installation
-1. Récupère le paquet `stable` (jeton GitHub en lecture seule, le même que sur le VPS Windows) :
-   ```bash
-   mkdir -p ~/scalpx-paquet && cd ~/scalpx-paquet
-   curl -fsSL -H "Authorization: Bearer github_pat_TON_JETON" \
-        https://api.github.com/repos/aigle3/ScalpX/tarball/stable | tar xz --strip-components=1
-   ```
-2. Lance l'installation :
-   ```bash
-   sudo bash linux/install.sh
-   ```
-   Le script installe Wine (WineHQ stable), Xvfb et Python, crée l'utilisateur `scalpx` (sans sudo), le préfixe Wine,
-   installe MT5 (installeur MetaQuotes, qui se connecte aux serveurs RoboForex) dans `BASE`, copie l'EA et le bot, puis demande le token Telegram, ton chat_id, le jeton
-   GitHub et l'URL healthchecks.io. Autre installeur MT5 : `sudo MT5_SETUP_URL=https://…/setup.exe bash linux/install.sh`.
-3. Dans Telegram, recrée tes comptes (bouton ➕), comme sous Windows.
+## Installation (seule fois où tu touches au VPS)
+Remplace `github_pat_TON_JETON` (jeton GitHub en lecture seule) puis colle tout le bloc :
+```bash
+T=github_pat_TON_JETON
+mkdir -p ~/scalpx-paquet && cd ~/scalpx-paquet
+curl -fsSL -H "Authorization: Bearer $T" https://api.github.com/repos/aigle3/ScalpX/tarball/stable | tar xz --strip-components=1
+sudo GITHUB_TOKEN=$T bash linux/install.sh
+```
+Le script installe tout (Wine, Xvfb, Python, MT5, EA, bot, services, droits limités du bot) et ne demande que le
+**token Telegram** et ton **chat_id**. Si l'installeur MT5 échoue, copie le dossier `C:\MT5\BASE` du VPS Windows dans
+`/home/scalpx/mt5/BASE` puis relance la dernière ligne.
+
+Ensuite tout se fait dans Telegram :
+- **🛠 Système → 🔑 Clés et jetons** : jeton de sauvegarde GitHub, healthchecks.io, jeton des mises à jour (ton message est effacé aussitôt) ;
+- **🛠 Système → 🖥 Serveur** : CPU, RAM, disque, processus, services (arrêter / désactiver), démarrage auto,
+  🔧 mise à jour de l'installation (droits administrateur, sans mot de passe), 🔁 redémarrage du VPS, 🧨 désinstallation complète ;
+- **♻️ Réinitialiser** : comptes et historique effacés, bot, BASE et presets gardés.
 
 ⚠️ **Un compte ne doit jamais tourner sur les deux VPS en même temps** (deux EA = ordres en double). Avant d'ajouter
 un compte ici, arrête-le sur le VPS Windows (⏹ Arrêter). Et utilise un autre token Telegram tant que le bot Windows
 tourne : deux bots sur le même token se volent les messages.
-
-Relancer `install.sh` ne touche jamais à `.env`, `config.toml`, `data/` ni aux comptes déjà créés.
 
 ## Emplacements (utilisateur scalpx)
 | Quoi | Où |
@@ -54,9 +54,9 @@ sudo -u scalpx bash -c 'cd ~/scalpx/bot && .venv/bin/python main.py --check'   #
 - Le VPS redémarre : Xvfb puis le bot démarrent seuls, et le bot relance les terminaux.
 
 ## Sauvegarde des presets sur GitHub
-Dépôt privé `scalpx-sauvegarde` + jeton fine-grained limité à ce dépôt (Contents : Read and write), dans `.env` :
-`BACKUP_TOKEN=github_pat_…` puis 🔄 Redémarrer le bot. Les presets y sont réécrits à chaque changement ;
-💾 Presets → ☁️ Restaurer depuis GitHub les récupère sur un serveur neuf.
+Dépôt privé `scalpx-sauvegarde` + jeton fine-grained limité à ce dépôt (Contents : Read and write), envoyé au bot
+par 🔑 Clés et jetons → BACKUP_TOKEN. Les presets y sont réécrits à chaque changement ; 💾 Presets → ☁️ Restaurer
+depuis GitHub les récupère sur un serveur neuf.
 
 ## Sécurité
 Ferme l'accès SSH par mot de passe (clé uniquement) et n'ouvre aucun autre port : le bot n'en a pas besoin (il contacte

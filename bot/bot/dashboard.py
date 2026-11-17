@@ -159,6 +159,19 @@ class Dashboard:
             return self._render_actions()
         if kind == "rpt":
             return self._render_reports()
+        if kind == "key":                                   # Bot 3.18.0 : 🔑 clés et jetons
+            from .system import keys_screen
+            return keys_screen(self.ctx, self._flash_text())
+        if kind in ("srv", "svl", "svo"):                   # Bot 3.18.0 : 🖥 Serveur (Linux)
+            from . import server_ui as sui
+            if kind == "srv":
+                st, auto, sudo = getattr(self, "srv", (None, {}, True))
+                return sui.server_screen(st, auto, sudo, self._flash_text())
+            svcs = getattr(self, "svcs", [])
+            i = self.screen[1] if len(self.screen) > 1 else -1
+            if kind == "svo" and 0 <= i < len(svcs):
+                return sui.service_screen(svcs[i], i, self._flash_text())
+            return sui.services_screen(svcs, self._flash_text())
         if kind == "plex":                                  # Bot 3.8.0
             from .system import plex_screen
             return plex_screen(self.ctx, self._flash_text())

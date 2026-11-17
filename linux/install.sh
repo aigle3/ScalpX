@@ -19,12 +19,13 @@ DISP=":99"
 # Installeur MT5 : celui de MetaQuotes (il se connecte aux serveurs RoboForex). Autre installeur : MT5_SETUP_URL=…
 SETUP_URLS="${MT5_SETUP_URL:-https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe https://download.terminal.free/cdn/web/metaquotes.ltd/mt5/mt5setup.exe}"
 PKG="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"          # racine du paquet (dossiers bot/, ea/, linux/)
+AUTO=""; [ "${1:-}" = "--auto" ] && AUTO=1                         # --auto : relancé par le bot (🔧), aucune question
 
 step() { echo; echo -e "\e[36m=== $*\e[0m"; }
 ok()   { echo -e "  \e[32m[OK]\e[0m $*"; }
 warn() { echo -e "  \e[33m[!]\e[0m  $*"; }
 die()  { echo -e "  \e[31m[ERREUR]\e[0m $*"; exit 1; }
-ask()  { local r; read -rp "  $1 " r </dev/tty || true; echo "$r"; }
+ask()  { local r=""; [ -n "$AUTO" ] || read -rp "  $1 " r </dev/tty || true; echo "$r"; }
 as_u() { sudo -u "$U" -H env WINEPREFIX="$PFX" WINEARCH=win64 DISPLAY="$DISP" WINEDEBUG=-all "$@"; }
 
 [ "$(id -u)" -eq 0 ] || die "lance ce script avec sudo : sudo bash linux/install.sh"
@@ -160,19 +161,18 @@ as_u "$BOT/.venv/bin/pip" install --disable-pip-version-check -q -r "$BOT/requir
 ok "bibliothèques installées"
 
 ENVF="$BOT/.env"
+[ -f "$ENVF" ] || [ -z "$AUTO" ] || die "mode automatique sans .env : lance une première fois sudo bash linux/install.sh"
 if [ ! -f "$ENVF" ]; then
     echo "  Dans Telegram : @BotFather -> /newbot -> copie le TOKEN. Ton chat_id : écris à @userinfobot."
     echo "  Si l'ancien bot Windows tourne encore, utilise un AUTRE token (deux bots sur le même token se gênent)."
     tok=""; for _ in 1 2 3; do tok=$(ask "TELEGRAM_TOKEN :"); [[ "$tok" =~ ^[0-9]{6,}:[A-Za-z0-9_-]{30,}$ ]] && break; warn "format attendu : 123456789:AAxx…"; done
     chat=""; for _ in 1 2 3; do chat=$(ask "Ton chat_id (nombre) :"); [[ "$chat" =~ ^-?[0-9]{5,}(,-?[0-9]{5,})*$ ]] && break; warn "format attendu : un nombre"; done
-    gh=$(ask "Jeton GitHub en lecture seule (github_pat_…, Entrée = plus tard) :")
-    hc=$(ask "URL healthchecks.io (Entrée = plus tard) :")
-    bk=$(ask "Jeton GitHub de SAUVEGARDE des presets (écriture sur scalpx-sauvegarde seulement, Entrée = plus tard) :")
+    # jeton GitHub des mises à jour : celui du téléchargement, passé par GITHUB_TOKEN=… (voir LISEZMOI) ; sinon dans
+    # Telegram (🛠 Système → 🔑 Clés et jetons), comme le jeton de sauvegarde et healthchecks.io
+    gh="${GITHUB_TOKEN:-}"
     umask 077
     { echo "TELEGRAM_TOKEN=$tok"; echo "ALLOWED_CHAT_IDS=$chat"
-      [ -n "$gh" ] && echo "GITHUB_TOKEN=$gh" || echo "# GITHUB_TOKEN=github_pat_..."
-      [ -n "$hc" ] && echo "HEALTHCHECK_URL=$hc" || echo "# HEALTHCHECK_URL=https://hc-ping.com/..."
-      [ -n "$bk" ] && echo "BACKUP_TOKEN=$bk" || echo "# BACKUP_TOKEN=github_pat_..."; } > "$ENVF"
+      [ -n "$gh" ] && echo "GITHUB_TOKEN=$gh" || echo "# GITHUB_TOKEN=github_pat_..."; } > "$ENVF"
     umask 022
     chown "$U:$U" "$ENVF"; chmod 600 "$ENVF"
     ok ".env écrit (lisible par $U seulement)"
@@ -199,6 +199,31 @@ else
 fi
 as_u mkdir -p "$PFX/drive_c/users/$U/AppData/Roaming/MetaQuotes/Terminal/Common/Files" "$MT/instances" "$MT/archives" "$APP/release"
 (cd "$BOT" && as_u "$BOT/.venv/bin/python" main.py --check) || warn "contrôle incomplet : corrige les erreurs ci-dessus puis relance ce script"
+
+# ---------------------------------------------------------------- droits limités du bot (🖥 Serveur dans Telegram)
+# Sans mot de passe, SEULEMENT : gérer un service, redémarrer le VPS, tout désinstaller. Rien d'autre en administrateur.
+SC=/usr/bin/systemctl
+SUD=$(mktemp)
+cat > "$SUD" <<SUDEOF
+# ScalpX : commandes administrateur permises au bot (écrit par linux/install.sh)
+$U ALL=(root) NOPASSWD: $SC reboot, $SC start *, $SC stop *, $SC restart *, $SC enable *, $SC disable *, /usr/local/sbin/scalpx-uninstall "", /usr/local/sbin/scalpx-root-update ""
+SUDEOF
+if visudo -cf "$SUD" >/dev/null; then
+    install -m 440 -o root -g root "$SUD" /etc/sudoers.d/scalpx
+    ok "droits limités du bot installés (services, redémarrage du VPS, désinstallation)"
+else
+    warn "règle sudo refusée par visudo : boutons 🖥 Serveur sans effet"
+fi
+rm -f "$SUD"
+sed "s#@USER@#$U#g" "$PKG/linux/scalpx-uninstall.sh" > /usr/local/sbin/scalpx-uninstall
+chown root:root /usr/local/sbin/scalpx-uninstall
+chmod 755 /usr/local/sbin/scalpx-uninstall
+# 🔧 mise à jour de l'installation depuis Telegram : script root qui télécharge LUI-MÊME la branche stable du dépôt
+# (le bot ne peut pas lui faire exécuter ses propres fichiers) puis relance ce script en mode --auto
+REPO=$(sed -n 's/^github *= *"\([^"]*\)".*/\1/p' "$BOT/config.toml" | head -1); REPO="${REPO:-aigle3/ScalpX}"
+sed -e "s#@USER@#$U#g" -e "s#@REPO@#$REPO#g" "$PKG/linux/scalpx-root-update.sh" > /usr/local/sbin/scalpx-root-update
+chown root:root /usr/local/sbin/scalpx-root-update
+chmod 755 /usr/local/sbin/scalpx-root-update
 
 # ---------------------------------------------------------------- 7. service
 step "7/7  Service scalpx-bot (démarrage automatique, relance si arrêt)"

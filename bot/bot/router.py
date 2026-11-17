@@ -26,6 +26,19 @@ from .ui import ALL_ID, Confirmations, Keyboard, Pending, Sender, resolve, short
 log = logging.getLogger(__name__)
 
 
+# Bot 3.18.0 : clés de .env saisies depuis Telegram : nom → (attribut de Config, description, format accepté)
+SECRETS = {
+    "GITHUB_TOKEN": ("github_token", "jeton GitHub de lecture des mises à jour, github_pat_…", r"(github_pat_[A-Za-z0-9_]{20,255}|ghp_[A-Za-z0-9]{30,255})"),
+    "BACKUP_TOKEN": ("backup_token", "jeton GitHub de sauvegarde des presets, github_pat_…", r"(github_pat_[A-Za-z0-9_]{20,255}|ghp_[A-Za-z0-9]{30,255})"),
+    "HEALTHCHECK_URL": ("healthcheck_url", "adresse https://hc-ping.com/…", r"https://[A-Za-z0-9.-]+(/[A-Za-z0-9._~/-]*)?"),
+}
+
+
+def _clock() -> float:
+    """Horloge de la confirmation à 10 s (Bot 3.18.0), remplaçable dans les tests sans toucher à asyncio."""
+    return time.monotonic()
+
+
 class Router:
     awaiting: tuple[str, int] | None = None
 
@@ -42,6 +55,7 @@ class Router:
         self.awaiting_preset: tuple[str, str] | None = None   # (compte modèle, preset remplacé) : nom attendu (texte)
         self.awaiting_goal: str | None = None               # compte (ou ALL_ID) dont on attend l'objectif (message texte)
         self.awaiting_import = False                        # Bot 3.16.0 : fichier / texte de presets attendu (📥 Importer)
+        self.awaiting_token = ""                            # Bot 3.18.0 : clé de .env attendue (message texte), ex. BACKUP_TOKEN
         self._dep_sel: set[str] = set()
         from mt5.backtester import BacktestManager
         self.bt = BacktestManager(ctx.cfg, ctx.db, ctx.mgr.procs)      # 🧪 terminal de backtest à part
@@ -187,6 +201,16 @@ class Router:
             return await self._ask("⚡ <b>Optimiser le VPS ?</b>\nRéglages Windows qui libèrent du CPU (antivirus, services inutiles, "
                                    "alimentation…), CPU mesuré avant / après (≈ 1 min). Les terminaux et l'EA continuent de trader.",
                                    self.vps_optimize, ("sys",), "⚡ Optimiser")
+        elif sub in ("srv", "svl", "svo", "svx", "sva", "rbt", "uni", "rup"):   # Bot 3.18.0 : 🖥 Serveur (Linux)
+            return await self._server_cb(sub, p)
+        elif sub == "key":                                      # Bot 3.18.0 : 🔑 clés et jetons (saisis ici, jamais sur le VPS)
+            self.dash.goto("key")
+        elif sub in ("kset", "bkt") and (sub == "bkt" or (len(p) > 2 and p[2] in SECRETS)):
+            key = "BACKUP_TOKEN" if sub == "bkt" else p[2]
+            self.awaiting_token = key
+            self.dash.goto("key")
+            self.dash.flash(f"🔑 Envoie la valeur de <b>{key}</b> ({SECRETS[key][1]}). Ton message est effacé aussitôt ; "
+                            "envoie « effacer » pour la retirer.", 300)
         elif sub == "rz":                                       # Bot 3.17.0 : ♻️ réinitialiser (double confirmation)
             return await self._ask("♻️ <b>Réinitialiser le serveur ?</b>\n"
                                    "Supprime <b>tous les comptes de ce serveur</b> (terminaux arrêtés, dossiers effacés), le terminal "
@@ -422,6 +446,10 @@ class Router:
                 await self.dash.refresh(force=True)
                 return
             await self._goal_confirm(inst, v.replace(",", "."))
+            return
+        if self.awaiting_token:
+            key, self.awaiting_token = self.awaiting_token, ""
+            await self.set_secret(key, text.strip())
             return
         if self.awaiting_import:
             self.awaiting_import = False
@@ -1075,6 +1103,145 @@ class Router:
                                [[("✖ Fermer", "d:close")]], True)
         self.dash.flash("🔍 Comparaison envoyée ci-dessous.", 10)
         await self.dash.refresh(force=True)
+
+    # ---- Bot 3.18.0 : ☁️ jeton de sauvegarde, 🖥 gestion du serveur (Linux)
+    async def set_secret(self, key: str, value: str) -> None:
+        """Clé de .env reçue par message (déjà effacé de la conversation) : vérifiée, écrite, prise en compte tout de suite."""
+        from core import envfile
+        from .system import BOT_ROOT
+        self.dash.goto("key")
+        attr, hint, pattern = SECRETS[key]
+        clear = value.lower() in ("effacer", "supprimer", "-")
+        if not clear and not re.fullmatch(pattern, value):
+            self.dash.flash(f"❌ Valeur refusée pour {key} : attendu {hint}.")
+            await self.dash.refresh(force=True)
+            return
+        value = "" if clear else value
+        try:
+            await asyncio.to_thread(envfile.set_key, BOT_ROOT / ".env", key, value)
+        except (OSError, ValueError) as exc:
+            self.dash.flash(f"❌ .env non modifié : {esc(str(exc))}")
+            await self.dash.refresh(force=True)
+            return
+        setattr(self.ctx.cfg, attr, value)
+        self.ctx.db.add_action("", f"{key} {'RETIRÉ' if clear else 'ENREGISTRÉ'}", True, "")
+        msg = f"✅ {key} {'retiré' if clear else 'enregistré'}."
+        if key == "BACKUP_TOKEN" and value:
+            self.ctx.db.meta_set("ghb_hash", "")                # sauvegarde refaite tout de suite avec le nouveau jeton
+            self.ctx.db.meta_set("ghb_err", "")
+            self.dash.flash("⏳ Jeton enregistré : première sauvegarde des presets…")
+            await self.dash.refresh(force=True)
+            await self.backup_presets()
+            err = self.ctx.db.meta_get("ghb_err")
+            msg = f"❌ Jeton enregistré mais sauvegarde refusée : {esc(err)}" if err else "✅ Jeton enregistré, presets sauvegardés sur GitHub."
+        elif key == "GITHUB_TOKEN":
+            self.ctx.db.meta_set("gh_err", "")
+            msg += " Les mises à jour sont vérifiées à la prochaine minute."
+        self.dash.flash(msg)
+        await self.dash.refresh(force=True)
+
+    async def _server_cb(self, sub: str, p: list[str]) -> str:
+        from core import server as sv
+        dash = self.dash
+        if sub == "srv":
+            dash.goto("srv")
+            dash.srv = (None, getattr(dash, "srv", (None, {}, True))[1], getattr(dash, "srv", (None, {}, True))[2])
+            await dash.refresh(force=True)
+            st, auto, sudo = await asyncio.gather(asyncio.to_thread(sv.stats), asyncio.to_thread(sv.autostart),
+                                                  asyncio.to_thread(sv.sudo_ready))
+            dash.srv = (st, auto, sudo)
+        elif sub == "svl":
+            dash.goto("svl")
+            dash.svcs = await asyncio.to_thread(sv.services)
+        elif sub == "svo" and len(p) > 2 and p[2].isdigit():
+            dash.goto("svo", int(p[2]))
+        elif sub == "svx" and len(p) > 3 and p[3].isdigit():
+            act, i = p[2], int(p[3])
+            svcs = getattr(dash, "svcs", [])
+            if not 0 <= i < len(svcs):
+                dash.goto("svl")
+            else:
+                unit = svcs[i].unit
+                if act in ("stop", "disable"):
+                    return await self._ask(f"🧩 <b>{'Arrêter' if act == 'stop' else 'Désactiver'} {esc(unit)} ?</b>"
+                                           + ("\nIl ne sera plus lancé au démarrage du VPS." if act == "disable" else ""),
+                                           lambda: self._service_do(unit, act, i), ("svo", i), "✅ Confirmer")
+                return await self._service_do(unit, act, i) or ""
+        elif sub == "sva":
+            res = await asyncio.gather(*[asyncio.to_thread(sv.action, u, "enable") for u in sv.OWN])
+            dash.flash("✅ Relancés au démarrage du VPS." if all(ok for ok, _ in res) else
+                       "❌ " + esc("; ".join(m for ok, m in res if not ok)))
+            return await self._server_cb("srv", ["d", "srv"])
+        elif sub == "rbt":
+            return await self._ask("🔁 <b>Redémarrer le VPS ?</b>\nTerminaux et bot coupés ≈ 1 à 3 min ; au retour, le bot et les "
+                                   "terminaux repartent seuls. Positions et ordres restent chez le broker.",
+                                   self._reboot, ("srv",), "🔁 Redémarrer")
+        elif sub == "rup":
+            return await self._ask("🔧 <b>Mettre à jour l'installation ?</b>\nLe serveur télécharge la dernière version validée et "
+                                   "relance l'installeur (droits administrateur, services, autorisations), sans question. Comptes, "
+                                   "réglages et BASE gardés ; le bot redémarre (≈ 1 à 5 min).", self._root_update, ("srv",), "🔧 Lancer")
+        elif sub == "uni":
+            return await self._ask("🧨 <b>Tout désinstaller ?</b>\nSupprime de ce VPS : le bot, BASE, tous les comptes MT5, le "
+                                   "préfixe Wine, l'historique, les services et les autorisations. Rien ne restera de ScalpX.",
+                                   self._uninstall_2, ("srv",), "🧨 Continuer")
+        await dash.refresh(force=True)
+        return ""
+
+    async def _service_do(self, unit: str, act: str, i: int) -> str:
+        from core import server as sv
+        ok, msg = await asyncio.to_thread(sv.action, unit, act)
+        self.ctx.db.add_action("", f"SERVICE {act.upper()} {unit}", ok, msg)
+        self.dash.svcs = await asyncio.to_thread(sv.services)
+        idx = next((k for k, s in enumerate(self.dash.svcs) if s.unit == unit), -1)
+        self.dash.goto(*(("svo", idx) if idx >= 0 else ("svl",)))
+        self.dash.flash(("✅ " if ok else "❌ ") + f"{esc(unit)} : {act} → {esc(msg)}")
+        await self.dash.refresh(force=True)
+        return ""
+
+    async def _root_update(self) -> None:
+        from core import server as sv
+        ok, err = await asyncio.to_thread(sv.root_update)
+        self.ctx.db.add_action("", "MISE À JOUR DE L'INSTALLATION", ok, err)
+        self.dash.goto("srv")
+        self.dash.flash("🔧 Mise à jour de l'installation lancée : le bot redémarre dans quelques minutes "
+                        "(journal : /var/log/scalpx-root-update.log)." if ok else
+                        f"❌ Refusé : {esc(err or 'droits administrateur absents (relance install.sh une fois)')}")
+        await self.dash.refresh(force=True)
+
+    async def _reboot(self) -> None:
+        from core import server as sv
+        self.ctx.db.add_action("", "REDÉMARRAGE DU VPS", True, "")
+        await self.sender.send(self.chat_id, "🔁 <b>Redémarrage du VPS…</b> Le bot revient dans quelques minutes.", None, True)
+        ok, err = await asyncio.to_thread(sv.reboot)
+        if not ok:
+            self.dash.goto("srv")
+            self.dash.flash(f"❌ Redémarrage refusé : {esc(err or 'droits administrateur absents (relance install.sh)')}")
+            await self.dash.refresh(force=True)
+
+    async def _uninstall_2(self) -> None:
+        await self._ask("⚠️ <b>Vraiment sûr ?</b>\nTous les comptes devront être recréés sur un autre serveur, et le bot de ce "
+                        "VPS ne répondra plus jamais. Les positions restent chez le broker.", self._uninstall_3, ("srv",),
+                        "🧨 Oui, je suis sûr")
+
+    async def _uninstall_3(self) -> None:
+        t0 = _clock()
+        await self._ask("🛑 <b>Dernière confirmation.</b>\nAttends <b>10 secondes</b> avant de toucher le bouton (un appui plus tôt "
+                        "est refusé). Cette action est définitive.", lambda: self._uninstall_go(t0), ("srv",), "🧨 DÉSINSTALLER")
+
+    async def _uninstall_go(self, t0: float) -> None:
+        from core import server as sv
+        if _clock() - t0 < 10:
+            self.dash.flash("⏱ Trop tôt : attends 10 secondes après l'affichage, puis confirme.")
+            await self._uninstall_3()
+            return
+        self.ctx.db.add_action("", "DÉSINSTALLATION", True, "")
+        await self.sender.send(self.chat_id, "🧨 <b>Désinstallation lancée.</b> Le bot s'arrête définitivement. Wine, Xvfb et Python "
+                               "restent installés sur le système (paquets Ubuntu).", None, True)
+        ok, err = await asyncio.to_thread(sv.uninstall)
+        if not ok:
+            self.dash.goto("srv")
+            self.dash.flash(f"❌ Désinstallation refusée : {esc(err or 'droits administrateur absents (relance install.sh)')}")
+            await self.dash.refresh(force=True)
 
     async def _reset_confirm2(self) -> None:
         n = len(self.ctx.db.list())

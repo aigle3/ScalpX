@@ -138,10 +138,11 @@ def system_kb(pending: bool, previous: str = "", windows: bool = os.name == "nt"
            [("📊 Remettre le bouton du bas", "d:menu"), ("🎬 Plex", "d:plex")],
            [("⚡ Optimiser le VPS", "d:vpo")]] if windows else
           # Bot 3.15.0 : Linux → pas de fenêtres à réduire (écran virtuel), Plex et optimisation propres à Windows
-          [[("📜 Journaux", "d:logs"), ("🏓 Ping", "d:png")],
-           [("🧾 Journal des actions", "d:jra"), ("📊 Remettre le bouton du bas", "d:menu")]]),
+          [[("🖥 Serveur", "d:srv"), ("📜 Journaux", "d:logs")],
+           [("🏓 Ping", "d:png"), ("🧾 Journal des actions", "d:jra")],
+           [("📊 Remettre le bouton du bas", "d:menu")]]),
         [("🔄 Redémarrer le bot", "d:rst"), ("🔃", "d:sys")],
-        [("♻️ Réinitialiser le serveur", "d:rz")],
+        [("🔑 Clés et jetons", "d:key"), ("♻️ Réinitialiser", "d:rz")],
         [("⬅ Accueil", "d:home")],
     ]
 
@@ -193,3 +194,19 @@ def plex_screen(ctx: Ctx, flash: str = "") -> tuple[str, Keyboard]:
         lines = [flash, ""] + lines
     btn = ("⏹ Éteindre Plex", "d:plexoff") if st.running else ("▶ Allumer Plex", "d:plexon")
     return "\n".join(lines), [[btn, ("🔃", "d:plex")], [("⬅ Système", "d:sys")]]
+
+
+def keys_screen(ctx: Ctx, flash: str = "") -> tuple[str, Keyboard]:
+    """Bot 3.18.0 : 🔑 clés du .env saisies depuis Telegram (le message est effacé, la valeur n'est jamais réaffichée)."""
+    from .router import SECRETS
+    lines = ["🔑 <b>Clés et jetons</b>", "<i>Touche une clé puis envoie sa valeur : elle est enregistrée dans le .env du bot "
+             "et ton message est effacé aussitôt. Rien à faire sur le VPS.</i>", ""]
+    kb: Keyboard = []
+    for key, (attr, hint, _) in SECRETS.items():
+        val = getattr(ctx.cfg, attr, "") or ""
+        shown = ("✅ " + (val[:11] + "…" + val[-4:] if len(val) > 20 else "défini")) if val else "❌ absent"
+        lines.append(f"<b>{key}</b> : {esc(shown)}\n   <i>{esc(hint)}</i>")
+        kb.append([(("✏️ " if val else "➕ ") + key, f"d:kset:{key}")])
+    kb.append([("⬅ Système", "d:sys")])
+    text = "\n".join(lines)
+    return (f"{flash}\n\n{text}" if flash else text), kb
