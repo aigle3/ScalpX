@@ -17,7 +17,7 @@
 //|   SX_Panel.mqh     panneau d'informations dynamique              |
 //+------------------------------------------------------------------+
 #property copyright   "ScalpX"
-#property version     "7.12"
+#property version     "7.13"
 #property description "ScalpX v6.1.0 — EMA 10/20 + grille ATR + TP commun + filtres multi-timeframe, pilotage par bot central (fichiers)"
 
 // [SEUIL500] début : TEST UNIQUEMENT (test B-3 de la checklist). Décommenter pour simuler un glissement de 2.0 (devise du compte)
@@ -142,7 +142,8 @@ input bool   FermerAutresGraphiques = true;              // Ferme les autres gra
 
 // [ARCHI] début : 7.2.0 backtest piloté par le bot (ignorés hors du testeur de stratégie)
 input group "══ Backtest (bot) ══"
-input string BacktestId = "";                         // Identifiant du backtest (rempli par le bot) ; vide = backtest MT5 classique
+input string BacktestId = "";                         // Identifiant du backtest (rempli par le bot) ; vide = testeur lancé à la main
+input bool   BtPresetBot = true;                      // Testeur à la main : réglages du preset ⭐ du bot (Common\Files\scalpx_preset.cfg) ; false = paramètres du test
 input int    BtGmtHiver = -99;                        // Décalage GMT du serveur en hiver (h) ; -99 = celui du calendrier exporté
 input bool   BtHeureEteUS = true;                     // Le serveur suit l'heure d'été américaine (+1 h)
 input double BtCommissionLot = 0.0;                   // Labo : commission par lot et par côté (mesurée en réel)

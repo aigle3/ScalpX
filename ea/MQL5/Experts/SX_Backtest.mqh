@@ -203,14 +203,17 @@ bool BtPreInit()
 }
 
 // Réglages du compte de référence (clé=valeur brute, comme la commande PARAMS) : appliqués par-dessus les inputs
-int BtLoadParams()
+string g_btPresetName = "";
+int BtLoadParams(string file = "")
 {
-   int h = FileOpen(BtFile("params.cfg"), FILE_READ | FILE_TXT | FILE_ANSI | FILE_COMMON | FILE_SHARE_READ);
+   if(file == "") file = BtFile("params.cfg");
+   int h = FileOpen(file, FILE_READ | FILE_TXT | FILE_ANSI | FILE_COMMON | FILE_SHARE_READ);
    if(h == INVALID_HANDLE) return -1;
    int n = 0;
    while(!FileIsEnding(h))
    {
       string line = FileReadString(h);
+      if(StringFind(line, "# preset=") == 0) { g_btPresetName = StringSubstr(line, 9); continue; }   // 7.13.0
       int p = StringFind(line, "=");
       if(p <= 0) continue;
       if(StringSubstr(line, 0, p) == "bt_labo_seul") { g_btLaboOnly = (StringToInteger(StringSubstr(line, p + 1)) != 0); continue; }
@@ -230,9 +233,20 @@ int BtLoadParams()
 void BtInit()
 {
    if(!g_bt) return;
-   int n = g_btManual ? 0 : BtLoadParams();         // 7.12.0 : à la main : réglages = paramètres du test (.set)
-   if(g_btManual) g_btNote = "testeur MT5 lancé à la main : réglages des paramètres du test";
-   else if(n < 0) g_btNote = "réglages du compte introuvables : valeurs par défaut de l'EA";
+   int n;
+   if(g_btManual)
+   {
+      // 7.13.0 : à la main : preset ⭐ du bot (ex. Martin), recopié par le bot dans Common\Files à chaque modification
+      n = BtPresetBot ? BtLoadParams("scalpx_preset.cfg") : 0;
+      if(!BtPresetBot) g_btNote = "testeur lancé à la main : réglages des paramètres du test (BtPresetBot = false)";
+      else if(n < 0) g_btNote = "testeur lancé à la main : preset du bot introuvable (Common\\Files\\scalpx_preset.cfg), réglages des paramètres du test";
+      else g_btNote = "testeur lancé à la main : réglages du preset ⭐ " + g_btPresetName + " du bot";
+   }
+   else
+   {
+      n = BtLoadParams();
+      if(n < 0) g_btNote = "réglages du compte introuvables : valeurs par défaut de l'EA";
+   }
    if(g_pVal[P_FAST] >= g_pVal[P_SLOW]) { g_pVal[P_FAST] = g_pDef[P_FAST]; g_pVal[P_SLOW] = g_pDef[P_SLOW]; }
    RebuildIndicators();                              // timeframes / périodes des réglages chargés
    g_configOK = true;
