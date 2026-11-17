@@ -72,11 +72,15 @@ class CommandQueue:
         # écriture (fsync, nouvel essai si l'EA tient le fichier) et lectures dans un fil : la boucle du bot n'est jamais figée
         n = await asyncio.to_thread(self.send, iid, cmd, args)
         deadline = time.monotonic() + timeout
+        wait = poll
         while time.monotonic() < deadline:
             ack = await asyncio.to_thread(self.read_ack, iid, n)
             if ack is not None:
                 return CmdResult(ack.ok, ack.message, False, n)
-            await asyncio.sleep(poll)
+            await asyncio.sleep(wait)
+            # Bot 3.10.0 : attente de plus en plus espacée (0,25 → 1 s) : 11 robots interrogés ensemble ne font plus
+            # 44 lectures de fichiers par seconde (l'EA ne lit ses commandes qu'une fois par seconde)
+            wait = min(max(poll, 1.0), wait * 1.5)
         safe_remove(self.cmd_path(iid, n))      # l'EA ne l'a pas lue : on ne la laisse pas traîner
         log.warning("commande %s → %s : pas de réponse de l'EA en %.0f s", cmd.upper(), iid, timeout)
         return CmdResult(False, "Pas de réponse de l'EA (terminal arrêté ou occupé ?)", True, n)

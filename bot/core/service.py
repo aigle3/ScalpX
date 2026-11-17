@@ -149,14 +149,19 @@ class Monitor:
         n = 0
         while self._pending:
             await self.emit(self._pending.pop(0))
-        for inst in self.db.list():
-            try:
-                # lecture des fichiers hors de la boucle : un fichier verrouillé par l'EA (nouvelles tentatives espacées)
-                # ne fige plus le bot (tableau de bord, boutons, autres tâches)
-                evs = await asyncio.to_thread(self.events.drain, inst.id)
-            except Exception:
-                log.exception("événements de %s : lecture impossible", inst.id)
-                continue
+        insts = self.db.list()
+
+        def drain_all() -> list[tuple]:
+            # Bot 3.10.0 : tous les comptes dans UN seul fil (avant : un fil par compte, toutes les 3 s) ; hors de la boucle :
+            # un fichier verrouillé par l'EA (nouvelles tentatives espacées) ne fige pas le bot
+            out = []
+            for inst in insts:
+                try:
+                    out.append((inst, self.events.drain(inst.id)))
+                except Exception:
+                    log.exception("événements de %s : lecture impossible", inst.id)
+            return out
+        for inst, evs in await asyncio.to_thread(drain_all):
             for ev in evs:
                 n += 1
                 try:

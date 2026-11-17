@@ -127,6 +127,7 @@ def system_kb(pending: bool, previous: str = "") -> Keyboard:
         [("📜 Journaux", "d:logs"), ("🪟 Réduire les terminaux", "d:win")],
         [("🏓 Ping", "d:png"), ("🧾 Journal des actions", "d:jra")],
         [("📊 Remettre le bouton du bas", "d:menu"), ("🎬 Plex", "d:plex")],
+        [("⚡ Optimiser le VPS", "d:vpo")],
         [("🔄 Redémarrer le bot", "d:rst"), ("🔃", "d:sys")],
         [("⬅ Accueil", "d:home")],
     ]

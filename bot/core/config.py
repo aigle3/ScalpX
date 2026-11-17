@@ -35,6 +35,7 @@ class MT5(BaseModel):
     profile: str = "Default"               # profil de graphiques MT5 que le bot VIDE dans chaque terminal avant le lancement (évite EURUSD, GBPUSD…)
     minimize: bool = True                  # fenêtre MT5 réduite après chaque ouverture (moins de CPU/RAM)
     minimize_check_s: int = 300            # contrôle périodique : fenêtres ouvertes de nouveau réduites (0 = jamais)
+    max_bars: int = 5000                   # Bot 3.10.0 : barres max par graphique (moins de calcul et de RAM ; 0 = réglage MT5 inchangé)
     hide_panels: bool = True               # boîte à outils, navigateur et observation du marché masqués
     maximize_chart: bool = True            # graphique agrandi dans la fenêtre MT5
     default_server: str = ""
@@ -58,6 +59,7 @@ class Timing(BaseModel):
     watchdog_interval_s: int = 15
     events_interval_s: int = 3
     status_interval_s: int = 5
+    presets_check_s: int = 600             # Bot 3.10.0 : contrôle « robots conformes au preset ⭐ » (10 min, avant 5)
     verify_deploy_s: int = 120
 
 

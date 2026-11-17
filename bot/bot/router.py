@@ -181,6 +181,10 @@ class Router:
             if sub == "plexon" and not res.startswith("❌"):
                 await asyncio.sleep(3)                          # le serveur apparaît dans la liste des processus
             self.dash.flash(("✅ " if not res.startswith(("❌", "⚠")) else "") + "Plex " + esc(res))
+        elif sub == "vpo":                                      # Bot 3.10.0 : ⚡ Optimiser le VPS
+            return await self._ask("⚡ <b>Optimiser le VPS ?</b>\nRéglages Windows qui libèrent du CPU (antivirus, services inutiles, "
+                                   "alimentation…), CPU mesuré avant / après (≈ 1 min). Les terminaux et l'EA continuent de trader.",
+                                   self.vps_optimize, ("sys",), "⚡ Optimiser")
         elif sub == "crash":
             from .system import crash_report
             text, has = crash_report(self.ctx)
@@ -1479,6 +1483,25 @@ class Router:
         await self.sender.send(self.chat_id, f"⏪ Bot {esc(ver)} restauré : redémarrage…", None, True)
         upd.restart_bot(BOT_ROOT)
         upd.STOP.set()
+
+    async def vps_optimize(self) -> None:
+        """Bot 3.10.0 : réglages Windows de vps_optimize.ps1 + CPU avant / après, résultat dans un message à part."""
+        from core import vpsopt
+        mid = await self.sender.send(self.chat_id, "⚡ <b>Optimisation du VPS</b>\n⏳ Mesure du CPU, réglages Windows, nouvelle mesure… (≈ 1 min)",
+                                     None, True)
+        try:
+            rep = await asyncio.to_thread(vpsopt.optimize, self.ctx.cfg)
+            text = vpsopt.report_text(rep, esc)
+            ok = not rep.error and not any(i.state == "echec" for i in rep.items)
+        except Exception as exc:
+            log.exception("optimisation du VPS")
+            text, ok = f"⚡ <b>Optimisation du VPS</b>\n❌ {esc(str(exc))}", False
+        self.ctx.db.add_action("", "OPTIMISER LE VPS", ok, "")
+        kb = [[("🔄 Redémarrer tous les terminaux", "d:tall:rst")], [("✖ Fermer", "d:close")]]
+        if mid:
+            await self.sender.edit(self.chat_id, mid, text, kb)
+        else:
+            await self.sender.send(self.chat_id, text, kb, True)
 
     async def restart_bot(self) -> None:
         """Relance le bot (même mécanisme qu'après une mise à jour) : terminaux et EA non touchés."""

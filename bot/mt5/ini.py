@@ -30,12 +30,15 @@ def mask(text: str, secret: str) -> str:
     return text
 
 
-def _charts(profile: str) -> list[str]:
-    return ["[Charts]", f"ProfileLast={_clean(profile, 'profil')}"] if profile else []
+def _charts(profile: str, max_bars: int = 0) -> list[str]:
+    """[Charts] : profil de démarrage et (Bot 3.10.0) nombre maximum de barres par graphique (« MaxBars » de la doc
+    MetaQuotes) : moins de barres = moins de calcul pour les indicateurs et moins de RAM, sur chaque terminal."""
+    keys = ([f"ProfileLast={_clean(profile, 'profil')}"] if profile else []) + ([f"MaxBars={int(max_bars)}"] if max_bars > 0 else [])
+    return ["[Charts]", *keys] if keys else []
 
 
 def build_ini(login: int | str, password: str, server: str, ea_name: str, set_name: str,
-              symbol: str, period: str, profile: str = "") -> str:
+              symbol: str, period: str, profile: str = "", max_bars: int = 0) -> str:
     """Contenu du .ini : [Common] connexion + mémorisation, [Experts] autorisations, [StartUp] EA + .set."""
     _clean(password, "mot de passe")
     _clean(server, "serveur")
@@ -53,7 +56,7 @@ def build_ini(login: int | str, password: str, server: str, ea_name: str, set_na
         "Enabled=1",
         "Account=0",
         "Profile=0",
-        *_charts(profile),
+        *_charts(profile, max_bars),
         "[StartUp]",
         f"Expert={ea_name}",
         f"ExpertParameters={set_name}",  # relatif à MQL5\Presets
@@ -64,7 +67,7 @@ def build_ini(login: int | str, password: str, server: str, ea_name: str, set_na
 
 
 def build_run_ini(login: int | str, server: str, ea_name: str, set_name: str, symbol: str, period: str,
-                  profile: str = "") -> str:
+                  profile: str = "", max_bars: int = 0) -> str:
     """.ini de relance SANS mot de passe : Login + Server désignent le compte (MT5 utilise le mot de passe qu'il a mémorisé)
     et le [StartUp] rouvre le graphique de l'EA
     (un graphique ouvert par [StartUp] n'est pas conservé dans le profil : sans /config l'EA ne revient pas)."""
@@ -81,7 +84,7 @@ def build_run_ini(login: int | str, server: str, ea_name: str, set_name: str, sy
         "Enabled=1",
         "Account=0",
         "Profile=0",
-        *_charts(profile),
+        *_charts(profile, max_bars),
         "[StartUp]",
         f"Expert={ea_name}",
         f"ExpertParameters={set_name}",

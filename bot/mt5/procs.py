@@ -35,6 +35,7 @@ class PsutilProcesses:
         self._running: set[str] = set()
         self._running_at = 0.0
         self._names: set[str] = set()                 # noms d'exécutables suivis (terminal64.exe)
+        self._pid_exe: dict[tuple[int, str], str | None] = {}   # Bot 3.10.0 : (pid, nom) → chemin déjà lu (pas rouvert à chaque parcours)
         self.window_opts = window_opts                # mt5.window.WindowOptions : rangement de la fenêtre à l'ouverture
         self.win_api = win_api
 
@@ -59,13 +60,23 @@ class PsutilProcesses:
         if now - self._running_at > self.CACHE_S:
             t0 = time.monotonic()
             exes: set[str] = set()
+            seen: dict[tuple[int, str], str | None] = {}
             for p in psutil.process_iter(["name"]):
                 try:
-                    pe = self._exe_of(p, self._names)
+                    key = (getattr(p, "pid", None), (p.info.get("name") or "").lower())
+                    if key[0] is not None and key in self._pid_exe:
+                        pe = self._pid_exe[key]
+                    else:
+                        pe = self._exe_of(p, self._names)
+                        if pe is None and FAST_NAMES and key[1] and key[1] not in self._names:
+                            continue                           # processus non suivi : rien à retenir
+                    if key[0] is not None:
+                        seen[key] = pe
                     if pe:
                         exes.add(norm_path(pe))
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
+            self._pid_exe = seen                               # processus disparus oubliés
             self._running, self._running_at = exes, now
             dt = time.monotonic() - t0
             if dt > 1.0:
@@ -74,6 +85,7 @@ class PsutilProcesses:
 
     def _invalidate(self) -> None:
         self._running_at = 0.0
+        self._pid_exe = {}                             # lancement / arrêt : chemins relus (aucun pid réutilisé mal attribué)
 
     def lower_priority(self, exe: Path, free_cores: int = 0) -> int:
         """Priorité « basse » (inactivité) pour les processus de cet exécutable : le testeur ne prend que le processeur

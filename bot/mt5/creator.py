@@ -96,7 +96,8 @@ class InstanceCreator:
         folder = Path(inst.folder)
         try:
             content = build_ini(inst.login, password, inst.server, self.cfg.mt5.ea_name, self.cfg.mt5.set_name,
-                                self.cfg.mt5.symbol, self.cfg.mt5.period, self.cfg.mt5.profile)
+                                self.cfg.mt5.symbol, self.cfg.mt5.period, self.cfg.mt5.profile,
+                                self.cfg.mt5.max_bars)
             ini = write_ini(folder, content)
             del content
             await progress("🚀 Lancement du terminal et connexion au broker…")

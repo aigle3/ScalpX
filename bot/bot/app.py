@@ -360,7 +360,7 @@ async def j_dash(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def j_status(context: ContextTypes.DEFAULT_TYPE) -> None:
-    svc(context).monitor.poll_status()
+    await asyncio.to_thread(svc(context).monitor.poll_status)      # Bot 3.10.0 : lectures et base hors de la boucle du bot
 
 
 async def j_events(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -616,7 +616,7 @@ def build_application(cfg: Config, ctx_factory) -> Application:
     jq.run_repeating(timed(j_events), interval=t.events_interval_s, first=3, job_kwargs=JOB_KW)
     jq.run_repeating(timed(j_clean), interval=60, first=30, job_kwargs=JOB_KW)
     jq.run_repeating(timed(j_flush), interval=max(1, cfg.alerts.batch_window_s), first=4, job_kwargs=JOB_KW)
-    jq.run_repeating(timed(j_presets), interval=300, first=90, job_kwargs=JOB_KW)  # robots conformes au preset ⭐ actif ?
+    jq.run_repeating(timed(j_presets), interval=max(60, t.presets_check_s), first=90, job_kwargs=JOB_KW)  # robots conformes au preset ⭐ ?
     jq.run_repeating(timed(j_dash), interval=2, first=5, job_kwargs=JOB_KW)        # refresh() : toutes les refresh_s, republication après repost_s
     jq.run_repeating(timed(j_watchdog), interval=t.watchdog_interval_s, first=20, job_kwargs=JOB_KW)
     jq.run_repeating(timed(j_opt), interval=60, first=120, job_kwargs=JOB_KW)

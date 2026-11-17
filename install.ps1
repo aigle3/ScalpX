@@ -279,8 +279,15 @@ $trigger   = New-ScheduledTaskTrigger -AtLogOn -User $user
 $trigger.Delay = 'PT30S'
 $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
              -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -MultipleInstances IgnoreNew
-$principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
-Register-ScheduledTask -TaskName 'ScalpX Bot' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+# Bot 3.10.0 : en administrateur (« privilèges les plus élevés ») si possible : ⚡ Optimiser le VPS règle alors tout seul
+# l'antivirus et les services ; sans droits administrateur pour l'installation, tâche normale comme avant
+try {
+    $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Highest
+    Register-ScheduledTask -TaskName 'ScalpX Bot' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force -ErrorAction Stop | Out-Null
+} catch {
+    $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
+    Register-ScheduledTask -TaskName 'ScalpX Bot' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+}
 Ok 'Tâche planifiée "ScalpX Bot" créée (démarre à l''ouverture de session, relancée si elle s''arrête).'
 
 if ($code -eq 0) {

@@ -56,7 +56,8 @@ class InstanceManager:
         self.ensure_profile(inst)
         if ini is None:
             ini = write_run_ini(Path(inst.folder), build_run_ini(inst.login, inst.server, self.cfg.mt5.ea_name, self.cfg.mt5.set_name,
-                                                                 self.cfg.mt5.symbol, self.cfg.mt5.period, self.cfg.mt5.profile))
+                                                                 self.cfg.mt5.symbol, self.cfg.mt5.period, self.cfg.mt5.profile,
+                                                                 self.cfg.mt5.max_bars))
         return self.procs.launch(self.exe(inst), ini)
 
     def start(self, inst: Instance, set_desired: bool = True) -> bool:
