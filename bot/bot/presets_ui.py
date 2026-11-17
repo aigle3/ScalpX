@@ -128,6 +128,7 @@ def render_list(store: ps.PresetStore, chk: Check | None, now: float, flash: str
     kb: Keyboard = [[(("⭐ " if n == store.active else "📄 ") + n, f"s:o:{code_of(n)}")] for n in store.names()]
     kb.append([("📸 Nouveau preset (réglages d'un robot)", "s:new")])
     kb.append([("📥 Importer", "s:imp"), ("📤 Tout exporter", "s:expa")])       # Bot 3.16.0 : d'un bot à l'autre
+    kb.append([("☁️ Restaurer depuis GitHub", "s:ghr")])                         # Bot 3.17.0
     kb.append([("🔃 Contrôler les robots", "s:chk"), ("⬅ Actions", "d:act")])
     text = "\n".join(lines)
     return (f"{flash}\n\n{text}" if flash else text), kb

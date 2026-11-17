@@ -167,10 +167,12 @@ if [ ! -f "$ENVF" ]; then
     chat=""; for _ in 1 2 3; do chat=$(ask "Ton chat_id (nombre) :"); [[ "$chat" =~ ^-?[0-9]{5,}(,-?[0-9]{5,})*$ ]] && break; warn "format attendu : un nombre"; done
     gh=$(ask "Jeton GitHub en lecture seule (github_pat_…, Entrée = plus tard) :")
     hc=$(ask "URL healthchecks.io (Entrée = plus tard) :")
+    bk=$(ask "Jeton GitHub de SAUVEGARDE des presets (écriture sur scalpx-sauvegarde seulement, Entrée = plus tard) :")
     umask 077
     { echo "TELEGRAM_TOKEN=$tok"; echo "ALLOWED_CHAT_IDS=$chat"
       [ -n "$gh" ] && echo "GITHUB_TOKEN=$gh" || echo "# GITHUB_TOKEN=github_pat_..."
-      [ -n "$hc" ] && echo "HEALTHCHECK_URL=$hc" || echo "# HEALTHCHECK_URL=https://hc-ping.com/..."; } > "$ENVF"
+      [ -n "$hc" ] && echo "HEALTHCHECK_URL=$hc" || echo "# HEALTHCHECK_URL=https://hc-ping.com/..."
+      [ -n "$bk" ] && echo "BACKUP_TOKEN=$bk" || echo "# BACKUP_TOKEN=github_pat_..."; } > "$ENVF"
     umask 022
     chown "$U:$U" "$ENVF"; chmod 600 "$ENVF"
     ok ".env écrit (lisible par $U seulement)"

@@ -118,6 +118,8 @@ class Backup(BaseModel):
     dir: str = ""                          # vide → %OneDrive%\\ScalpX\\sauvegardes si OneDrive est présent, sinon data\\backups
     hour: int = 3                          # sauvegarde quotidienne de l'historique (scalpx.db)
     keep: int = 14                         # nombre de sauvegardes conservées
+    github: str = ""                       # Bot 3.17.0 : dépôt de sauvegarde des presets ('' → <propriétaire>/scalpx-sauvegarde) ; jeton BACKUP_TOKEN (.env)
+    github_check_s: int = 300              # presets comparés à la dernière sauvegarde toutes les N secondes
 
 
 class Backtest(BaseModel):
@@ -166,6 +168,7 @@ class Config(BaseModel):
     # secrets (depuis .env, jamais depuis config.toml)
     token: str = ""
     github_token: str = ""
+    backup_token: str = ""                 # BACKUP_TOKEN (.env) : écriture sur le dépôt de sauvegarde SEULEMENT
     healthcheck_url: str = ""              # HEALTHCHECK_URL (.env) : surveillance externe, ex. https://hc-ping.com/<uuid>
     allowed_chats: list[int] = Field(default_factory=list)
 
@@ -196,6 +199,7 @@ def load_config(config_path: Path, env_path: Path | None = None) -> Config:
     cfg.token = env.get("TELEGRAM_TOKEN", os.environ.get("TELEGRAM_TOKEN", "")).strip()
     cfg.github_token = env.get("GITHUB_TOKEN", os.environ.get("GITHUB_TOKEN", "")).strip()
     cfg.healthcheck_url = env.get("HEALTHCHECK_URL", os.environ.get("HEALTHCHECK_URL", "")).strip()
+    cfg.backup_token = env.get("BACKUP_TOKEN", os.environ.get("BACKUP_TOKEN", "")).strip()
     chats = env.get("ALLOWED_CHAT_IDS", env.get("CHAT_ID", os.environ.get("ALLOWED_CHAT_IDS", "")))
     cfg.allowed_chats = [int(x) for x in chats.replace(";", ",").split(",") if x.strip().lstrip("-").isdigit()]
     if not IS_WINDOWS and cfg.paths.common_files is None:      # Linux : Common\Files dans le préfixe Wine configuré

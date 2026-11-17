@@ -70,6 +70,14 @@ def system_text(ctx: Ctx, vps: dict[str, float]) -> str:
                  + (f" · <code>{esc(inst_c.split()[0])}</code>" if inst_c else ""))
     lines.append(f"🖥 CPU {vps.get('cpu', 0):.0f}%  RAM {vps.get('ram', 0):.0f}%  Disque {vps.get('disk', 0):.0f}%"
                  + f"  ({basemod.free_disk_gb(cfg.paths.instances):.1f} Go libres)")
+    from core import ghbackup
+    rp = ghbackup.repo(cfg)
+    if rp:                                                   # Bot 3.17.0 : ☁️ sauvegarde des presets
+        err, ts = db.meta_get("ghb_err"), int(float(db.meta_get("ghb_ts") or 0))
+        lines.append(f"☁️ Presets sauvegardés sur GitHub ({esc(rp)}) : "
+                     + (f"⚠️ {esc(err)}" if err else (f"il y a {render.ago(now - ts)}" if ts else "en attente")))
+    else:
+        lines.append("☁️ Sauvegarde GitHub des presets : non configurée (BACKUP_TOKEN dans .env)")
     if cfg.healthcheck_url:
         hc = db.meta_get("health_ok")
         lines.append("📡 Surveillance externe : " + ("✅ active" if hc == "1" else "⏳ en attente" if hc == "" else "❌ ping refusé (URL ?)"))
@@ -133,6 +141,7 @@ def system_kb(pending: bool, previous: str = "", windows: bool = os.name == "nt"
           [[("📜 Journaux", "d:logs"), ("🏓 Ping", "d:png")],
            [("🧾 Journal des actions", "d:jra"), ("📊 Remettre le bouton du bas", "d:menu")]]),
         [("🔄 Redémarrer le bot", "d:rst"), ("🔃", "d:sys")],
+        [("♻️ Réinitialiser le serveur", "d:rz")],
         [("⬅ Accueil", "d:home")],
     ]
 

@@ -548,6 +548,11 @@ async def j_health(context: ContextTypes.DEFAULT_TYPE) -> None:
         s.ctx.db.meta_set("health_ok", "1" if ok else "0")
 
 
+async def j_ghbackup(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Bot 3.17.0 : ☁️ presets sauvegardés sur GitHub quand ils changent."""
+    await svc(context).router.backup_presets()
+
+
 async def j_backup(context: ContextTypes.DEFAULT_TYPE) -> None:
     from core import backup
     s = svc(context)
@@ -686,4 +691,5 @@ def build_application(cfg: Config, ctx_factory) -> Application:
         jq.run_daily(timed(j_withdraw_reminder), time=dtime(cfg.reports.withdraw_reminder_hour, 0), job_kwargs=JOB_KW_DAILY)
     jq.run_daily(timed(j_prune), time=dtime(4, 0), job_kwargs=JOB_KW_DAILY)
     jq.run_daily(timed(j_backup), time=dtime(cfg.backup.hour % 24, 0), job_kwargs=JOB_KW_DAILY)
+    jq.run_repeating(timed(j_ghbackup), interval=max(60, cfg.backup.github_check_s), first=90, job_kwargs=JOB_KW)
     return app

@@ -1646,3 +1646,32 @@ async def test_presets_export_puis_import_dans_un_autre_bot(svc):
     tok = dash.screen[1]
     await router.on_callback(f"ok:{tok}")
     assert await _until(lambda: st.presets["Martin"] == {"lot": "0.02", "fast": "12"})
+
+
+async def test_reinitialisation_et_sauvegarde_github_depuis_le_bot(svc, monkeypatch):
+    """Bot 3.17.0 : ♻️ double confirmation puis tout effacé sauf bot / BASE / presets ; ☁️ presets poussés s'ils changent."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    from core import ghbackup, update as upd
+    st = ctx_stack(svc)
+    a = seed(st, 81, "Demo-Server 1")
+    dash.store.put("Martin", {"fast": "12"})
+    await router.on_callback("d:rz")
+    assert dash.screen[0] == "confirm"
+    await router.on_callback(f"ok:{dash.screen[1]}")
+    assert await _until(lambda: dash.screen[0] == "confirm" and "Vraiment sûr" in dash.all_text() if hasattr(dash, "all_text") else dash.screen[0] == "confirm")
+    monkeypatch.setattr(upd, "restart_bot", lambda root: "test")
+    await router.on_callback(f"ok:{dash.screen[1]}")
+    assert await _until(lambda: upd.STOP.is_set())
+    upd.STOP.clear()
+    assert ctx.db.list(include_archived=True) == [] and "Martin" in dash.store.presets
+    assert not any(ctx.cfg.paths.instances.iterdir()) and any("Serveur réinitialisé" in t for t in sender.all_text().split("\n"))
+    # ☁️ sauvegarde
+    pushed = []
+    monkeypatch.setattr(ghbackup, "push", lambda cfg, text, http=None: pushed.append(text) or "")
+    ctx.cfg.backup_token, ctx.cfg.update.github = "tok", "aigle3/ScalpX"
+    await router.backup_presets()
+    await router.backup_presets()                                          # inchangé : pas de 2e envoi
+    assert len(pushed) == 1 and "[preset=Martin]" in pushed[0]
+    dash.store.set_value("Martin", "fast", "14")
+    await router.backup_presets()
+    assert len(pushed) == 2 and "fast=14" in pushed[1]

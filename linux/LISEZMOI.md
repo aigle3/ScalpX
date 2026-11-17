@@ -53,6 +53,11 @@ sudo -u scalpx bash -c 'cd ~/scalpx/bot && .venv/bin/python main.py --check'   #
   arrêtés avec lui.
 - Le VPS redémarre : Xvfb puis le bot démarrent seuls, et le bot relance les terminaux.
 
+## Sauvegarde des presets sur GitHub
+Dépôt privé `scalpx-sauvegarde` + jeton fine-grained limité à ce dépôt (Contents : Read and write), dans `.env` :
+`BACKUP_TOKEN=github_pat_…` puis 🔄 Redémarrer le bot. Les presets y sont réécrits à chaque changement ;
+💾 Presets → ☁️ Restaurer depuis GitHub les récupère sur un serveur neuf.
+
 ## Sécurité
 Ferme l'accès SSH par mot de passe (clé uniquement) et n'ouvre aucun autre port : le bot n'en a pas besoin (il contacte
 Telegram et GitHub, rien n'entre).

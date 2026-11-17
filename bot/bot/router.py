@@ -187,6 +187,13 @@ class Router:
             return await self._ask("⚡ <b>Optimiser le VPS ?</b>\nRéglages Windows qui libèrent du CPU (antivirus, services inutiles, "
                                    "alimentation…), CPU mesuré avant / après (≈ 1 min). Les terminaux et l'EA continuent de trader.",
                                    self.vps_optimize, ("sys",), "⚡ Optimiser")
+        elif sub == "rz":                                       # Bot 3.17.0 : ♻️ réinitialiser (double confirmation)
+            return await self._ask("♻️ <b>Réinitialiser le serveur ?</b>\n"
+                                   "Supprime <b>tous les comptes de ce serveur</b> (terminaux arrêtés, dossiers effacés), le terminal "
+                                   "de backtest, tout l'historique (soldes, cycles, retraits, journaux, optimiseur) et les fichiers "
+                                   "d'échange avec l'EA.\nGardés : le bot, BASE et les presets. "
+                                   "Les positions restent chez le broker (TP en place).",
+                                   self._reset_confirm2, ("sys",), "♻️ Continuer")
         elif sub == "crash":
             from .system import crash_report
             text, has = crash_report(self.ctx)
@@ -994,6 +1001,9 @@ class Router:
             else:
                 await self._preset_export(names)
                 return ""
+        elif sub == "ghr":                                              # Bot 3.17.0 : ☁️ restaurer la sauvegarde GitHub
+            self._bg(self.preset_restore_github())
+            return ""
         elif sub == "imp":
             self.awaiting_import = True
             dash.goto("psl")
@@ -1065,6 +1075,83 @@ class Router:
                                [[("✖ Fermer", "d:close")]], True)
         self.dash.flash("🔍 Comparaison envoyée ci-dessous.", 10)
         await self.dash.refresh(force=True)
+
+    async def _reset_confirm2(self) -> None:
+        n = len(self.ctx.db.list())
+        await self._ask(f"⚠️ <b>Vraiment sûr ?</b>\n{n} compte(s) seront retirés de ce serveur. Impossible à annuler : il faudra "
+                        "recréer chaque compte avec ➕ (mot de passe redemandé).", self.reset_server, ("sys",), "♻️ OUI, tout effacer")
+
+    async def reset_server(self) -> None:
+        """Bot 3.17.0 : ♻️ voir core.reset. Le bot redémarre à la fin."""
+        from core import reset as rs, update as upd
+        mid = await self.sender.send(self.chat_id, "♻️ <b>Réinitialisation…</b>\n⏳ arrêt des terminaux", None, True)
+        insts = self.ctx.db.list(include_archived=True)
+        for i in insts:
+            self.ctx.db.set_desired(i.id, "ARRETE")                       # le watchdog ne relance plus rien
+        for i in insts:
+            try:
+                await asyncio.to_thread(self.ctx.mgr.procs.kill, self.ctx.mgr.exe(i))
+            except Exception:
+                log.exception("réinitialisation : arrêt de %s", i.id)
+        try:
+            await self.bt._kill()
+        except Exception:
+            log.exception("réinitialisation : arrêt du testeur")
+        await asyncio.sleep(3)
+        cfg = self.ctx.cfg
+        rep = await asyncio.to_thread(rs.wipe_files, cfg.paths.instances, cfg.paths.archives, self.bt.folder,
+                                      cfg.paths.common(), cfg.paths.base)
+        rs.wipe_db(self.ctx.db, rep)
+        self.ctx.db.add_action("", "SERVEUR RÉINITIALISÉ", not rep.errors, f"{len(insts)} compte(s)")
+        log.warning("serveur réinitialisé : %d compte(s), %d dossier(s), %d fichier(s), %d ligne(s), erreurs : %s",
+                    len(insts), len(rep.folders), rep.files, rep.rows, rep.errors)
+        txt = (f"♻️ <b>Serveur réinitialisé</b> : {len(insts)} compte(s) retiré(s), {rep.files} fichier(s) d'échange supprimé(s).\n"
+               "Bot, BASE et presets gardés. Le bot redémarre ; recrée tes comptes avec ➕.")
+        if rep.errors:
+            txt += "\n⚠️ Non supprimé : " + esc("; ".join(rep.errors)[:600])
+        await self.sender.edit(self.chat_id, mid, txt, [[("✖ Fermer", "d:close")]])
+        from .system import BOT_ROOT
+        await asyncio.to_thread(upd.restart_bot, BOT_ROOT)
+        upd.STOP.set()
+
+    async def preset_restore_github(self) -> None:
+        from core import ghbackup
+        self.dash.goto("psl")
+        self.dash.flash("⏳ Lecture de la sauvegarde GitHub…")
+        await self.dash.refresh(force=True)
+        text, err = await asyncio.to_thread(ghbackup.fetch, self.ctx.cfg)
+        if err:
+            self.dash.flash(f"❌ {esc(err)}")
+            await self.dash.refresh(force=True)
+            return
+        await self.preset_import(text)
+
+    async def backup_presets(self) -> None:
+        """Toutes les 5 min : presets changés → presets.txt réécrit sur GitHub (une alerte par problème)."""
+        from core import ghbackup
+        if not ghbackup.repo(self.ctx.cfg):
+            return
+        store = self.dash.store
+        names = store.names()
+        if not names:
+            return
+        text = pui.ps.export_text(store, names)
+        h = ghbackup.digest(text)
+        db = self.ctx.db
+        if h == db.meta_get("ghb_hash"):
+            return
+        err = await asyncio.to_thread(ghbackup.push, self.ctx.cfg, text)
+        if err:
+            if err != db.meta_get("ghb_err"):
+                db.meta_set("ghb_err", err)
+                await self.sender.send(self.chat_id, f"⚠️ Sauvegarde GitHub des presets : {esc(err)}", None, True)
+            return
+        db.meta_set("ghb_hash", h)
+        db.meta_set("ghb_ts", str(int(time.time())))
+        if db.meta_get("ghb_err"):
+            db.meta_set("ghb_err", "")
+            await self.sender.send(self.chat_id, "☁️ Sauvegarde GitHub des presets rétablie.", None, True)
+        log.info("presets sauvegardés sur GitHub (%s)", ", ".join(names))
 
     async def _preset_export(self, names: list[str]) -> None:
         store = self.dash.store
