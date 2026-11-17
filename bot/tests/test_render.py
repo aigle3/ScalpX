@@ -207,3 +207,15 @@ def test_accueil_tous_les_comptes():
     txt = render.home_text(vs, totals(vs), {}, "EUR", "3", "7.8.3", False, 1.0, time.time())
     assert "autre(s) : 👥 Comptes" not in txt and txt.count("\n🟢 ") + txt.count(">🟢 ") >= 0
     assert all(v.inst.label in txt for v in vs)
+
+
+def test_mode_continu_affiche_en_haut_de_l_accueil():
+    """Bot 3.18.2 : le mode de lancement est toujours visible sur l'accueil, même pendant un objectif."""
+    from types import SimpleNamespace as NS
+    from bot.render import mode_line
+    st = lambda c: NS(mode_continu=c, age_s=lambda now: 1)                       # noqa: E731
+    v = lambda c: NS(st=st(c))                                                   # noqa: E731
+    assert "Mode continu" in mode_line([v(True), v(True)], 0)
+    assert "Mode créneaux" in mode_line([v(False)], 0)
+    assert "1 compte(s) en continu" in mode_line([v(True), v(False)], 0)
+    assert mode_line([], 0) == ""

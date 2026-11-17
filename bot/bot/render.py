@@ -308,13 +308,30 @@ def slot_stats_text(stats: dict, days: int, n_accounts: int, cur: str) -> str:
     return "\n".join(out)
 
 
+def mode_line(views: list[AccountView], now: float) -> str:
+    """Bot 3.18.2 : mode de lancement des objectifs, toujours visible en haut de l'accueil (continu ou créneaux)."""
+    fresh = [v.st for v in views if v.st is not None and v.st.age_s(now) < 120]
+    if not fresh:
+        return ""
+    n = sum(1 for st in fresh if st.mode_continu)
+    if n == len(fresh):
+        return "🔁 <b>Mode continu</b> : objectif lancé dès que tous les filtres sont OK (clôture M5)"
+    if n == 0:
+        return "🕐 <b>Mode créneaux</b> : objectif lancé aux heures prévues"
+    return f"🔀 <b>Modes mélangés</b> : {n} compte(s) en continu, {len(fresh) - n} en créneaux"
+
+
 def home_text(views: list[AccountView], t: Totals, vps: dict[str, float], cur: str, bot_v: str, ea_v: str,
               update_pending: bool, data_age_s: float | None, now: float, max_lines: int = 40,   # Bot 3.4.0 : tous les comptes (40 tient dans un message)
               extra_alerts: list[str] | None = None) -> str:
     """Accueil compact : état du trading, argent, alertes, puis une ligne par compte (objectif 🎯 ou vers 500)."""
     c = "" if t.currency_mixed else cur
     tb = trading_block(views, now)
-    lines = [f"📊 <b>ScalpX</b> {time.strftime('%H:%M', time.localtime(now))} · {tb[0]}", SEP]
+    lines = [f"📊 <b>ScalpX</b> {time.strftime('%H:%M', time.localtime(now))} · {tb[0]}"]
+    ml = mode_line(views, now)
+    if ml:
+        lines.append(ml)
+    lines.append(SEP)
     lines += tb[1:]
     lines.append(SEP)
     money_line = f"💰 <b>{money(t.balance, c)}</b> · jour {money(t.pl_jour, c, True)}"
@@ -399,7 +416,8 @@ def account_card(v: AccountView, withdrawn: float, closures: int, now: float | N
         f"📊 Flottant EA {money(st.flottant_ea, cur, True)} · Jour {money(st.day_realized(), cur, True)}",
         f"🎯 Vers {st.seuil_arret:.0f} : {bar(st.progress500(), 10)} {st.progress500() * 100:.0f}% "
         f"(solde+flottant {money(st.solde_plus_flottant_ea, cur)})",
-        f"📌 {st.positions} position(s) · {st.ordres} ordre(s) · cycle {st.cycle}",
+        f"📌 {st.positions} position(s) · {st.ordres} ordre(s) · cycle {st.cycle} · "
+        + ("🔁 mode continu" if st.mode_continu else "🕐 mode créneaux"),
     ]
     if st.etat == "ARRET_500":
         lines.append(f"💸 <b>À retirer : {money(st.to_retire(), cur)}</b> (laisser {st.seuil_reprise:.0f})")
