@@ -147,3 +147,31 @@ class Gone:
             return False
         self._down_since = self._down_since or now
         return now - self._down_since >= self.grace_s
+
+
+class Slots:
+    """Bot 3.14.1 : lancements « 2 par 2 » en file glissante : une place se libère dès que l'EA du terminal a chargé
+    (1er heartbeat, la partie lourde pour le CPU) ou au bout de free_after_s (un terminal très lent ne bloque plus
+    toute la file) ; l'attente du vert continue, elle, sans limite."""
+
+    def __init__(self, n: int, free_after_s: float = 600.0) -> None:
+        self.sem = asyncio.Semaphore(max(1, int(n)))
+        self.free_after_s = free_after_s
+
+    async def take(self) -> "Slot":
+        await self.sem.acquire()
+        return Slot(self.sem, self.free_after_s)
+
+
+class Slot:
+    def __init__(self, sem: asyncio.Semaphore, free_after_s: float) -> None:
+        self.sem, self.free_after_s, self.t0, self.done = sem, free_after_s, time.monotonic(), False
+
+    def free(self) -> None:
+        if not self.done:
+            self.done = True
+            self.sem.release()
+
+    def check(self, loaded: bool) -> None:
+        if loaded or time.monotonic() - self.t0 >= self.free_after_s:
+            self.free()

@@ -102,7 +102,7 @@ async def action_restart(ctx: Ctx, inst: Instance, force: bool = False) -> str:
 
 
 async def wait_online(ctx: Ctx, inst: Instance, since: float, timeout: float,
-                      tick: "Callable[[int, str], Awaitable[None]] | None" = None) -> tuple[bool, str]:
+                      tick: "Callable[[int, str], Awaitable[None]] | None" = None, slot=None) -> tuple[bool, str]:
     """Bot 3.9.0 : attend que l'EA d'un terminal relancé réponde (heartbeat écrit après `since`) ET soit connecté au serveur.
     Bot 3.11.0 : timeout <= 0 = sans limite (le temps qu'il faut) ; abandon si le terminal reste fermé 30 s."""
     end = time.monotonic() + timeout if timeout > 0 else float("inf")
@@ -111,7 +111,10 @@ async def wait_online(ctx: Ctx, inst: Instance, since: float, timeout: float,
     gone = Gone(ctx, inst)
     while time.monotonic() < end:
         st = ctx.status.read(inst.id)
-        if st is not None and st.ts >= since - 2:
+        loaded = st is not None and st.ts >= since - 2
+        if slot is not None:
+            slot.check(loaded)                          # Bot 3.14.1 : EA chargé → le terminal suivant peut démarrer
+        if loaded:
             if st.connecte:
                 return True, f"🟢 en ligne et connecté en {int(time.time() - since)} s"
             last = "EA lancé, pas encore connecté au serveur"

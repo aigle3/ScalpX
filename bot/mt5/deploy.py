@@ -432,8 +432,18 @@ class DeployManager:
             except Exception as exc:
                 outcomes[inst.id] = DeployOutcome(inst.id, "failed", f"erreur : {exc}")
         todo = [i for i in stopped if i.id not in outcomes]
-        # Bot 3.12.0 : relance PAR GROUPES de launch_group (2) : le groupe suivant attend que ceux-ci soient revenus
+        # Bot 3.12.0 : relance par 2 (launch_group) ; 3.14.1 : file glissante, place libérée dès que le nouvel EA a chargé
+        from .manager import Slots
+        slots = Slots(self.cfg.timing.launch_group)
+
         async def relaunch(k: int, inst: Instance) -> None:
+            slot = await slots.take()                       # Bot 3.14.1 : file glissante (place libérée dès l'EA chargé)
+            try:
+                await _relaunch(k, inst, slot)
+            finally:
+                slot.free()
+
+        async def _relaunch(k: int, inst: Instance, slot) -> None:
             old = self.status.read(inst.id)
             old_ts = old.ts if old is not None else 0
             t0 = time.time()
@@ -456,6 +466,7 @@ class DeployManager:
                     last = "terminal fermé pendant l'attente"
                     break
                 st = self.status.read(inst.id)
+                slot.check(st is not None and st.ts > old_ts and st.ts >= t0 - 2)   # nouvel EA chargé : suivant lancé
                 if st is not None and st.ts > old_ts and st.ts >= t0 - 2:
                     last = f"version {st.version or '?'}" + ("" if st.connecte else ", terminal pas encore connecté au serveur")
                     if st.connecte:
@@ -476,9 +487,7 @@ class DeployManager:
                                                  f"(dernier signe : {last})")
                 await asyncio.sleep(1.0)
             outcomes[inst.id] = res or DeployOutcome(inst.id, "failed", f"heartbeat du nouvel EA non reçu ({last})")
-        per = max(1, int(self.cfg.timing.launch_group))
-        for g in range(0, len(todo), per):
-            await asyncio.gather(*(relaunch(g + j + 1, inst) for j, inst in enumerate(todo[g:g + per])))
+        await asyncio.gather(*(relaunch(k, inst) for k, inst in enumerate(todo, 1)))
         # échecs : Bot 3.10.2, plus de retour à l'ancien EA (demandé) : nouvel EA laissé en place, terminal non touché,
         # compte remis « démarré » (surveillance normale) ; redémarrage du compte à la main si besoin
         for inst in [i for i in stopped if outcomes[i.id].status == "failed"]:

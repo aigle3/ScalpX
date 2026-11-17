@@ -865,8 +865,13 @@ class Router:
             timeout = float(self.ctx.cfg.timing.wait_online_limit_s)      # Bot 3.11.0 : 0 = le temps qu'il faut
             per = max(1, int(self.ctx.cfg.timing.launch_group))
 
+            from mt5.manager import Slots
+            slots = Slots(per)
+
             async def start_one(i) -> None:
+                slot = await slots.take()                  # Bot 3.14.1 : file glissante (place libérée dès l'EA chargé)
                 line[i.id] = "🚀 lancement…"
+                await show()
                 t0 = time.time()
                 try:
                     r = await act.action_start(self.ctx, i)
@@ -874,7 +879,7 @@ class Router:
                         async def tick(sec: int, last: str, i=i) -> None:
                             line[i.id] = f"attente de l'EA {sec} s ({last})…"
                             await show()
-                        ok, r = await act.wait_online(self.ctx, i, t0, timeout, tick)
+                        ok, r = await act.wait_online(self.ctx, i, t0, timeout, tick, slot)
                         if ok:
                             good.append(i.id)
                     elif r.startswith("ℹ️"):                    # déjà lancé
@@ -882,10 +887,11 @@ class Router:
                 except Exception as exc:
                     log.exception("terminal %s", i.label)
                     r = f"❌ {exc}"
+                finally:
+                    slot.free()
                 line[i.id] = str(r)
                 await show()
-            for k in range(0, len(to_start), per):
-                await asyncio.gather(*(start_one(i) for i in to_start[k:k + per]))
+            await asyncio.gather(*(start_one(i) for i in to_start))
             for i in to_start:                                     # redémarrage interrompu : jamais laissé en MAINTENANCE
                 cur = self.ctx.db.get(i.id)
                 if verb == "rst" and cur is not None and cur.desired_state == MAINTENANCE:

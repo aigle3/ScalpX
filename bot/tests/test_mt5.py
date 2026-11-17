@@ -448,10 +448,8 @@ async def test_deploiement_groupe_ferme_tout_puis_relance(stack):
 
     def launch(inst, ini=None):
         prev = [e[1] for e in order if e[0] == "launch"]
-        done = prev[:len(prev) - len(prev) % 2]                    # Bot 3.12.0 : par 2 : les groupes précédents sont revenus
-        for iid in done:
-            st = status.read(iid)
-            assert st is not None and st.connecte, "groupe suivant relancé avant le retour du précédent"
+        waiting = [iid for iid in prev if status.read(iid) is None]   # Bot 3.14.1 : au plus 2 terminaux en chargement
+        assert len(waiting) < 2, "plus de 2 terminaux en chargement en même temps"
         order.append(("launch", inst.id))
         return real_launch(inst, ini)
 
@@ -755,3 +753,20 @@ def test_reglages_par_defaut_fermeture_et_lancement():
     from core.config import Timing
     t = Timing()
     assert t.kill_after_s == 10 and t.launch_group == 2              # Bot 3.12.0
+
+
+@pytest.mark.asyncio
+async def test_file_glissante_place_liberee_des_ea_charge():
+    """Bot 3.14.1 : 2 places ; un terminal très lent (jamais chargé) ne bloque pas les suivants au-delà de free_after_s."""
+    from mt5.manager import Slots
+    slots = Slots(2, free_after_s=0.05)
+    a, b = await slots.take(), await slots.take()
+    a.check(True)                                                  # EA de a chargé : une place libre
+    c = await asyncio.wait_for(slots.take(), 0.5)
+    await asyncio.sleep(0.06)
+    b.check(False)                                                 # b toujours pas chargé, mais délai dépassé
+    d = await asyncio.wait_for(slots.take(), 0.5)
+    for s in (a, b, c, d):
+        s.free()
+        s.free()                                                   # libérer deux fois : sans effet
+    assert slots.sem._value == 2
