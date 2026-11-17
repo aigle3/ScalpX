@@ -18,6 +18,29 @@ _NUM = re.compile(r"-?\d+(?:[.,]\d+)?")
 BY_KEY = {p[0]: p for p in cat.PARAMS}
 
 
+def valid_value(key: str, v) -> bool:
+    """Bot 4.3.0 : valeur brute lisible par l'EA pour cette clé (preset importé, restauré ou ancien) ?
+    Clé inconnue (réglage retiré de l'EA), texte, 1/0 attendu, choix hors liste → False. Aucune valeur n'est modifiée :
+    l'EA borne lui-même les nombres hors limites."""
+    p = BY_KEY.get(key)
+    v = str(v).strip()
+    if p is None or not v or len(v) > 24:
+        return False
+    if p[3] == "bool":
+        return v in ("0", "1")
+    try:
+        x = float(v.replace(",", "."))
+    except ValueError:
+        return False
+    if x != x or x in (float("inf"), float("-inf")):
+        return False
+    if p[3] == "enum":
+        return x.is_integer() and 0 <= int(x) < max(1, len(p[8]))
+    if p[3] == "int":
+        return x.is_integer()
+    return True
+
+
 def _dec(step: float) -> int:
     s = f"{step:.6f}".rstrip("0")
     return len(s.split(".")[1]) if "." in s else 0
@@ -89,8 +112,8 @@ class PresetStore:
         try:
             d = json.loads(self.path.read_text(encoding="utf-8"))
             # réglages supprimés de l'EA (ex. « autoresume » en 6.0.0) : retirés des presets
-            self.presets = {str(k): {str(a): str(b) for a, b in v.items() if str(a) in BY_KEY}
-                            for k, v in d.get("presets", {}).items()}
+            self.presets = {str(k): {str(a): str(b).strip() for a, b in v.items() if valid_value(str(a), b)}
+                            for k, v in d.get("presets", {}).items() if isinstance(v, dict)}
             self.active = d.get("active", "") if d.get("active", "") in self.presets else ""
         except (OSError, ValueError, AttributeError):
             self.presets, self.active = {}, ""
@@ -185,8 +208,8 @@ SET_INPUTS = {
     "emsl": "UseEmergencyStopLoss", "emslpct": "EmergencyStopLossPct", "sesslim": "UseSessionLossLimit",
     "sesspct": "MaxSessionLossPct", "early": "UseEarlyGoalClose", "goalmax": "GoalMaxAmount",
     "profnotif": "ProfitNotifyAmount", "dev": "Deviation", "retries": "MaxRetries", "n_filters": "NotifyFilters",
-    "n_progress": "NotifyProgress", "n_errors": "NotifyErrors", "ch_style": "ChartModernStyle", "ch_ema": "ChartShowEMA",
-    "ch_levels": "ChartShowLevels", "ch_panel": "ChartShowPanel", "news_block": "NewsPauseEnabledAtStart",
+    "n_progress": "NotifyProgress", "n_errors": "NotifyErrors",
+    "news_block": "NewsPauseEnabledAtStart",
     "sl_on": "ObjectifAutoCreneaux", "sl_pct": "ObjectifAutoPct", "sl_win": "ObjectifAutoFenetreMin",
     "seuil_on": "ActiverSeuil500", "seuil_arret": "SeuilArret", "seuil_reprise": "SeuilReprise",
     "f_ext": "UseExtensionFilter", "extatr": "ExtensionMaxATR", "f_fresh": "UseFreshSignalFilter",
@@ -314,10 +337,8 @@ def parse_import(text: str) -> tuple[dict[str, dict[str, str]], int]:
         if line.startswith(("#", ";")) or "=" not in line:
             continue
         k, v = (x.strip() for x in line.split("=", 1))
-        if k not in BY_KEY:
+        if not valid_value(k, v):                          # réglage retiré de l'EA, inconnu ou valeur illisible
             unknown += 1
-            continue
-        if any(c in v for c in "\x00"):
             continue
         presets.setdefault(name or "Importé", {})[k] = v
     presets = {n: v for n, v in presets.items() if v}

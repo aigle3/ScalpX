@@ -1632,7 +1632,7 @@ class Router:
         replaced = [n for n in got if n in store.presets]
         desc = "\n".join(f"• {esc(n)} : {len(v)} réglages" + (" (remplace l'existant)" if n in replaced else " (nouveau)")
                          for n, v in got.items())
-        note = f"\n<i>{unknown} réglage(s) inconnu(s) de cet EA ignoré(s).</i>" if unknown else ""
+        note = f"\n<i>{unknown} réglage(s) ignoré(s) : inconnu(s) de cet EA (ex. réglages retirés) ou valeur illisible.</i>" if unknown else ""
 
         async def run() -> None:
             for n, v in got.items():

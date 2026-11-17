@@ -500,3 +500,51 @@ async def test_wait_online_attend_heartbeat_connecte():
     ctx2 = NS(status=NS(read=lambda iid: NS(ts=t0 + 1, connecte=False)))
     ok, msg = await act.wait_online(ctx2, NS(id="a"), t0, timeout=1.5)
     assert not ok and "pas encore connecté" in msg
+
+
+def test_catalogue_du_bot_identique_aux_reglages_de_l_ea():
+    """EA 8.0.0 / Bot 4.3.0 : mêmes clés, mêmes groupes et mêmes noms de groupes que SX_Core.mqh (réglages 🎨 Graphique
+    retirés des deux côtés) ; un preset ancien qui contient encore ch_* est lu sans erreur, sans ces clés."""
+    import re
+    from pathlib import Path
+    from core import params as cat, presets as ps
+    src = (Path(__file__).resolve().parents[2] / "ea/MQL5/Experts/SX_Core.mqh").read_text(encoding="utf-8-sig")
+    enum = re.search(r"enum ENUM_PGROUP \{([^}]*)\}", src).group(1)
+    groups = [g.split("=")[0].strip() for g in enum.split(",") if g.strip() and "COUNT" not in g]
+    names = dict(re.findall(r'g_groupName\[(G_\w+)\]\s*=\s*"([^"]+)"', src))
+    assert [names[g] for g in groups] == cat.GROUPS
+    regs = {k: groups.index(g) for k, g in re.findall(r'Reg\(P_\w+,\s*"(\w+)",\s*"[^"]*",\s*(G_\w+)', src)}
+    assert regs == {p[0]: p[2] for p in cat.PARAMS}
+    assert not any(k.startswith("ch_") for k in regs) and not any(k.startswith("ch_") for k in ps.SET_INPUTS)
+    assert set(ps.SET_INPUTS) <= set(regs)
+
+
+def test_preset_ancien_avec_reglages_graphiques_lu_sans_eux(tmp_path):
+    """Bot 4.3.0 : un presets.json d'avant (ch_style, ch_panel…) se charge ; les clés graphiques disparaissent."""
+    import json
+    from core import presets as ps
+    f = tmp_path / "presets.json"
+    f.write_text(json.dumps({"presets": {"Martin": {"fast": "12", "ch_style": "1", "ch_panel": "0"}}, "active": "Martin"}),
+                 encoding="utf-8")
+    st = ps.PresetStore(f)
+    assert st.presets == {"Martin": {"fast": "12"}} and st.active == "Martin"
+
+
+def test_import_tolerant_reglages_retires_inconnus_ou_illisibles(tmp_path):
+    """Bot 4.3.0 : un ancien export / une sauvegarde avec des réglages retirés (ch_*), inconnus ou des valeurs illisibles
+    s'importe sans planter : seules les valeurs lisibles des réglages de l'EA restent, sans être modifiées."""
+    import json
+    from core import presets as ps
+    text = ("# ScalpX presets\n[preset=Martin]\nfast=12\nlot=0.02\nseuil_arret=505\nch_style=1\nch_panel=0\ntruc_inconnu=3\n"
+            "slow=abc\ndyngrid=2\ntf=9\ntbm=1.5\nlotmult=nan\nf_atr=1\n[preset=Vide]\nch_ema=1\n")
+    got, unknown = ps.parse_import(text)
+    assert got == {"Martin": {"fast": "12", "lot": "0.02", "seuil_arret": "505", "f_atr": "1"}} and unknown == 9
+    f = tmp_path / "presets.json"
+    f.write_text(json.dumps({"presets": {"Martin": {"fast": "12", "ch_style": "1", "slow": "x", "lot": 0.02},
+                                         "Cassé": "pas un dict"}, "active": "Martin"}), encoding="utf-8")
+    st = ps.PresetStore(f)
+    assert st.presets == {"Martin": {"fast": "12", "lot": "0.02"}} and st.active == "Martin"
+    for bad in ('{"presets": [1, 2]}', "pas du json", '{"presets": {"A": {"fast": null}}}'):
+        f.write_text(bad, encoding="utf-8")
+        st = ps.PresetStore(f)                                                # jamais d'exception
+        assert all(ps.valid_value(k, v) for p in st.presets.values() for k, v in p.items())

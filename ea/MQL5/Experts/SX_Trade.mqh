@@ -55,11 +55,9 @@ bool InitIndicators()
 
 bool RebuildIndicators()
 {
-   ChartRemoveATR();           // l'ATR du graphique référence l'ancien handle
    ReleaseIndicators();
    bool ok = InitIndicators();
    g_tpSig = -1;
-   g_lastEmaBar = 0;
    return ok;
 }
 

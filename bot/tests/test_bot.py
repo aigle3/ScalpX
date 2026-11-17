@@ -1727,3 +1727,27 @@ async def test_un_autre_bouton_annule_la_saisie_du_mot_de_passe(svc, monkeypatch
     assert router.awaiting_token == ""
     await router.on_text("NomDePreset1")
     assert "BACKUP_KEY" not in written and not ctx.cfg.backup_key
+
+
+async def test_ancien_preset_et_ancien_ea_avec_reglages_graphiques(svc):
+    """EA 8.0.0 / Bot 4.3.0 : 📥 un ancien export (ch_*, clé inconnue, valeur illisible) s'importe ; appliqué à un robot
+    encore en EA 7.x (qui annonce ch_*), seules les vraies différences partent et le robot devient conforme."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    from bot import presets_ui as pui
+    st = ctx_stack(svc)
+    a = seed(st, 73, "Demo-Server 1")
+    ea.start()
+    await asyncio.sleep(0.3)
+    try:
+        ea.accounts[a.id]["params"] = {"lot": "0.01 lot", "fast": "10", "ch_style": "✅", "ch_panel": "✅"}
+        old = "# ScalpX presets\n[preset=Martin]\nfast=12\nlot=0.02\nch_style=0\nch_panel=0\ntruc=1\nslow=abc\n"
+        await router.preset_import_file(old.encode("utf-16"))
+        assert await _until(lambda: dash.store.presets.get("Martin") == {"fast": "12", "lot": "0.02"})
+        await router.on_callback(f"s:ap:{pui.code_of('Martin')}")
+        await _confirm(router, dash)
+        assert await _until(lambda: dash.store.active == "Martin" and dash.preset_check is not None, 120)
+        p = ea.accounts[a.id]["params"]
+        assert p["fast"] == "12" and p["lot"] == "0.02 lot" and p["ch_style"] == "✅" and p["ch_panel"] == "✅"
+        assert dash.preset_check.diffs == {}
+    finally:
+        await ea.stop()

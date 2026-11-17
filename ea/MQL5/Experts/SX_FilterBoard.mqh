@@ -1,6 +1,6 @@
 ﻿//+------------------------------------------------------------------+
 //| SX_FilterBoard.mqh - ScalpX                                      |
-//| Tableau des filtres (bot, panneau, journal, statut) :            |
+//| Tableau des filtres (bot, journal, statut) :                     |
 //|  - 8 filtres dont News (calendrier MT5)                          |
 //|  - UNE alerte globale cohérente : « filtres bloquants » puis     |
 //|    « tous les filtres OK, le trading reprend » (confirmée 30 s)  |
@@ -93,7 +93,7 @@ string FbWhy(int i)
    return f_why[i];
 }
 
-int FbOrder(int k) { int o[FB_N] = { 0, 1, 9, 10, 2, 6, 7, 8, 3, 4, 5 }; return o[k]; }   // même ordre que le panneau du graphique ([ARCHI] 6.6.0 : + 9, 10)
+int FbOrder(int k) { int o[FB_N] = { 0, 1, 9, 10, 2, 6, 7, 8, 3, 4, 5 }; return o[k]; }   // ordre d'affichage dans le bot ([ARCHI] 6.6.0 : + 9, 10)
 
 bool FiltersAllOK()
 {

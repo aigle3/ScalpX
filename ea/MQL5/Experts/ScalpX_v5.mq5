@@ -13,11 +13,10 @@
 //|   SX_FilterBoard.mqh  tableau des filtres (dont News) + alerte   |
 //|   SX_Journal.mqh   rapport du jour, journal des filtres          |
 //|   SX_Smart.mqh     alertes, watchdog, news, pause, vacances      |
-//|   SX_Chart.mqh     style, EMA, ATR, niveaux sur le graphique     |
-//|   SX_Panel.mqh     panneau d'informations dynamique              |
+//|   (8.0.0 : aucun affichage sur le graphique, tout par Telegram)  |
 //+------------------------------------------------------------------+
 #property copyright   "ScalpX"
-#property version     "7.13"
+#property version     "8.00"
 #property description "ScalpX v6.1.0 — EMA 10/20 + grille ATR + TP commun + filtres multi-timeframe, pilotage par bot central (fichiers)"
 
 // [SEUIL500] début : TEST UNIQUEMENT (test B-3 de la checklist). Décommenter pour simuler un glissement de 2.0 (devise du compte)
@@ -27,7 +26,7 @@
 
 //+------------------------------------------------------------------+
 //| PARAMÈTRES (valeurs de départ).                                  |
-//| Tout est modifiable ensuite depuis le bot central ou le panneau ;|
+//| Tout est modifiable ensuite depuis le bot central (Telegram) ;   |
 //| les réglages modifiés sont sauvegardés (voir UseSavedParams).    |
 //+------------------------------------------------------------------+
 input group "══ Signal & timeframe ══"
@@ -114,12 +113,6 @@ input bool   NotifyFilters = false;                   // Alertes de filtres
 input bool   NotifyProgress = true;                   // Alertes de progression (25/50/75 %)
 input bool   NotifyErrors = true;                     // Alertes d'erreurs d'ordres
 
-input group "══ Graphique ══"
-input bool   ChartModernStyle = true;                 // Thème moderne (sans grille ni volumes)
-input bool   ChartShowEMA = true;                     // Tracer les EMA
-input bool   ChartShowLevels = true;                  // Lignes prix moyen / TP / grille
-input bool   ChartShowPanel = true;                   // Panneau d'informations
-
 input group "══ Divers ══"
 input bool   UseSavedParams = true;                   // Reprendre les réglages modifiés depuis le bot
 input bool   VerboseLogs = false;                     // Journal détaillé
@@ -170,8 +163,6 @@ input int    ExtensionTimeframe = 0;                  // Extension mesurée sur 
 #include "SX_Smart.mqh"
 #include "SX_Labo.mqh"
 #include "SX_Backtest.mqh"             // [ARCHI] 7.2.0 : backtest piloté par le bot                 // [ARCHI] 7.1.0 : labo des filtres (séries virtuelles, aucun ordre réel)
-#include "SX_Chart.mqh"
-#include "SX_Panel.mqh"
 
 //+------------------------------------------------------------------+
 //| Initialisation                                                   |
@@ -231,8 +222,7 @@ int OnInit()
               "\n🎯 Objectif : " + Sgn(GoalAmount()) + " " + Cur() + " | progression " + F0(GoalProgressPct()) + " %");
    // [ARCHI] fin
 
-   ChartRefreshAll(true);
-   PanelUpdate();
+   ChartSetInteger(0, CHART_SHOW, false);   // [ARCHI] 8.0.0 : graphique masqué (tout passe par Telegram : aucun dessin)
    if(!g_bt) EventSetMillisecondTimer(250);   // [ARCHI] 7.2.0 : backtest du bot : tâches de la seconde lancées par OnTick (temps simulé)
    return INIT_SUCCEEDED;
 }
@@ -254,7 +244,7 @@ void OnDeinit(const int reason)
    BtDeinit(reason);                  // 7.2.0 : résultat final du backtest
    ArchiDeinit(reason);
    // [ARCHI] fin
-   ChartShutdown(!reload);
+   if(!reload) ChartSetInteger(0, CHART_SHOW, true);   // [ARCHI] 8.0.0 : EA retiré, graphique rendu
    ReleaseIndicators();
 }
 
@@ -368,16 +358,8 @@ void OnTimer()
       SmartTick1Hz();
       LaboTimer1Hz();                    // [ARCHI] 7.1.0 : labo des filtres (mesure seulement)
       BtLiveTick();                      // [ARCHI] 7.2.0 : calendrier des news exporté pour les backtests (1 fois/jour)
-      ChartDrawEMAs(false);
-
-      ShotTick();                        // captures demandées par le bot
-      if(!PBool(P_CH_PANEL)) ChartRedraw(0);
+      ShotTick();                        // courbe d'equity demandée par le bot
    }
-
-   //--- Graphique (4 Hz, seulement si changement)
-   static ulong lastLv = 0;
-   if(now - lastLv >= 500) { lastLv = now; ChartDrawLevels(); }
-   PanelUpdate();
 
    // [ARCHI] début
    ArchiTimer();                         // commandes (2 s), statut (5 s), créneaux, événements
@@ -441,13 +423,4 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    }
 }
 
-//+------------------------------------------------------------------+
-//| Clics sur le panneau                                             |
-//+------------------------------------------------------------------+
-void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
-{
-   if(id == CHARTEVENT_CLICK) PanelOnClickXY((int)lparam, (int)dparam);   // [ARCHI] 6.4.0 : panneau sur canevas
-   else if(id == CHARTEVENT_OBJECT_CLICK) PanelOnClick(sparam);
-   else if(id == CHARTEVENT_CHART_CHANGE) { g_panelMs = 0; PanelUpdate(); }   // [ARCHI] taille du graphique changée : panneau adapté
-}
 //+------------------------------------------------------------------+

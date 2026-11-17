@@ -3,7 +3,7 @@
 //| Noyau : variables globales, registre de paramètres (tous les     |
 //| réglages sont modifiables à chaud), persistance, presets.        |
 //+------------------------------------------------------------------+
-#define SX_VERSION   "7.13.0"
+#define SX_VERSION   "8.0.0"
 #define SX_PREFIX    "SX4_"
 #define SX_MAXQ      40
 
@@ -53,7 +53,7 @@ datetime SxGmt()
 
 //--- Types / groupes / identifiants de paramètres
 enum ENUM_PTYPE  { PT_BOOL = 0, PT_INT = 1, PT_DBL = 2, PT_ENUM = 3 };
-enum ENUM_PGROUP { G_SIGNAL = 0, G_GRID, G_TP, G_FILTERS, G_MTF, G_TIME, G_RISK, G_GOAL, G_EXEC, G_NOTIF, G_CHART, G_SMART, G_COUNT };
+enum ENUM_PGROUP { G_SIGNAL = 0, G_GRID, G_TP, G_FILTERS, G_MTF, G_TIME, G_RISK, G_GOAL, G_EXEC, G_NOTIF, G_SMART, G_COUNT };
 
 enum ENUM_PID
 {
@@ -80,8 +80,6 @@ enum ENUM_PID
    P_DEVIATION, P_RETRIES,
    // Notifications
    P_N_FILTERS, P_N_PROGRESS, P_N_ERRORS,
-   // Graphique
-   P_CH_STYLE, P_CH_EMA, P_CH_LEVELS, P_CH_PANEL,
    // Alertes, news, mode vacances
    P_N_WATCHDOG, P_N_MARKET,
    P_N_NEWS, P_NEWS_MIN, P_NEWS_IMP, P_NEWS_BLOCK, P_NEWS_BEFORE, P_NEWS_AFTER, P_VAC_RISK,
@@ -95,7 +93,6 @@ enum ENUM_PID
 };
 
 #define PF_INDI   1   // reconstruire les indicateurs
-#define PF_CHART  2   // redessiner le graphique
 #define PF_TP     4   // recalculer le TP
 
 //--- Registre
@@ -184,8 +181,7 @@ string   g_cutName = "";
 // [ARCHI] fin
 int      g_faState  = -1;          // dernier état global annoncé : 1 = tous OK, 0 = bloqué, -1 = inconnu
 ulong    g_faSince  = 0;
-//--- Demandes d'images du bot (traitées par le timer : ShotTick)
-string   g_shotReq  = "";
+//--- Demande de courbe d'equity du bot (traitée par le timer : ShotTick)
 string   g_curveReq = "";
 //--- Mode vacances, pause programmée, news
 bool     g_vacation = false;          // mode vacances : aucune nouvelle série, plafond de risque réduit
@@ -250,10 +246,6 @@ double   g_profitAccum= 0;
 string   g_psNames[12];
 int      g_psCount    = 0;
 
-//--- Graphique / panneau
-ulong    g_panelMs    = 0;
-datetime g_lastEmaBar = 0;
-string   g_atrIndName = "";
 int      g_atrSubWin  = -1;
 bool     g_chartStyled= false;
 long     g_chOrig[24];
@@ -363,22 +355,21 @@ void InitParams()
    g_groupName[G_GOAL]    = "🏆 Objectifs";
    g_groupName[G_EXEC]    = "⚡ Exécution";
    g_groupName[G_NOTIF]   = "🔔 Notifications";
-   g_groupName[G_CHART]   = "🎨 Graphique";
    g_groupName[G_SMART]   = "🧠 Alertes & news";
 
    // --- Signal & timeframe
    Reg(P_TF, "tf", "Timeframe de trading", G_SIGNAL, PT_ENUM, TfToIndex(TradingTimeframe), 0, 5, 1, "",
        "Timeframe des EMA, de l'ATR et de tous les filtres. Indépendant du graphique affiché (mets le même pour voir ce que le robot voit).",
-       "M1|M5|M15|M30|H1|H4", PF_INDI | PF_CHART);
+       "M1|M5|M15|M30|H1|H4", PF_INDI);
    Reg(P_BAR, "bar", "Bougie utilisée", G_SIGNAL, PT_ENUM, SignalBar, 0, 1, 1, "",
        "En cours = réagit à chaque tick (comportement v3.3, signal pouvant osciller). Clôturée = signal stable, une seule décision par bougie.",
-       "En cours|Clôturée", PF_CHART);
+       "En cours|Clôturée");
    Reg(P_FAST, "fast", "EMA rapide", G_SIGNAL, PT_INT, FastEMA, 2, 200, 1, "",
-       "Période de l'EMA rapide. Fast > Slow = ACHAT, Fast < Slow = VENTE.", "", PF_INDI | PF_CHART);
+       "Période de l'EMA rapide. Fast > Slow = ACHAT, Fast < Slow = VENTE.", "", PF_INDI);
    Reg(P_SLOW, "slow", "EMA lente", G_SIGNAL, PT_INT, SlowEMA, 3, 400, 1, "",
-       "Période de l'EMA lente (doit être supérieure à l'EMA rapide).", "", PF_INDI | PF_CHART);
+       "Période de l'EMA lente (doit être supérieure à l'EMA rapide).", "", PF_INDI);
    Reg(P_ATRP, "atrp", "Période ATR", G_SIGNAL, PT_INT, ATRPeriod, 2, 100, 1, "",
-       "Période de l'ATR (volatilité) utilisé pour le TP dynamique et le filtre de volatilité.", "", PF_INDI | PF_CHART | PF_TP);
+       "Période de l'ATR (volatilité) utilisé pour le TP dynamique et le filtre de volatilité.", "", PF_INDI | PF_TP);
 
    // --- Lots & grille
    Reg(P_LOT, "lot", "Taille du lot", G_GRID, PT_DBL, LotSize, 0.01, 10.0, 0.01, " lot",
@@ -537,16 +528,6 @@ void InitParams()
        "Messages à 25 %, 50 % et 75 % de l'objectif.");
    Reg(P_N_ERRORS, "n_errors", "Erreurs d'ordres", G_NOTIF, PT_BOOL, NotifyErrors ? 1 : 0, 0, 1, 1, "",
        "Message en cas d'échecs d'ordres répétés.");
-
-   // --- Graphique
-   Reg(P_CH_STYLE, "ch_style", "Style moderne du graphique", G_CHART, PT_BOOL, ChartModernStyle ? 1 : 0, 0, 1, 1, "",
-       "Thème sombre, bougies nettes, sans grille ni volumes. Le style d'origine est restauré au retrait du robot.", "", PF_CHART);
-   Reg(P_CH_EMA, "ch_ema", "Afficher les EMA", G_CHART, PT_BOOL, ChartShowEMA ? 1 : 0, 0, 1, 1, "",
-       "Trace les deux EMA du robot directement sur le graphique.", "", PF_CHART);
-   Reg(P_CH_LEVELS, "ch_levels", "Afficher TP / prix moyen / grille", G_CHART, PT_BOOL, ChartShowLevels ? 1 : 0, 0, 1, 1, "",
-       "Lignes du prix moyen, du TP et des prochains niveaux de grille (remplace les lignes d'ordres natives).", "", PF_CHART);
-   Reg(P_CH_PANEL, "ch_panel", "Afficher le panneau", G_CHART, PT_BOOL, ChartShowPanel ? 1 : 0, 0, 1, 1, "",
-       "Panneau d'informations dynamique sur le graphique.", "", PF_CHART);
 
    // --- Alertes, news, mode vacances
    Reg(P_N_WATCHDOG, "n_watchdog", "Surveillance (watchdog)", G_SMART, PT_BOOL, 1, 0, 1, 1, "",
@@ -716,8 +697,6 @@ void ApplyParamEffects(int id)
    int fl = g_pFlag[id];
    if((fl & PF_INDI) != 0) { RebuildIndicators(); }
    if((fl & PF_TP) != 0)   { g_tpSig = -1; }
-   if((fl & PF_CHART) != 0 || id == P_CH_STYLE) { ChartRefreshAll(true); }
-   if(id == P_TF) { g_lastEmaBar = 0; }
    if(id >= P_SL_M00 && id <= P_SL_M45) { SlotsRefresh(); }   // [ARCHI] créneaux modifiés
 }
 
@@ -828,7 +807,6 @@ bool PresetLoad(string name)
    if(n <= 0) return false;
    RebuildIndicators();
    g_tpSig = -1;
-   ChartRefreshAll(true);
    SlotsRefresh();   // [ARCHI]
    SaveParams();
    return true;
