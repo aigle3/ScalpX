@@ -2,7 +2,8 @@
 # ScalpX — désinstallation complète (installé par install.sh dans /usr/local/sbin/scalpx-uninstall, appartient à root).
 # Lancé par le bot (🧨 Tout désinstaller) via sudo, ou à la main : sudo /usr/local/sbin/scalpx-uninstall
 # Supprime : services scalpx-bot et scalpx-xvfb, utilisateur @USER@ et TOUT son dossier (bot, BASE, comptes MT5, préfixe Wine,
-# historique), autorisations sudo et scripts ScalpX. Wine, Xvfb et Python restent installés (paquets système).
+# historique), autorisations sudo, scripts ScalpX, paquet téléchargé à la main (~/scalpx-paquet), Wine et Xvfb.
+# Python reste installé (Ubuntu en a besoin).
 # Les positions restent chez le broker. Chaque étape est envoyée dans Telegram (le bot étant arrêté, c'est ce script qui
 # écrit, avec le token lu dans le .env avant sa suppression) et notée dans /var/log/scalpx-uninstall.log.
 set -u
@@ -25,19 +26,29 @@ step() {                                                  # étape : journal + m
 }
 sleep 4                                                    # laisse le bot envoyer son dernier message
 step "🧨 <b>Désinstallation de ScalpX</b> ($HOST)
-1/5 ⏹ arrêt du bot et de l'écran virtuel…"
+1/6 ⏹ arrêt du bot et de l'écran virtuel…"
 systemctl disable --now scalpx-bot.service scalpx-xvfb.service
-step "2/5 🔌 arrêt des terminaux MT5 et de Wine…"
+step "2/6 🔌 arrêt des terminaux MT5 et de Wine…"
 pkill -TERM -u "$U"; sleep 5; pkill -KILL -u "$U"; sleep 2
-step "3/5 🗑 suppression des services…"
+step "3/6 🗑 suppression des services…"
 rm -f /etc/systemd/system/scalpx-bot.service /etc/systemd/system/scalpx-xvfb.service
 systemctl daemon-reload
-step "4/5 🗑 suppression de l'utilisateur $U et de tout son dossier (bot, BASE, comptes, Wine, historique)…"
+step "4/6 🗑 suppression de l'utilisateur $U et de tout son dossier (bot, BASE, comptes, Wine, historique)…"
 id "$U" >/dev/null 2>&1 && userdel -r "$U"
 rm -rf "/home/$U"
-step "5/5 🗑 suppression des autorisations et des scripts ScalpX…"
-rm -f /etc/sudoers.d/scalpx /usr/local/sbin/scalpx-root-update /var/log/scalpx-root-update.log
-rm -rf /etc/scalpx
+step "5/6 🗑 suppression des autorisations, des scripts et du paquet téléchargé…"
+PKGDIR=$(cat /etc/scalpx/paquet 2>/dev/null)
+if [ -n "$PKGDIR" ] && [ -f "$PKGDIR/linux/install.sh" ] && [ -f "$PKGDIR/bot/main.py" ]; then
+    rm -rf "$PKGDIR"                                      # ex. ~/scalpx-paquet (jamais un autre dossier)
+fi
+rm -f /etc/sudoers.d/scalpx /usr/local/sbin/scalpx-root-update /var/log/scalpx-root-update.log /tmp/mt5setup.exe /tmp/webview2.exe
+rm -rf /etc/scalpx /root/scalpx-paquet.*
+step "6/6 🗑 suppression de Wine et de l'écran virtuel (paquets installés pour ScalpX)…"
+export DEBIAN_FRONTEND=noninteractive
+apt-get purge -y -qq 'winehq-*' 'wine-stable*' 'wine-devel*' 'wine-staging*' wine wine64 wine32 xvfb cabextract >/dev/null 2>&1
+rm -f /etc/apt/sources.list.d/winehq-*.sources /etc/apt/keyrings/winehq-archive.key
+apt-get autoremove -y -qq >/dev/null 2>&1
+apt-get update -qq >/dev/null 2>&1
 if [ -d "/home/$U" ] || id "$U" >/dev/null 2>&1; then
     step "⚠️ Désinstallation incomplète : il reste des fichiers de $U. Journal : $LOG" false
 else

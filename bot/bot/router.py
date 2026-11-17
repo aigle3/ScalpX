@@ -1213,7 +1213,7 @@ class Router:
                                    "réglages et BASE gardés ; le bot redémarre (≈ 1 à 5 min).", self._root_update, ("sys",), "🔧 Lancer")
         elif sub == "uni":
             return await self._ask("🧨 <b>Tout désinstaller ?</b>\nSupprime de ce VPS : le bot, BASE, tous les comptes MT5, le "
-                                   "préfixe Wine, l'historique, les services et les autorisations. Rien ne restera de ScalpX.",
+                                   "préfixe Wine, l'historique, les services, les autorisations, le paquet téléchargé, Wine et Xvfb. Rien ne restera de ScalpX.",
                                    self._uninstall_2, ("srv",), "🧨 Continuer")
         await dash.refresh(force=True)
         return ""

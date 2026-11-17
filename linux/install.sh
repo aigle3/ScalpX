@@ -244,6 +244,8 @@ chmod 755 /usr/local/sbin/scalpx-root-update
 # empreinte de l'installation système (le bot propose 🔔 🔧 quand le paquet en a une plus récente) : même calcul que
 # core/server.py linux_digest (fichiers de linux/ hors .md, par nom : « nom\n » + contenu, sha256, 16 caractères)
 install -d -m 755 /etc/scalpx
+# dossier du paquet téléchargé à la main (ex. ~/scalpx-paquet) : supprimé par la désinstallation
+case "$PKG" in "$APP"/*|/root/scalpx-paquet.*) ;; *) echo "$PKG" > /etc/scalpx/paquet ;; esac
 ( cd "$PKG/linux" && for f in $(ls -1 | grep -v '\.md$' | LC_ALL=C sort); do [ -f "$f" ] && { printf '%s\n' "$f"; cat "$f"; }; done ) \
     | sha256sum | cut -c1-16 > /etc/scalpx/installation
 chmod 644 /etc/scalpx/installation
