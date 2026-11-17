@@ -9,16 +9,19 @@ comme sous Windows.
 - Accès root (sudo).
 
 ## Installation (seule fois où tu touches au VPS)
-Remplace `github_pat_TON_JETON` (jeton GitHub en lecture seule) puis colle tout le bloc :
+Le dépôt est privé : le téléchargement demande ton jeton GitHub de lecture (remplace `github_pat_TON_JETON`) :
 ```bash
-T=github_pat_TON_JETON
 mkdir -p ~/scalpx-paquet && cd ~/scalpx-paquet
-curl -fsSL -H "Authorization: Bearer $T" https://api.github.com/repos/aigle3/ScalpX/tarball/stable | tar xz --strip-components=1
-sudo GITHUB_TOKEN=$T bash linux/install.sh
+curl -fsSL -H "Authorization: Bearer github_pat_TON_JETON" https://api.github.com/repos/aigle3/ScalpX/tarball/stable | tar xz --strip-components=1
+sudo bash linux/install.sh
 ```
 Le script installe tout (Wine, Xvfb, Python, MT5, EA, bot, services, droits limités du bot) et ne demande que le
-**token Telegram** et ton **chat_id**. Si l'installeur MT5 échoue, copie le dossier `C:\MT5\BASE` du VPS Windows dans
-`/home/scalpx/mt5/BASE` puis relance la dernière ligne.
+**token Telegram** et ton **chat_id**, seulement s'ils manquent. Au démarrage, le bot te demande dans Telegram les jetons
+GitHub qui lui manquent (mises à jour, sauvegarde) : tu les envoies, il les enregistre et efface ton message.
+Si l'installeur MT5 échoue, copie le dossier `C:\MT5\BASE` du VPS Windows dans `/home/scalpx/mt5/BASE` puis relance.
+
+Relancer l'installation (sans jeton : le bot garde toujours la dernière version téléchargée) :
+`sudo bash /home/scalpx/scalpx/release/linux/install.sh` — ou, une fois les droits du bot en place, 🛠 Système → 🔧.
 
 Ensuite tout se fait dans Telegram :
 - **🛠 Système → 🔑 Clés et jetons** : jeton de sauvegarde GitHub, healthchecks.io, jeton des mises à jour (ton message est effacé aussitôt) ;

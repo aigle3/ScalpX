@@ -131,3 +131,5 @@ def test_menu_systeme_sans_options_windows():
     from bot.system import system_kb
     cbs = [cb for row in system_kb(False, windows=False) for _, cb in row]
     assert "d:vpo" not in cbs and "d:plex" not in cbs and "d:win" not in cbs and "d:rst" in cbs
+    assert "d:rup" in cbs and "d:rz" not in cbs                       # Bot 3.19.0 : ♻️ dans 🖥 Serveur, 🔧 ici
+    assert any(t.startswith("🔔 🔧") for row in system_kb(False, windows=False, install=True) for t, _ in row)

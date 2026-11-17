@@ -548,6 +548,11 @@ async def j_health(context: ContextTypes.DEFAULT_TYPE) -> None:
         s.ctx.db.meta_set("health_ok", "1" if ok else "0")
 
 
+async def j_install(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Bot 3.19.0 (Linux) : installation système plus ancienne que le paquet → 🔔 🔧."""
+    await svc(context).router.check_install()
+
+
 async def j_ghbackup(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Bot 3.17.0 : ☁️ presets sauvegardés sur GitHub quand ils changent."""
     await svc(context).router.backup_presets()
@@ -572,6 +577,10 @@ async def startup(app: Application) -> None:
     """Après le démarrage : relance échelonnée des instances DEMARRE, reprise d'un déploiement interrompu."""
     s: Services = app.bot_data["svc"]
     s.router.sync_base_set()                                        # preset ⭐ actif → .set de BASE
+    try:                                                            # Bot 3.19.0 : jetons manquants demandés dans Telegram
+        await s.router.ask_missing_keys()
+    except Exception:
+        log.exception("demande des jetons manquants")
     try:                                                            # Bot 3.6.2 : le bot passe avant le testeur sur un VPS chargé
         import psutil
         cls = getattr(psutil, "ABOVE_NORMAL_PRIORITY_CLASS", None)
@@ -691,4 +700,6 @@ def build_application(cfg: Config, ctx_factory) -> Application:
     jq.run_daily(timed(j_prune), time=dtime(4, 0), job_kwargs=JOB_KW_DAILY)
     jq.run_daily(timed(j_backup), time=dtime(cfg.backup.hour % 24, 0), job_kwargs=JOB_KW_DAILY)
     jq.run_repeating(timed(j_ghbackup), interval=max(60, cfg.backup.github_check_s), first=90, job_kwargs=JOB_KW)
+    if os.name != "nt":
+        jq.run_repeating(timed(j_install), interval=300, first=120, job_kwargs=JOB_KW)
     return app

@@ -37,6 +37,7 @@ id "$U" >/dev/null 2>&1 && userdel -r "$U"
 rm -rf "/home/$U"
 step "5/5 🗑 suppression des autorisations et des scripts ScalpX…"
 rm -f /etc/sudoers.d/scalpx /usr/local/sbin/scalpx-root-update /var/log/scalpx-root-update.log
+rm -rf /etc/scalpx
 if [ -d "/home/$U" ] || id "$U" >/dev/null 2>&1; then
     step "⚠️ Désinstallation incomplète : il reste des fichiers de $U. Journal : $LOG" false
 else

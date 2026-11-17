@@ -128,7 +128,8 @@ class Dashboard:
             from .system import BOT_ROOT, system_kb, system_text
             fl = self._flash_text()
             return ((f"{fl}\n\n" if fl else "") + system_text(self.ctx, self.vps(self.ctx.cfg.paths.data)),
-                    system_kb(bool(self.ctx.db.meta_get("update_pending")), upd.backup_version(BOT_ROOT)))
+                    system_kb(bool(self.ctx.db.meta_get("update_pending")), upd.backup_version(BOT_ROOT),
+                              install=bool(self.ctx.db.meta_get("install_pending"))))
         if kind in ("prm", "prg", "prp", "prc", "prh", "prq", "puc", "puh", "puq"):
             sid = self.screen[1]
             if sid.startswith(pui.PREFIX):                  # réglages d'un preset (gardé par le bot)
@@ -222,7 +223,7 @@ class Dashboard:
         from core.version import bot_version
         from mt5 import base as basemod
         views = self.ctx.views()
-        pending = bool(self.ctx.db.meta_get("update_pending"))
+        pending = bool(self.ctx.db.meta_get("update_pending") or self.ctx.db.meta_get("install_pending"))
         sys_btn = ("🛠 Système" + (" 🔔" if pending else ""), "d:sys")
         if not views:
             kb: Keyboard = [[("➕ Nouveau compte", "n")], [sys_btn]]

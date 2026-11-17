@@ -161,24 +161,28 @@ as_u "$BOT/.venv/bin/pip" install --disable-pip-version-check -q -r "$BOT/requir
 ok "bibliothèques installées"
 
 ENVF="$BOT/.env"
-[ -f "$ENVF" ] || [ -z "$AUTO" ] || die "mode automatique sans .env : lance une première fois sudo bash linux/install.sh"
-if [ ! -f "$ENVF" ]; then
+# Seuls le token Telegram et ton chat_id sont demandés ici, et seulement s'ils manquent (relancer ce script ne
+# redemande rien de ce qui est déjà là). Tout le reste (jetons GitHub, healthchecks.io) est demandé par le bot dans Telegram.
+envget() { sed -n "s/^$1=//p" "$ENVF" 2>/dev/null | head -1 | tr -d '\r'; }
+umask 077; touch "$ENVF"; umask 022
+chown "$U:$U" "$ENVF"; chmod 600 "$ENVF"
+tok=$(envget TELEGRAM_TOKEN); chat=$(envget ALLOWED_CHAT_IDS)
+if [ -z "$tok" ] || [ -z "$chat" ]; then
+    [ -z "$AUTO" ] || die "token Telegram ou chat_id absent du .env : lance une fois sudo bash linux/install.sh"
     echo "  Dans Telegram : @BotFather -> /newbot -> copie le TOKEN. Ton chat_id : écris à @userinfobot."
     echo "  Si l'ancien bot Windows tourne encore, utilise un AUTRE token (deux bots sur le même token se gênent)."
-    tok=""; for _ in 1 2 3; do tok=$(ask "TELEGRAM_TOKEN :"); [[ "$tok" =~ ^[0-9]{6,}:[A-Za-z0-9_-]{30,}$ ]] && break; warn "format attendu : 123456789:AAxx…"; done
-    chat=""; for _ in 1 2 3; do chat=$(ask "Ton chat_id (nombre) :"); [[ "$chat" =~ ^-?[0-9]{5,}(,-?[0-9]{5,})*$ ]] && break; warn "format attendu : un nombre"; done
-    # jeton GitHub des mises à jour : celui du téléchargement, passé par GITHUB_TOKEN=… (voir LISEZMOI) ; sinon dans
-    # Telegram (🛠 Système → 🔑 Clés et jetons), comme le jeton de sauvegarde et healthchecks.io
-    gh="${GITHUB_TOKEN:-}"
-    umask 077
-    { echo "TELEGRAM_TOKEN=$tok"; echo "ALLOWED_CHAT_IDS=$chat"
-      [ -n "$gh" ] && echo "GITHUB_TOKEN=$gh" || echo "# GITHUB_TOKEN=github_pat_..."; } > "$ENVF"
-    umask 022
-    chown "$U:$U" "$ENVF"; chmod 600 "$ENVF"
-    ok ".env écrit (lisible par $U seulement)"
-else
-    ok ".env existant conservé"
 fi
+if [ -z "$tok" ]; then
+    for _ in 1 2 3; do tok=$(ask "TELEGRAM_TOKEN :"); [[ "$tok" =~ ^[0-9]{6,}:[A-Za-z0-9_-]{30,}$ ]] && break; warn "format attendu : 123456789:AAxx…"; tok=""; done
+    [ -n "$tok" ] || die "token Telegram requis"
+    echo "TELEGRAM_TOKEN=$tok" >> "$ENVF"
+fi
+if [ -z "$chat" ]; then
+    for _ in 1 2 3; do chat=$(ask "Ton chat_id (nombre) :"); [[ "$chat" =~ ^-?[0-9]{5,}(,-?[0-9]{5,})*$ ]] && break; warn "format attendu : un nombre"; chat=""; done
+    [ -n "$chat" ] || die "chat_id requis"
+    echo "ALLOWED_CHAT_IDS=$chat" >> "$ENVF"
+fi
+ok ".env prêt (lisible par $U seulement) : jetons GitHub et healthchecks.io à donner dans Telegram quand le bot les demande"
 
 CFG="$BOT/config.toml"
 if ! grep -q '^\[wine\]' "$CFG"; then                     # config.toml du paquet (Windows) → chemins Linux
@@ -225,6 +229,13 @@ REPO=$(sed -n 's/^github *= *"\([^"]*\)".*/\1/p' "$BOT/config.toml" | head -1); 
 sed -e "s#@USER@#$U#g" -e "s#@REPO@#$REPO#g" "$PKG/linux/scalpx-root-update.sh" > /usr/local/sbin/scalpx-root-update
 chown root:root /usr/local/sbin/scalpx-root-update
 chmod 755 /usr/local/sbin/scalpx-root-update
+
+# empreinte de l'installation système (le bot propose 🔔 🔧 quand le paquet en a une plus récente) : même calcul que
+# core/server.py linux_digest (fichiers de linux/ hors .md, par nom : « nom\n » + contenu, sha256, 16 caractères)
+install -d -m 755 /etc/scalpx
+( cd "$PKG/linux" && for f in $(ls -1 | grep -v '\.md$' | LC_ALL=C sort); do [ -f "$f" ] && { printf '%s\n' "$f"; cat "$f"; }; done ) \
+    | sha256sum | cut -c1-16 > /etc/scalpx/installation
+chmod 644 /etc/scalpx/installation
 
 # ---------------------------------------------------------------- 7. service
 step "7/7  Service scalpx-bot (démarrage automatique, relance si arrêt)"

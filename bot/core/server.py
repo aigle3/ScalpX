@@ -7,12 +7,13 @@ jour root de l'installation et la désinstallation. Aucun mot de passe ne passe 
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import subprocess
 import time
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 SYSTEMCTL = "/usr/bin/systemctl"
 UNINSTALL = "/usr/local/sbin/scalpx-uninstall"
@@ -140,3 +141,29 @@ def root_update(run=_run) -> tuple[bool, str]:
     relance install.sh --auto (aucune question, réglages et comptes gardés) et redémarre le bot."""
     r = run(["sudo", "-n", ROOT_UPDATE], timeout=30)
     return r.returncode == 0, (r.stderr or r.stdout or "").strip()[-200:]
+
+
+# ---------------------------------------------------------------- Bot 3.19.0 : 🔔 installation système à mettre à jour ?
+INSTALL_STAMP = Path("/etc/scalpx/installation")     # empreinte du dossier linux/ installé (écrite par install.sh)
+
+
+def linux_digest(linux_dir: Path) -> str:
+    """Empreinte des fichiers d'installation (linux/, hors documentation .md). install.sh calcule la même :
+    pour chaque fichier, dans l'ordre des noms : « nom\n » puis son contenu ; sha256, 16 premiers caractères."""
+    h = hashlib.sha256()
+    for f in sorted(p for p in Path(linux_dir).iterdir() if p.is_file() and p.suffix != ".md"):
+        h.update(f.name.encode() + b"\n")
+        h.update(f.read_bytes())
+    return h.hexdigest()[:16]
+
+
+def install_needed(package: Path | None, stamp: Path = INSTALL_STAMP) -> str:
+    """Empreinte du paquet si l'installation système du VPS est plus ancienne que le paquet téléchargé, sinon ''."""
+    if package is None or not (Path(package) / "linux" / "install.sh").is_file():
+        return ""
+    want = linux_digest(Path(package) / "linux")
+    try:
+        have = stamp.read_text(encoding="utf-8").strip()
+    except OSError:
+        have = ""
+    return want if want != have else ""

@@ -1707,3 +1707,17 @@ async def test_jeton_de_sauvegarde_et_desinstallation_apres_10_s(svc, monkeypatc
     tok = router._uni[0]
     assert await router.on_callback(f"d:unigo:{tok}") == "OK"
     assert await _until(lambda: calls == [1])
+
+
+
+async def test_jetons_manquants_demandes_dans_telegram(svc):
+    """Bot 3.19.0 : l'installeur ne demande que Telegram ; les jetons GitHub absents sont demandés par le bot (1×/jour)."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    ctx.cfg.github_token, ctx.cfg.backup_token = "", ""
+    assert await router.ask_missing_keys() == ["GITHUB_TOKEN", "BACKUP_TOKEN"]
+    assert "Il me manque des jetons" in sender.all_text()
+    assert await router.ask_missing_keys() == []                              # déjà demandé aujourd'hui
+    ctx.cfg.github_token = "github_pat_x"
+    assert await router.ask_missing_keys(force=True) == ["BACKUP_TOKEN"]
+    ctx.cfg.backup_token = "github_pat_y"
+    assert await router.ask_missing_keys(force=True) == []

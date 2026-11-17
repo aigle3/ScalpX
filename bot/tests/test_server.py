@@ -52,3 +52,33 @@ def test_mise_a_jour_root_et_desinstallation_par_sudo_sans_mot_de_passe():
     assert sv.root_update(run)[0] and calls[-1] == ["sudo", "-n", "/usr/local/sbin/scalpx-root-update"]
     assert sv.uninstall(run)[0] and calls[-1] == ["sudo", "-n", "/usr/local/sbin/scalpx-uninstall"]
     assert sv.reboot(run)[0] and calls[-1] == ["sudo", "-n", "/usr/bin/systemctl", "reboot"]
+
+
+def test_installation_systeme_a_mettre_a_jour(tmp_path):
+    """Bot 3.19.0 : empreinte du dossier linux/ du paquet ≠ celle écrite par install.sh → 🔔 🔧."""
+    pkg = tmp_path / "release"
+    (pkg / "linux").mkdir(parents=True)
+    (pkg / "linux" / "install.sh").write_text("echo 1\n")
+    (pkg / "linux" / "LISEZMOI.md").write_text("doc")
+    stamp = tmp_path / "installation"
+    want = sv.install_needed(pkg, stamp)
+    assert want and len(want) == 16                                     # jamais installé : à faire
+    stamp.write_text(want + "\n")
+    assert sv.install_needed(pkg, stamp) == ""                          # à jour
+    (pkg / "linux" / "LISEZMOI.md").write_text("doc modifiée")
+    assert sv.install_needed(pkg, stamp) == ""                          # documentation seule : rien à faire
+    (pkg / "linux" / "install.sh").write_text("echo 2\n")
+    assert sv.install_needed(pkg, stamp) not in ("", want)
+    assert sv.install_needed(None, stamp) == ""
+
+
+def test_empreinte_identique_a_celle_de_install_sh():
+    """Même calcul en Python et dans install.sh (sinon la cloche ne s'éteindrait jamais)."""
+    import os
+    from pathlib import Path
+    linux = Path(__file__).resolve().parents[2] / "linux"
+    sh = subprocess.run(["bash", "-c", "cd \"$1\" && for f in $(ls -1 | grep -v '\\.md$' | LC_ALL=C sort); do [ -f \"$f\" ] && "
+                         "{ printf '%s\\n' \"$f\"; cat \"$f\"; }; done | sha256sum | cut -c1-16", "x", str(linux)],
+                        capture_output=True, text=True).stdout.strip()
+    assert sh == sv.linux_digest(linux)
+    assert "sha256sum | cut -c1-16 > /etc/scalpx/installation" in (linux / "install.sh").read_text()

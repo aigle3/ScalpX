@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import logging
 import re
 import time
@@ -219,7 +220,7 @@ class Router:
                                    "de backtest, tout l'historique (soldes, cycles, retraits, journaux, optimiseur) et les fichiers "
                                    "d'échange avec l'EA.\nGardés : le bot, BASE et les presets. "
                                    "Les positions restent chez le broker (TP en place).",
-                                   self._reset_confirm2, ("sys",), "♻️ Continuer")
+                                   self._reset_confirm2, ("sys" if os.name == "nt" else "srv",), "♻️ Continuer")
         elif sub == "crash":
             from .system import crash_report
             text, has = crash_report(self.ctx)
@@ -1107,6 +1108,23 @@ class Router:
         await self.dash.refresh(force=True)
 
     # ---- Bot 3.18.0 : ☁️ jeton de sauvegarde, 🖥 gestion du serveur (Linux)
+    async def ask_missing_keys(self, force: bool = False) -> list[str]:
+        """Bot 3.19.0 : au démarrage, jetons absents du .env → demandés ici (une fois par jour au plus). L'installeur ne
+        demande que le token Telegram et le chat_id ; tout le reste passe par Telegram. Renvoie les clés demandées."""
+        cfg, db = self.ctx.cfg, self.ctx.db
+        missing = [k for k in ("GITHUB_TOKEN", "BACKUP_TOKEN") if not getattr(cfg, SECRETS[k][0], "")]
+        today = time.strftime("%Y-%m-%d")
+        if not missing or (not force and db.meta_get("keys_asked") == today):
+            return []
+        db.meta_set("keys_asked", today)
+        what = {"GITHUB_TOKEN": "mises à jour du bot et de l'EA (jeton de lecture du dépôt ScalpX)",
+                "BACKUP_TOKEN": "sauvegarde automatique de tes presets (jeton d'écriture du dépôt scalpx-sauvegarde)"}
+        await self.sender.send(self.chat_id, "🔑 <b>Il me manque " + ("un jeton" if len(missing) == 1 else "des jetons") + "</b>\n"
+                               + "\n".join(f"• <b>{k}</b> : {what[k]}" for k in missing)
+                               + "\nTouche le bouton, puis envoie le jeton : il est enregistré et ton message effacé aussitôt.",
+                               [[(f"➕ {k}", f"d:kset:{k}")] for k in missing] + [[("⏰ Plus tard", "d:close")]], False)
+        return missing
+
     async def set_secret(self, key: str, value: str) -> None:
         """Clé de .env reçue par message (déjà effacé de la conversation) : vérifiée, écrite, prise en compte tout de suite."""
         from core import envfile
@@ -1161,9 +1179,9 @@ class Router:
                                    "terminaux repartent seuls. Positions et ordres restent chez le broker.",
                                    self._reboot, ("srv",), "🔁 Redémarrer")
         elif sub == "rup":
-            return await self._ask("🔧 <b>Mettre à jour l'installation ?</b>\nLe serveur télécharge la dernière version validée et "
+            return await self._ask("🔧 <b>Mettre à jour l'installation système ?</b>\nLe serveur télécharge la dernière version validée et "
                                    "relance l'installeur (droits administrateur, services, autorisations), sans question. Comptes, "
-                                   "réglages et BASE gardés ; le bot redémarre (≈ 1 à 5 min).", self._root_update, ("srv",), "🔧 Lancer")
+                                   "réglages et BASE gardés ; le bot redémarre (≈ 1 à 5 min).", self._root_update, ("sys",), "🔧 Lancer")
         elif sub == "uni":
             return await self._ask("🧨 <b>Tout désinstaller ?</b>\nSupprime de ce VPS : le bot, BASE, tous les comptes MT5, le "
                                    "préfixe Wine, l'historique, les services et les autorisations. Rien ne restera de ScalpX.",
@@ -1175,11 +1193,28 @@ class Router:
         from core import server as sv
         ok, err = await asyncio.to_thread(sv.root_update)
         self.ctx.db.add_action("", "MISE À JOUR DE L'INSTALLATION", ok, err)
-        self.dash.goto("srv")
+        self.dash.goto("sys")
         self.dash.flash("🔧 Mise à jour de l'installation lancée : le bot redémarre dans quelques minutes "
                         "(journal : /var/log/scalpx-root-update.log)." if ok else
                         f"❌ Refusé : {esc(err or 'droits administrateur absents (relance install.sh une fois)')}")
         await self.dash.refresh(force=True)
+
+    async def check_install(self) -> None:
+        """Bot 3.19.0 (Linux) : le paquet téléchargé apporte une nouvelle installation système → 🔔 et un message (une fois)."""
+        if os.name == "nt":
+            return
+        from core import server as sv, update as upd
+        need = await asyncio.to_thread(sv.install_needed, upd.find_source(self.ctx.cfg))
+        db = self.ctx.db
+        if need != db.meta_get("install_pending"):
+            db.meta_set("install_pending", need)
+            await self.dash.refresh(force=True)
+        if need and db.meta_get("install_offered") != need:
+            db.meta_set("install_offered", need)
+            await self.sender.send(self.chat_id, "🔔 <b>Mise à jour de l'installation système disponible</b>\n"
+                                   "Elle touche ce qui demande les droits administrateur (services, autorisations, scripts). "
+                                   "Comptes, réglages et BASE sont gardés ; le bot redémarre (≈ 1 à 5 min).",
+                                   [[("🔧 Mettre à jour maintenant", "d:rup")], [("⏰ Plus tard (🛠 Système)", "d:close")]], True)
 
     async def _reboot(self) -> None:
         from core import server as sv
@@ -1249,7 +1284,8 @@ class Router:
     async def _reset_confirm2(self) -> None:
         n = len(self.ctx.db.list())
         await self._ask(f"⚠️ <b>Vraiment sûr ?</b>\n{n} compte(s) seront retirés de ce serveur. Impossible à annuler : il faudra "
-                        "recréer chaque compte avec ➕ (mot de passe redemandé).", self.reset_server, ("sys",), "♻️ OUI, tout effacer")
+                        "recréer chaque compte avec ➕ (mot de passe redemandé).", self.reset_server, ("sys" if os.name == "nt" else "srv",),
+                        "♻️ OUI, tout effacer")
 
     async def reset_server(self) -> None:
         """Bot 3.17.0 : ♻️ voir core.reset. Le bot redémarre à la fin."""

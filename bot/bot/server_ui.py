@@ -37,8 +37,8 @@ def server_screen(st: sv.Stats | None, auto: dict[str, str], sudo: bool, flash: 
     kb: Keyboard = [
         [("🔃 Actualiser", "d:srv")],
         [("✅ Démarrage auto", "d:sva")] if bad else [],
-        [("🔧 Mettre à jour l'installation", "d:rup")],
-        [("🔁 Redémarrer le VPS", "d:rbt"), ("🧨 Tout désinstaller", "d:uni")],
+        [("🔁 Redémarrer le VPS", "d:rbt"), ("♻️ Réinitialiser", "d:rz")],
+        [("🧨 Tout désinstaller", "d:uni")],
         [("⬅ Système", "d:sys")],
     ]
     text = "\n".join(lines)

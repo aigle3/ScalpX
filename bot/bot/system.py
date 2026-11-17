@@ -126,13 +126,17 @@ def system_text(ctx: Ctx, vps: dict[str, float]) -> str:
         lines.append("⬆ Mises à jour automatiques : non configurées ([update] github)")
     if db.meta_get("update_pending"):
         lines.append("🔔 <b>Une mise à jour attend d'être installée</b> : touche ⬆ Mises à jour.")
+    if os.name != "nt" and db.meta_get("install_pending"):
+        lines.append("🔔 <b>L'installation système a une mise à jour</b> : touche 🔧 Installation système.")
     return "\n".join(lines)
 
 
-def system_kb(pending: bool, previous: str = "", windows: bool = os.name == "nt") -> Keyboard:
+def system_kb(pending: bool, previous: str = "", windows: bool = os.name == "nt", install: bool = False) -> Keyboard:
     extra: Keyboard = [[(f"⏪ Revenir au bot {previous}", "d:rbk")]] if previous else []
     return extra + [
         [(("🔔 " if pending else "") + "⬆ Mises à jour", "d:upd"), ("🔨 Compiler l'EA", "d:bld")],
+        # Bot 3.19.0 : Linux → installation système (droits administrateur), 🔔 quand le paquet en apporte une nouvelle
+        *([] if windows else [[(("🔔 " if install else "") + "🔧 Installation système", "d:rup")]]),
         *([[("📜 Journaux", "d:logs"), ("🪟 Réduire les terminaux", "d:win")],
            [("🏓 Ping", "d:png"), ("🧾 Journal des actions", "d:jra")],
            [("📊 Remettre le bouton du bas", "d:menu"), ("🎬 Plex", "d:plex")],
@@ -142,7 +146,7 @@ def system_kb(pending: bool, previous: str = "", windows: bool = os.name == "nt"
            [("🏓 Ping", "d:png"), ("🧾 Journal des actions", "d:jra")],
            [("📊 Remettre le bouton du bas", "d:menu")]]),
         [("🔄 Redémarrer le bot", "d:rst"), ("🔃", "d:sys")],
-        [("🔑 Clés et jetons", "d:key"), ("♻️ Réinitialiser", "d:rz")],
+        [("🔑 Clés et jetons", "d:key")] + ([("♻️ Réinitialiser", "d:rz")] if windows else []),   # Linux : dans 🖥 Serveur
         [("⬅ Accueil", "d:home")],
     ]
 
