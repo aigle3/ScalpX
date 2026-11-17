@@ -141,15 +141,20 @@ class InstanceCreator:
         return CreateResult(True, "Compte connecté.", inst.id, st2, warnings)
 
     async def create(self, login: str, password: str, server: str, alias: str = "",
-                     progress: Progress = _noop, keep_on_refusal: bool = False) -> CreateResult:
+                     progress: Progress = _noop, keep_on_refusal: bool = False, exclusive: bool = True) -> CreateResult:
         """Déroulé complet. Aucune instance fantôme ne reste en cas d'échec.
-        keep_on_refusal : identifiants refusés → terminal arrêté, dossier gardé (EN_CREATION) pour retry() ou abandon()."""
-        async with self._lock:
+        keep_on_refusal : identifiants refusés → terminal arrêté, dossier gardé (EN_CREATION) pour retry() ou abandon().
+        exclusive=False (Bot 3.20.0, création en lot) : plusieurs créations en même temps (le lot limite lui-même)."""
+        async def go() -> CreateResult:
             try:
                 return await self._create(login.strip(), password, server, alias.strip(), progress, keep_on_refusal)
             except Exception as exc:                      # le message ne doit JAMAIS contenir le mot de passe
                 log.error("création : erreur inattendue : %s", mask(repr(exc), password))
                 return CreateResult(False, "Erreur inattendue : " + mask(str(exc), password))
+        if not exclusive:
+            return await go()
+        async with self._lock:
+            return await go()
 
     async def _create(self, login: str, password: str, server: str, alias: str, progress: Progress,
                       keep_on_refusal: bool = False) -> CreateResult:

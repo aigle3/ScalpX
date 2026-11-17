@@ -145,6 +145,7 @@ class Services:
         self.monitor = Monitor(cfg, ctx.db, ctx.status, EventReader(cfg.paths.common()), self.notifier.emit)
         self.wizard = WizardCore(ctx, self.sender, self.chat_id, self.on_created)
         self.wizard.dash_refresh = lambda: self.dash.refresh(force=True)
+        self.router.remember_server = self.wizard._remember_server            # Bot 3.20.0 : création en lot
 
     async def on_created(self, res, mode: str, mid: int) -> None:
         """Fin de l'assistant : message de résultat + carte du compte (ou échec clair)."""
@@ -209,13 +210,23 @@ async def h_doc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     m = update.message
     if m is None or m.document is None:
         return
-    if not s.router.awaiting_import:
-        await s.sender.send(s.chat_id, "📎 Fichier ignoré. Pour importer des presets : 💾 Presets → 📥 Importer, puis renvoie-le.",
-                            [[("✖ Fermer", "d:close")]], True)
+    bulk = s.router.awaiting_bulk                            # Bot 3.20.0 : 📄 fichier de comptes (mots de passe)
+    if bulk:
+        try:                                                 # effacé AVANT toute lecture : rien ne reste dans la conversation
+            await s.sender.delete(update.effective_chat.id, m.message_id)
+        except Exception:
+            log.warning("fichier de comptes : suppression du message impossible")
+    if not s.router.awaiting_import and not bulk:
+        await s.sender.send(s.chat_id, "📎 Fichier ignoré. Pour importer des presets : 💾 Presets → 📥 Importer ; pour "
+                            "ajouter des comptes : 📄 Comptes (fichier). Puis renvoie-le.", [[("✖ Fermer", "d:close")]], True)
         return
     s.router.awaiting_import = False
+    s.router.awaiting_bulk = False
     if (m.document.file_size or 0) > 200_000:
-        await s.router.preset_import("")                   # message « fichier trop gros / rien de reconnu »
+        if bulk:
+            await s.router.bulk_received("")
+        else:
+            await s.router.preset_import("")               # message « fichier trop gros / rien de reconnu »
         return
     try:
         f = await m.document.get_file()
@@ -223,6 +234,9 @@ async def h_doc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as exc:
         log.warning("import de presets : fichier illisible : %s", exc)
         data = b""
+    if bulk:
+        await s.router.bulk_received(data.decode("utf-8-sig", errors="replace"))
+        return
     try:
         await s.sender.delete(update.effective_chat.id, m.message_id)
     except Exception:

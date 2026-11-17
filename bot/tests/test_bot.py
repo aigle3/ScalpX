@@ -769,7 +769,7 @@ async def test_sans_compte_boutons_systeme_et_journaux(svc):
     ctx, sender, dash, router, notifier, ea, conf = svc
     text, kb = dash.render()
     datas = [d for row in kb for _, d in row]
-    assert datas == ["n", "d:sys"]                                                  # sans compte : créer, ou Système
+    assert datas == ["n", "d:bulk", "d:sys"]                                                # sans compte : créer, ou Système
     await router.on_callback("d:sys")
     text, kb = dash.render()
     assert "Système" in text and "BASE" in text and "Comptes : 0" in text
@@ -1721,3 +1721,24 @@ async def test_jetons_manquants_demandes_dans_telegram(svc):
     assert await router.ask_missing_keys(force=True) == ["BACKUP_TOKEN"]
     ctx.cfg.backup_token = "github_pat_y"
     assert await router.ask_missing_keys(force=True) == []
+
+
+async def test_comptes_par_fichier_depuis_le_bot(svc, monkeypatch):
+    """Bot 3.20.0 : 📄 → texte collé → récapitulatif sans mot de passe → ✅ 2 à la fois → créations (exclusive=False)."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    from types import SimpleNamespace as NS
+    calls = []
+
+    async def fake_create(login, pw, server, alias="", progress=None, keep_on_refusal=False, exclusive=True):
+        calls.append((login, pw, server, exclusive))
+        return NS(ok=True, iid=f"{login}_{server}", message="")
+    monkeypatch.setattr(ctx.creator, "create", fake_create)
+    await router.on_callback("d:bulk")
+    assert router.awaiting_bulk
+    await router.on_text("7001:mdpA:Demo-Server\n7002:mdp:B:Demo-Server\n")
+    assert not router.awaiting_bulk and "mdp" not in sender.all_text() and "2 compte(s) à créer" in sender.all_text()
+    tok = router._bulk.token
+    assert await router.on_callback(f"d:bkgo:{tok}:2") == "C'est parti"
+    assert await _until(lambda: len(calls) == 2 and "Création terminée" in sender.all_text())
+    assert sorted(calls) == [("7001", "mdpA", "Demo-Server", False), ("7002", "mdp:B", "Demo-Server", False)]
+    assert "mdp" not in sender.all_text()

@@ -226,7 +226,7 @@ class Dashboard:
         pending = bool(self.ctx.db.meta_get("update_pending") or self.ctx.db.meta_get("install_pending"))
         sys_btn = ("🛠 Système" + (" 🔔" if pending else ""), "d:sys")
         if not views:
-            kb: Keyboard = [[("➕ Nouveau compte", "n")], [sys_btn]]
+            kb: Keyboard = [[("➕ Nouveau compte", "n"), ("📄 Comptes (fichier)", "d:bulk")], [sys_btn]]
             return self._with_flash(render.welcome_empty()), kb
         t = totals(views)
         cur = next((v.st.devise for v in views if v.st and v.st.devise), "")
@@ -255,6 +255,7 @@ class Dashboard:
         if pages > 1:
             kb.append([("◀", f"d:p:{self.page - 1}"), (f"{self.page + 1}/{pages}", "d:r"), ("▶", f"d:p:{self.page + 1}")])
         kb.append([("⬅ Accueil", "d:home"), ("➕ Nouveau compte", "n")])
+        kb.append([("📄 Ajouter des comptes (fichier)", "d:bulk")])                 # Bot 3.20.0
         return self._with_flash(text), kb
 
     def _render_actions(self) -> tuple[str, Keyboard]:

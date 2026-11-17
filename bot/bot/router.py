@@ -57,6 +57,9 @@ class Router:
         self.awaiting_goal: str | None = None               # compte (ou ALL_ID) dont on attend l'objectif (message texte)
         self.awaiting_import = False                        # Bot 3.16.0 : fichier / texte de presets attendu (📥 Importer)
         self.awaiting_token = ""                            # Bot 3.18.0 : clé de .env attendue (message texte), ex. BACKUP_TOKEN
+        self.awaiting_bulk = False                          # Bot 3.20.0 : fichier de comptes attendu (📄)
+        self._bulk = None                                   # lot de comptes en attente de confirmation (mots de passe en mémoire)
+        self.remember_server = None                         # assistant : serveur mémorisé après une connexion réussie
         self._dep_sel: set[str] = set()
         from mt5.backtester import BacktestManager
         self.bt = BacktestManager(ctx.cfg, ctx.db, ctx.mgr.procs)      # 🧪 terminal de backtest à part
@@ -202,6 +205,13 @@ class Router:
             return await self._ask("⚡ <b>Optimiser le VPS ?</b>\nRéglages Windows qui libèrent du CPU (antivirus, services inutiles, "
                                    "alimentation…), CPU mesuré avant / après (≈ 1 min). Les terminaux et l'EA continuent de trader.",
                                    self.vps_optimize, ("sys",), "⚡ Optimiser")
+        elif sub == "bulk":                                     # Bot 3.20.0 : 📄 plusieurs comptes depuis un fichier
+            self.awaiting_bulk = True
+            self.dash.goto("home")
+            self.dash.flash("📄 Envoie un <b>fichier texte</b> (ou colle le texte), un compte par ligne :\n"
+                            "<code>numéro:mot de passe:serveur</code>\nIl est effacé de la conversation dès réception.", 300)
+        elif sub in ("bkgo", "bkno"):
+            return await self._bulk_cb(sub, p)
         elif sub in ("unigo", "unino"):                         # Bot 3.18.3 : dernière confirmation (compte à rebours)
             return await self._uninstall_cb(sub, p)
         elif sub in ("srv", "sva", "rbt", "uni", "rup"):        # Bot 3.18.0 : 🖥 Serveur (Linux)
@@ -449,6 +459,10 @@ class Router:
                 await self.dash.refresh(force=True)
                 return
             await self._goal_confirm(inst, v.replace(",", "."))
+            return
+        if self.awaiting_bulk:
+            self.awaiting_bulk = False
+            await self.bulk_received(text)
             return
         if self.awaiting_token:
             key, self.awaiting_token = self.awaiting_token, ""
@@ -1108,6 +1122,50 @@ class Router:
         await self.dash.refresh(force=True)
 
     # ---- Bot 3.18.0 : ☁️ jeton de sauvegarde, 🖥 gestion du serveur (Linux)
+    # ---- Bot 3.20.0 : 📄 création de plusieurs comptes (fichier texte)
+    async def bulk_received(self, text: str) -> None:
+        from . import bulk
+        rows, errors = bulk.parse(text)
+        del text
+        if self._bulk is not None:
+            self._bulk.forget()
+        b = bulk.new_batch(rows, errors, self.ctx.db.exists_active)
+        self._bulk = b if b.rows else None
+        kb = ([[(f"✅ {n} à la fois", f"d:bkgo:{b.token}:{n}") for n in bulk.PARALLEL[:2]],
+               [(f"✅ {n} à la fois", f"d:bkgo:{b.token}:{n}") for n in bulk.PARALLEL[2:]],
+               [("✖ Annuler", "d:bkno")]] if b.rows else [[("✖ Fermer", "d:close")]])
+        b.msg = await self.sender.send(self.chat_id, bulk.summary(b) if (b.rows or b.errors or b.skipped)
+                                       else "📄 Aucun compte trouvé dans ce fichier (format : numéro:mot de passe:serveur).",
+                                       kb, False)
+        self.ctx.db.add_action("", "COMPTES (FICHIER) REÇUS", True, f"{len(b.rows)} à créer, {len(b.skipped)} ignoré(s)")
+
+    async def _bulk_cb(self, sub: str, p: list[str]) -> str:
+        from . import bulk
+        b = self._bulk
+        if sub == "bkno" or b is None or len(p) < 4 or p[2] != b.token or time.monotonic() - b.created_at > bulk.TTL_S:
+            if b is not None:
+                b.forget()
+                await self.sender.edit(self.chat_id, getattr(b, "msg", None), "✖ Création des comptes annulée "
+                                       "(mots de passe oubliés).", None) if getattr(b, "msg", None) else None
+            self._bulk = None
+            return "Annulé" if sub == "bkno" else "Expiré : renvoie le fichier"
+        self._bulk = None
+        n = int(p[3]) if p[3].isdigit() else 2
+        mid = b.msg
+        self.ctx.db.add_action("", "CRÉATION DE COMPTES EN LOT", True, f"{len(b.rows)} compte(s), {n} à la fois")
+
+        async def create(login, pw, server, progress):
+            return await self.ctx.creator.create(login, pw, server, "", progress, exclusive=False)
+
+        async def edit(txt: str) -> None:
+            await self.sender.edit(self.chat_id, mid, txt, None)
+
+        async def go() -> None:
+            await bulk.run(b, n, create, self.preset_for_new, edit, self.remember_server)
+            await self.dash.refresh(force=True)
+        self._bg(go())
+        return "C'est parti"
+
     async def ask_missing_keys(self, force: bool = False) -> list[str]:
         """Bot 3.19.0 : au démarrage, jetons absents du .env → demandés ici (une fois par jour au plus). L'installeur ne
         demande que le token Telegram et le chat_id ; tout le reste passe par Telegram. Renvoie les clés demandées."""
