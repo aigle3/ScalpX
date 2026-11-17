@@ -582,12 +582,11 @@ async def startup(app: Application) -> None:
         log.warning("priorité du bot non modifiée", exc_info=True)
     try:
         from core import presets as cps
-        name = cps.ensure_recommended(s.dash.store, bool(s.ctx.db.meta_get("preset_conseille_v1")))
-        if name:
-            s.ctx.db.meta_set("preset_conseille_v1", name)
-            log.info("preset « %s » ajouté (réglages conseillés, non activé)", name)
+        gone = cps.remove_recommended(s.dash.store)                 # Bot 3.18.1 : preset « conseille » retiré (non voulu)
+        if gone:
+            log.info("preset(s) %s supprimé(s)", ", ".join(gone))
     except Exception:
-        log.exception("preset conseillé : ajout impossible")
+        log.exception("preset conseillé : suppression impossible")
     try:
         from core.selfwatch import ensure_watchdog
         res = await asyncio.to_thread(ensure_watchdog, Path(__file__).resolve().parent.parent)

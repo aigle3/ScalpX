@@ -151,29 +151,17 @@ class PresetStore:
         self.save()
 
 
-# ---------------------------------------------------------------- preset « conseille » (ajouté une fois, jamais imposé)
+# ---------------------------------------------------------------- preset « conseille » (Bot 3.18.1 : retiré)
 RECOMMENDED_NAME = "conseille"
-# créneaux 2:00, 4:00, 6:00, 11:00, 20:00 (bits de l'heure, minute :00) ; objectif 0,5 % ; grille plus large et plus douce.
-# SL d'urgence, drawdown et limite de session : NON modifiés (repris du preset ⭐ actif s'il y en a un).
-RECOMMENDED = {"sl_on": "1", "sl_pct": "0.5", "sl_m00": str(sum(1 << h for h in (2, 4, 6, 11, 20))), "sl_m15": "0",
-               "sl_m30": "0", "sl_m45": "0", "dyngrid": "1", "gridatr": "0.7", "gridmin": "200", "lotmult": "1.2",
-               "maxpend": "12"}
 
 
-def ensure_recommended(store: "PresetStore", done: bool) -> str:
-    """Ajoute le preset « conseille » (copie du preset ⭐ actif + RECOMMENDED) si ce n'est pas déjà fait. Renvoie son nom
-    ou "" ; il n'est NI activé NI appliqué (c'est l'utilisateur qui choisit)."""
-    if done:
-        return ""
-    name = RECOMMENDED_NAME
-    i = 2
-    while name in store.presets:
-        name = f"{RECOMMENDED_NAME}{i}"
-        i += 1
-    base = dict(store.presets.get(store.active, {})) if store.active else {}
-    base.update(RECOMMENDED)
-    store.put(name, base)
-    return name
+def remove_recommended(store: "PresetStore") -> list[str]:
+    """Supprime les presets « conseille », « conseille2 »… ajoutés automatiquement par les versions 2.29 à 3.18.0.
+    Jamais le preset ⭐ actif (s'il a été choisi, il est gardé). Renvoie les noms supprimés."""
+    gone = [n for n in store.names() if re.fullmatch(rf"{RECOMMENDED_NAME}\d*", n) and n != store.active]
+    for n in gone:
+        store.delete(n)
+    return gone
 
 
 # ---------------------------------------------------------------- .set de BASE (point de départ des nouveaux comptes)

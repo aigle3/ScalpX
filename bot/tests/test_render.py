@@ -153,19 +153,18 @@ def test_stats_par_creneau():
     assert "Aucun objectif de créneau" in render.slot_stats_text({}, 7, 1, "EUR")
 
 
-def test_preset_conseille_ajoute_une_fois_sans_toucher_au_sl(tmp_path):
+def test_preset_conseille_supprime(tmp_path):
+    """Bot 3.18.1 : les presets « conseille » ajoutés automatiquement sont retirés, sauf s'il est le preset ⭐ actif."""
     from core import presets as cps
-    st = cps.PresetStore(tmp_path / "presets.json")
-    st.put("perso", {"emsl": "1", "emslpct": "25", "ddstop": "0", "lotmult": "1.4", "sl_pct": "1.0"})
-    st.set_active("perso")
-    name = cps.ensure_recommended(st, False)
-    v = st.presets[name]
-    assert name == "conseille" and st.active == "perso"                                 # ajouté, pas activé
-    assert (v["emsl"], v["emslpct"], v["ddstop"]) == ("1", "25", "0")                   # SL / drawdown : ceux du preset actif
-    assert (v["lotmult"], v["sl_pct"], v["gridatr"], v["gridmin"], v["maxpend"]) == ("1.2", "0.5", "0.7", "200", "12")
-    assert cps.slots_input(v) == "2,4,6,11,20"
-    assert cps.ensure_recommended(st, True) == "" and len(st.presets) == 2
-
+    st = cps.PresetStore(tmp_path / "p.json")
+    st.put("Martin", {"fast": "12"})
+    st.put("conseille", {"fast": "9"})
+    st.put("conseille2", {"fast": "9"})
+    st.set_active("Martin")
+    assert cps.remove_recommended(st) == ["conseille", "conseille2"] and st.names() == ["Martin"]
+    st.put("conseille", {"fast": "9"})
+    st.set_active("conseille")
+    assert cps.remove_recommended(st) == [] and "conseille" in st.presets
 
 def test_stats_creneau_objectif_annule_sans_entree():
     from core import slotstats
