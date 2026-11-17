@@ -17,7 +17,7 @@ Légende : ☐ à faire · OK / KO à noter à la main.
 | A1 | Compilation | MetaEditor → `ScalpX_v5.mq5` → F7 | 0 erreur, 0 warning | Onglet *Erreurs* de MetaEditor | ☐ |
 | A2 | Logique de trading inchangée (remplace le backtest comparé) | Comparer les sources v4.5 et v5 : `fc /b` (ou `git diff --no-index`) sur `SX_Trade.mqh`, `SX_Filters.mqh`, `SX_Chart.mqh`, `SX_FilterBoard.mqh`, `SX_Goal.mqh` | Les 4 premiers sont **identiques** ; `SX_Goal.mqh` ne diffère que par 2 blocs `// [ARCHI]` (événements) ; tout ajout est encadré `// [ARCHI]` ou `// [SEUIL500]` | Diff ; `CHANGELOG.md` liste chaque modification | ☐ |
 | A3 | `.set` chargeable | Graphique → EA → *Entrées → Charger* → `scalpx_v5.set` | Aucune erreur, toutes les valeurs reprises (lot 0.01, grille 150, etc.) | Onglet Entrées + journal | ☐ |
-| A4 | Aucune trace de Telegram/WebRequest | `findstr /s /i "WebRequest api.telegram" *.mq5 *.mqh` dans le dossier de l'EA | Aucun résultat (les entrées `Telegram*` restent pour la compatibilité du `.set`, marquées « OBSOLÈTE ») | Console | ☐ |
+| A4 | Aucune trace de Telegram/WebRequest | `grep -il -e WebRequest -e api.telegram *.mq5 *.mqh` dans le dossier de l'EA | Aucun résultat (les entrées `Telegram*` restent pour la compatibilité du `.set`, marquées « OBSOLÈTE ») | Console | ☐ |
 | A5 | Mécanisme du 1 % inchangé | Lancer un objectif `+1%` (créneau, ou fiche compte → **🧰 Commandes EA** → Objectif) sur la démo | Clôture anticipée comme avant : l'EA ferme tout dès que `equity − départ ≥ montant`, vérifie le solde, sinon continue | Journal + événement `OBJECTIF_ATTEINT` | ☐ |
 
 ## B. EA — clôture anticipée à 500
@@ -51,7 +51,7 @@ Légende : ☐ à faire · OK / KO à noter à la main.
 | # | Test | Procédure | Résultat attendu | Vérification | OK/KO |
 |---|---|---|---|---|---|
 | D1 | Rafale de 10 commandes | Toucher 10 fois très vite le bouton **🏓 Ping** (fiche compte → 🧰 Commandes EA) | 10 exécutions dans l'ordre, 10 ack (« pong »), plus aucun `cmd_*`/`ack_*` dans `Common\Files` après ~1 min | Telegram + dossier | ☐ |
-| D2 | Commande > 5 min | Créer à la main `cmd_<id>_1.json` : `{"id":"<id>","cmd":"PING","args":[],"ts":<epoch − 600>}` (PowerShell : `[int][double]::Parse((Get-Date -UFormat %s)) - 600`) | L'EA l'ignore et écrit un ack `ok:false` « Commande expirée » ; le bot nettoie l'ack orphelin sous 10 min | Fichier ack | ☐ |
+| D2 | Commande > 5 min | Créer à la main `cmd_<id>_1.json` : `{"id":"<id>","cmd":"PING","args":[],"ts":<epoch − 600>}` (`date +%s` donne l'epoch) | L'EA l'ignore et écrit un ack `ok:false` « Commande expirée » ; le bot nettoie l'ack orphelin sous 10 min | Fichier ack | ☐ |
 | D3 | JSON corrompu | Déposer `cmd_<id>_2.json` contenant `{"id":` ; écraser un `statut_<id>.json` avec du texte | EA : fichier ignoré puis supprimé après 3 essais, pas de plantage. Bot : continue (statut illisible = ignoré) | Journal EA, log bot | ☐ |
 | D4 | Anciennes commandes identiques | Fiche compte → **🧰 Commandes EA** : Positions, Params, Filtres, Risque, Stats, Journal, Rapport, Objectif, Capture, Courbe, Statut (les commandes à paramètre — `LOT`, `TP`, `GRILLE`, `SPREAD`, `VACANCES`, `PRESET_*`, `FERMER_TOUT`… — n'ont plus de saisie texte : à ajouter en boutons) | Même texte/effet qu'avant sur Telegram (le texte est renvoyé par l'EA dans l'ack) | Comparer avec les anciens messages | ☐ |
 | D5 | Anciennes notifications | Provoquer : objectif atteint, filtre bloquant, erreur, rapport journalier, déconnexion broker | Elles arrivent toutes via le bot, préfixées du nom du compte | Telegram | ☐ |
@@ -62,12 +62,12 @@ Légende : ☐ à faire · OK / KO à noter à la main.
 |---|---|---|---|---|---|
 | E1 | Premier compte avec 0 instance | Démarrer le bot sans aucun compte ; envoyer un message ; **➕ Nouveau compte** | Message d'accueil invitant à créer ; création jusqu'à la carte du compte | Telegram | ☐ |
 | E2 | Mot de passe supprimé | Pendant l'assistant, saisir le mot de passe | Le message disparaît du chat immédiatement | Chat Telegram | ☐ |
-| E3 | `.ini` supprimé (succès et échec) | Après une création réussie, puis après une création ratée | `C:\MT5\instances\<id>\scalpx_start.ini` (ou dossier archivé) **absent** dans les deux cas | Explorateur | ☐ |
-| E4 | Mauvais mot de passe | Créer avec un faux mot de passe | Message clair (« compte non connecté… »), terminal arrêté, dossier dans `archives\*_ECHEC`, **aucune instance fantôme** | Tableau de bord + `archives\` | ☐ |
+| E3 | `.ini` supprimé (succès et échec) | Après une création réussie, puis après une création ratée | `~/mt5/instances/<id>/scalpx_start.ini` (ou dossier archivé) **absent** dans les deux cas | `ls` | ☐ |
+| E4 | Mauvais mot de passe | Créer avec un faux mot de passe | Message clair (« compte non connecté… »), terminal arrêté, dossier dans `archives/*_ECHEC`, **aucune instance fantôme** | Tableau de bord + `archives/` | ☐ |
 | E5 | Compte déjà existant | Recréer un compte existant (même login + serveur) | Refusé (« existe déjà ») | Telegram | ☐ |
-| E6 | BASE inchangé | Avant/après création : `.venv\Scripts\python -c "from mt5.base import tree_hash; print(tree_hash(r'C:\MT5\BASE'))"` (ne pas lancer MT5 depuis BASE) | Empreintes identiques | Console | ☐ |
+| E6 | BASE inchangé | Avant/après création : `.venv/bin/python -c "from mt5.base import tree_hash; print(tree_hash('/home/scalpx/mt5/BASE'))"` (ne pas lancer MT5 depuis BASE) | Empreintes identiques | Console | ☐ |
 | E7 | Relance sans /config | **Redémarrer** depuis la fiche compte | Reconnexion automatique, un seul graphique EA | `statut.connecte = true`, `nb_graphiques_ea = 1` | ☐ |
-| E8 | Mot de passe introuvable | `findstr /s /i /c:"<mot de passe>" C:\ScalpX\bot\data\*` et dans l'historique Telegram du bot | Aucune occurrence (logs, SQLite) | Console | ☐ |
+| E8 | Mot de passe introuvable | `grep -rF "<mot de passe>" ~/scalpx/bot/data` et dans l'historique Telegram du bot | Aucune occurrence (logs, SQLite) | Console | ☐ |
 
 ## F. Pilotage des terminaux
 
@@ -95,8 +95,8 @@ Légende : ☐ à faire · OK / KO à noter à la main.
 |---|---|---|---|---|---|
 | H1 | Chat non autorisé | Écrire au bot depuis un autre compte Telegram | Aucune réponse ; ligne « chat non autorisé » dans le log | `data\logs\bot.log` | ☐ |
 | H2 | Second lancement | Lancer `python main.py` une 2e fois | Refusé : « Un autre bot tourne déjà » (code 3) | Console | ☐ |
-| H3 | Tableau de bord 24 h | Laisser tourner 24 h avec plusieurs comptes | Toujours le **même** message édité ; aucune erreur de flood | `findstr /i "flood retry" data\logs\bot.log` | ☐ |
+| H3 | Tableau de bord 24 h | Laisser tourner 24 h avec plusieurs comptes | Toujours le **même** message édité ; aucune erreur de flood | `grep -iE "flood|retry" data/logs/bot.log` | ☐ |
 | H4 | Message du tableau de bord supprimé | Supprimer le message du tableau de bord | Recréé automatiquement (≤ 15 s, ou en touchant 📊) | Telegram | ☐ |
 | H5 | Notifications 🔒 🏁 ↩️ | Lors de B2 et B3 | Reçues correctement (regroupées, avec nom du compte) | Telegram | ☐ |
 | H6 | Rapport et ping | Attendre 22 h (ou bouton 📝 Rapport) ; bouton 🏓 Ping | Rapport complet (perf, cycles, clôtures, incidents, versions) ; Ping donne uptime et comptes 🟢 | Telegram | ☐ |
-| H7 | Endurance 48 h | 48 h sur démo avec plusieurs instances ; relever à 0 h / 24 h / 48 h : `Get-Process pythonw \| Select WS,CPU` | Pas de plantage, RAM du bot stable (sans dérive continue), CPU faible | PowerShell | ☐ |
+| H7 | Endurance 48 h | 48 h sur démo avec plusieurs instances ; relever à 0 h / 24 h / 48 h : `ps -o rss,pcpu -C python3` | Pas de plantage, RAM du bot stable (sans dérive continue), CPU faible | Console | ☐ |

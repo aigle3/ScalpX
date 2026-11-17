@@ -3,7 +3,7 @@
 Une ligne par compte : `numéro:mot de passe:serveur` (lignes vides et « # » ignorées ; le mot de passe peut contenir
 des « : » : numéro = 1er champ, serveur = dernier). Le fichier est effacé de la conversation dès réception ; les mots
 de passe restent en mémoire le temps de la création puis sont oubliés (seul MT5 les mémorise, comme avec ➕).
-Créations en parallèle (1 à 4 à la fois, au choix) ; chaque compte : copie de BASE, lancement, connexion — refusé
+Créations 2 par 2 ; chaque compte : copie de BASE, lancement, connexion — refusé
 (mauvais mot de passe / serveur) au bout de ~40 s, abandonné sans signe de l'EA au bout de create_timeout_s : aucune
 création n'attend indéfiniment. Preset par défaut (⭐ actif) appliqué à chaque compte créé.
 """
@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 
 MAX_LINES = 100
 TTL_S = 600                                   # récapitulatif non confirmé : mots de passe oubliés après 10 min
-PARALLEL = (1, 2, 3, 4)
+PARALLEL = 2                                  # créations 2 par 2
 
 
 @dataclass
@@ -105,7 +105,7 @@ def summary(b: Batch) -> str:
         lines.append("\n⚠️ <b>Lignes refusées</b>\n" + "\n".join("• " + esc(e) for e in b.errors[:20]))
     if b.rows:
         lines.append("\nChaque compte : copie de BASE, connexion, puis preset par défaut. Un mot de passe ou un serveur faux "
-                     "est détecté en ~40 s ; sans signe de l'EA, abandon au bout de quelques minutes. Combien à la fois ?")
+                     "est détecté en ~40 s ; sans signe de l'EA, abandon au bout de quelques minutes. Création 2 par 2.")
     return "\n".join(lines)
 
 

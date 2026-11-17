@@ -147,16 +147,13 @@ def parse_log(text: str) -> tuple[int, int, list[str]]:
     return (len(errs) or -1), 0, errs                     # -1 : résultat illisible
 
 
-def command_line(cfg: Config, log_path: Path) -> str | list[str]:
-    """Windows : ligne de commande de MetaEditor. Linux (Bot 3.15.0) : liste `wine MetaEditor64.exe …` avec chemins Z:\\…"""
+def command_line(cfg: Config, log_path: Path) -> list[str]:
+    """`wine MetaEditor64.exe /portable /compile:Z:\\… /inc:Z:\\… /log:Z:\\…` (chemins vus par Wine)."""
+    from .wine import to_win
     base = cfg.paths.base
     mq5 = experts(cfg) / f"{cfg.mt5.ea_name}.mq5"
-    if os.name != "nt":
-        from .wine import to_win
-        return [cfg.wine.cmd, str(base / METAEDITOR), "/portable", f"/compile:{to_win(mq5)}",
-                f"/inc:{to_win(base / 'MQL5')}", f"/log:{to_win(Path(log_path).resolve())}"]
-    return (f'"{base / METAEDITOR}" /portable /compile:"{mq5}" '
-            f'/inc:"{base / "MQL5"}" /log:"{log_path}"')
+    return [cfg.wine.cmd, str(base / METAEDITOR), "/portable", f"/compile:{to_win(mq5)}",
+            f"/inc:{to_win(base / 'MQL5')}", f"/log:{to_win(Path(log_path).resolve())}"]
 
 
 COMPILE_TIMEOUT_S = 900.0           # Bot 3.6.4 : 15 min (5 min avant : VPS chargé, compilation coupée à 95 %)
@@ -185,19 +182,12 @@ def kill_stale(base: Path) -> int:
         return 0
     target = os.path.normcase(os.path.abspath(str(Path(base) / METAEDITOR)))
     n = 0
-    wine = os.name != "nt"                                    # Bot 3.15.0 : Linux → nom tronqué à 15, chemin dans la ligne de commande
-    for p in psutil.process_iter(["name", "exe"]):
+    from .wine import cmdline_exe
+    from .procs import own_procs
+    for p in own_procs("name"):                                # Wine : nom quelconque (« main ») → chemin de la ligne de commande
         try:
-            if not wine and (p.info.get("name") or "").lower() != METAEDITOR.lower():   # Wine : nom quelconque (« main »)
-                continue
-            if wine:
-                from .wine import cmdline_exe
-                exe = cmdline_exe(p.cmdline()) or ""
-                if not exe:
-                    continue
-            else:
-                exe = p.info.get("exe") or ""
-            if exe and os.path.normcase(os.path.abspath(exe)) != target:
+            exe = cmdline_exe(p.cmdline()) or ""
+            if not exe or os.path.normcase(os.path.abspath(exe)) != target:
                 continue
             _kill_tree(p.pid)
             n += 1
@@ -209,17 +199,12 @@ def kill_stale(base: Path) -> int:
     return n
 
 
-_ENV: dict | None = None                                      # Linux : environnement Wine de la compilation en cours
+_ENV: dict | None = None                                      # environnement Wine de la compilation en cours
 
 
-def _run(cmd: str | list[str], timeout: float, env: dict | None = None) -> None:
-    # Bot 3.6.4 : MetaEditor en priorité « au-dessus de la normale » : avec le VPS à 100 % (terminaux, testeur),
-    # la phase d'optimisation de la compilation (après « generating code 95 % ») n'avançait plus.
-    # Linux : priorité normale (monter la priorité exige les droits root) ; environnement Wine.
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "ABOVE_NORMAL_PRIORITY_CLASS", 0)
-    proc = subprocess.Popen(cmd, shell=False, creationflags=flags, env=env or _ENV,
-                            **({} if os.name == "nt" else {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL,
-                                                           "stderr": subprocess.DEVNULL}))
+def _run(cmd: list[str], timeout: float, env: dict | None = None) -> None:
+    proc = subprocess.Popen(cmd, shell=False, env=env or _ENV, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
     try:
         proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -231,9 +216,8 @@ async def compile_ea(cfg: Config, timeout: float = COMPILE_TIMEOUT_S, runner=Non
     if runner is None:
         await asyncio.get_running_loop().run_in_executor(None, kill_stale, cfg.paths.base)
     global _ENV
-    if os.name != "nt":                                        # Linux : MetaEditor lancé par Wine (préfixe, écran virtuel)
-        from .wine import env as wine_env
-        _ENV = wine_env(cfg.wine.options())
+    from .wine import env as wine_env                          # MetaEditor lancé par Wine (préfixe, écran virtuel)
+    _ENV = wine_env(cfg.wine.options())
     runner = runner or _run
     ver = source_version(cfg)
     ex5 = experts(cfg) / cfg.mt5.ea_file

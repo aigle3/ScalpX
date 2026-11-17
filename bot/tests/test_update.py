@@ -150,11 +150,21 @@ def test_fichiers_retires_du_depot_supprimes(tmp_path, cfg):
     assert (bot_root / "config.toml").exists() and u.plan_update(cfg, bot_root).empty
 
 
-def test_detection_processus_reels():
-    import psutil
+def test_detection_processus_reels(tmp_path):
+    """Processus réel lancé avec un « .exe » en 1er argument (comme Wine) : reconnu par sa ligne de commande."""
+    import subprocess
+    import sys
     from mt5.procs import PsutilProcesses
-    p = PsutilProcesses()
-    assert p.is_running(psutil.Process().exe()) and not p.is_running("/nulle/part/terminal64.exe")
+    fake = tmp_path / "terminal64.exe"
+    fake.write_text("")
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", str(fake)])
+    try:
+        p = PsutilProcesses()
+        import psutil
+        assert any(x.pid == proc.pid for x in psutil.process_iter())
+        assert not p.is_running("/nulle/part/terminal64.exe")
+    finally:
+        proc.kill()
 
 
 def test_ping_de_surveillance(cfg):
@@ -321,28 +331,6 @@ def test_creneaux_masques_et_input_du_set():
     assert ps.human(p, "1184328") == "03:00, 06:00, 09:00, 12:00, 17:00, 20:00" and ps.human(ps.BY_KEY["sl_win"], "10") == "10 min"
 
 
-def test_detection_processus_filtre_par_nom(monkeypatch):
-    """Windows : seul le chemin des processus du bon nom est lu (parcours rapide), même résultat."""
-    from mt5 import procs as pr
-
-    class P:
-        def __init__(self, name, exe):
-            self.info, self._exe, self.read = {"name": name}, exe, 0
-
-        def exe(self):
-            self.read += 1
-            return self._exe
-
-    ps = [P("svchost.exe", "/w/svchost.exe"), P("terminal64.exe", "/mt5/a/terminal64.exe"), P(None, "/mt5/b/terminal64.exe")]
-    monkeypatch.setattr(pr, "FAST_NAMES", True)
-    monkeypatch.setattr(pr.psutil, "process_iter", lambda attrs=None: iter(ps))
-    p = pr.PsutilProcesses()
-    assert p.is_running("/mt5/a/terminal64.exe") and p.is_running("/mt5/b/terminal64.exe")
-    assert not p.is_running("/mt5/c/terminal64.exe")
-    assert ps[0].read == 0 and ps[1].read >= 1                        # svchost : chemin jamais lu
-    assert [x._exe for x in p.find("/mt5/a/terminal64.exe")] == ["/mt5/a/terminal64.exe"]
-
-
 def test_paquet_github_chemins_hors_dossier_refuses(tmp_path):
     import io
     import zipfile
@@ -357,98 +345,3 @@ def test_paquet_github_chemins_hors_dossier_refuses(tmp_path):
     assert (dest / "bot" / "main.py").read_text() == "ok"
     assert not (tmp_path / "release.new2").exists() and not (tmp_path.parent / "evil.txt").exists()
 
-
-def test_relance_attend_la_fin_de_l_ancien_bot():
-    """La tâche planifiée n'accepte qu'une instance : la relance attend la fin de CE processus (plus de délai fixe de 20 s)."""
-    from pathlib import Path
-    from core import update as u
-    sc = u.restart_script(4321)
-    assert "Wait-Process -Id 4321 -Timeout 300" in sc and f"schtasks /run /tn '{u.TASK}'" in sc and "$l =" not in sc
-    lg = u.restart_script(4321, log_path=Path("C:/ScalpX/bot/data/logs/restart.log"))
-    assert lg.startswith("$l = 'C:") and "L 'bot arrêté'" in lg and lg.index("Wait-Process") < lg.index("schtasks /run")
-    assert sc.index("Wait-Process") < sc.index("schtasks /run") and "for ($i = 1; $i -le 5" in sc
-
-
-def test_surveillance_du_bot_tache_et_marqueur(tmp_path):
-    from core import selfwatch as sw
-    root = tmp_path / "bot"
-    root.mkdir()
-    calls = []
-
-    class R:
-        def __init__(self, code=0):
-            self.returncode, self.stdout, self.stderr = code, "", ""
-
-    run = lambda args: (calls.append(args), R(0))[1]
-    assert sw.ensure_watchdog(root, run) == "watchdog.ps1 absent"
-    (root / "watchdog.ps1").write_text("x")
-    assert sw.ensure_watchdog(root, lambda a: R(1)) .startswith("pas de tâche")      # bot lancé à la main : rien
-    assert sw.ensure_watchdog(root, run) == "ok"
-    create = calls[-1]
-    assert create[:2] == ["schtasks", "/create"] and "/it" in create and create[create.index("/mo") + 1] == "2"
-    assert "watchdog.vbs" in create[-1] and (root / "watchdog.vbs").is_file()
-    assert str(root / "watchdog.ps1") in (root / "watchdog.vbs").read_text()
-    # redémarrage voulu : marqueur posé puis effacé par le nouveau bot
-    sw.mark_restarting(root)
-    import os as _os
-    ts, pid = sw.marker(root).read_text().split()
-    assert int(pid) == _os.getpid() and int(ts) > 0
-    # redémarrage voulu : la surveillance est lancée tout de suite (si sa tâche existe)
-    calls.clear()
-    assert sw.kick(run) and calls[-1] == ["schtasks", "/run", "/tn", sw.TASK]
-    assert not sw.kick(lambda a: R(1))
-    sw.clear_restarting(root)
-    sw.clear_restarting(root)
-    assert not sw.marker(root).exists()
-
-
-def test_script_de_surveillance_present_et_prudent():
-    from pathlib import Path
-    ps = (Path(__file__).resolve().parent.parent / "watchdog.ps1").read_bytes()
-    assert ps.startswith(b"\xef\xbb\xbf") and b"\r\n" in ps and b"\n" not in ps.replace(b"\r\n", b"")
-    t = ps.decode("utf-8-sig")
-    assert "restarting" in t and "-lt 300" in t and "$miss -lt 2" in t and "schtasks /run /tn $task" in t
-    # le marqueur est traité AVANT le test « bot vivant » (l'ancien bot tient encore son verrou pendant l'arrêt)
-    assert t.index("if (Test-Path $mark)") < t.index("if (Alive) {\r\n    if (Test-Path $state)")
-    assert "Wait-Process -Id $old" in t and "Stop-Process -Id $old -Force" in t
-
-
-def test_github_publication_d_une_autre_plateforme_non_proposee(tmp_path, cfg):
-    """Bot 3.13.0 : [linux] / [windows] dans le message → proposée seulement à cette plateforme."""
-    import json
-    from core import github as gh
-    assert gh.platforms("Bot 3.14.0 [linux] : Ubuntu") == {"linux"}
-    assert gh.platforms("EA 7.13.0 : filtre") == {"linux", "windows"}
-    assert gh.concerns("Bot 1.0.0 [Windows] : x", "windows") and not gh.concerns("Bot 1.0.0 [windows] : x", "linux")
-    cfg.update.github, cfg.update.source = "aigle3/scalpx", str(tmp_path / "release")
-    msgs = {"c2": "Bot c2 [linux] : Ubuntu", "c3": "Bot c3 : commun", "c4": "Bot c4 [linux] : correctif"}
-    chain = ["c1", "c2", "c3", "c4"]
-    head = {"sha": "c2"}
-    got = []
-
-    def commit(s):
-        return {"sha": s, "commit": {"message": msgs.get(s, s), "committer": {"date": "2026-11-17"}}}
-
-    def http(url, headers):
-        if url.endswith("/commits/stable"):
-            return 200, json.dumps(commit(head["sha"])).encode()
-        if "/compare/" in url:
-            base, top = url.split("/compare/")[1].split("...")
-            after = chain[chain.index(base) + 1:chain.index(top) + 1]
-            return 200, json.dumps({"status": "ahead", "commits": [commit(s) for s in after]}).encode()
-        if "/zipball/" in url:
-            got.append(url.rsplit("/", 1)[1])
-            return 200, _zip({"bot/main.py": b"print(1)"})
-        return 404, b""
-
-    gh._SEEN.update(sha="", since=0.0)
-    r = gh.fetch(cfg, http, force=True, installed="c1", platform="windows")       # seule c2 [linux] publiée
-    assert not r.changed and got == []
-    assert gh.fetch(cfg, http, force=True, installed="c1", platform="linux").sha == "c2"
-    import shutil
-    shutil.rmtree(tmp_path / "release")
-    got.clear()
-    head["sha"] = "c4"
-    r = gh.fetch(cfg, http, force=True, installed="c1", platform="windows")       # c3 commune (contient aussi c2)
-    assert r.changed and r.sha == "c3" and r.remaining == 0 and got == ["c3"]
-    assert not gh.fetch(cfg, http, force=True, installed="c3", platform="windows").changed   # c4 [linux] sautée

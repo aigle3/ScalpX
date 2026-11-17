@@ -1,7 +1,7 @@
 """Presets centraux : un seul jeu de réglages de l'EA, gardé par le bot (data/presets.json), appliqué à tous les robots.
 
 Valeurs « brutes » = format attendu par la commande SET de l'EA : 1/0 (oui/non), index (choix), nombre (arrondi au pas).
-Le fichier est dans data\\ : jamais remplacé par les mises à jour.
+Le fichier est dans data/ : jamais remplacé par les mises à jour.
 """
 from __future__ import annotations
 

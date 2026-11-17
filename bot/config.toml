@@ -1,10 +1,10 @@
 # ScalpX — configuration du bot central (les secrets sont dans .env, jamais ici)
 
 [paths]
-base      = "C:\\MT5\\BASE"            # installation MT5 portable SANS compte (jamais modifiée par le bot)
-instances = "C:\\MT5\\instances"       # un dossier <login>_<serveur> par compte
-archives  = "C:\\MT5\\archives"        # dossiers archivés (échecs de création, comptes supprimés)
-# common_files = "C:\\Users\\<toi>\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files"   # défaut : %APPDATA%\MetaQuotes\Terminal\Common\Files
+base      = "/home/scalpx/mt5/BASE"         # installation MT5 portable SANS compte (jamais modifiée par le bot)
+instances = "/home/scalpx/mt5/instances"    # un dossier <login>_<serveur> par compte
+archives  = "/home/scalpx/mt5/archives"     # dossiers archivés (échecs de création, comptes supprimés)
+common_files = "/home/scalpx/.wine/drive_c/users/scalpx/AppData/Roaming/MetaQuotes/Terminal/Common/Files"   # échanges bot ↔ EA
 data      = "data"                      # base SQLite et logs (relatif au dossier du bot)
 
 [mt5]
@@ -56,7 +56,13 @@ lock_port = 47653
 log_level = "INFO"
 
 [update]
-github  = "aigle3/ScalpX"        # dépôt des mises à jour (jeton GITHUB_TOKEN en lecture seule dans .env)
+github  = "aigle3/ScalpX"        # dépôt des mises à jour (jeton GITHUB_TOKEN en lecture seule, donné dans Telegram)
 branch  = "main"
-source  = "C:\\ScalpX\\release"  # copie locale du paquet téléchargé
+source  = "/home/scalpx/scalpx/release"   # copie locale du paquet téléchargé
 check_s = 60
+
+[wine]
+cmd     = "wine"
+prefix  = "/home/scalpx/.wine"
+display = ":99"              # écran virtuel (service scalpx-xvfb)
+webview = false              # pages web intégrées de MT5 (WebView2) : coupées = ≈ 300 Mo de RAM gagnés par terminal

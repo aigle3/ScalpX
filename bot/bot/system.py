@@ -1,7 +1,6 @@
 """Écran « 🛠 Système » : état du bot, du VPS, de BASE et des mises à jour — utile même sans aucun compte."""
 from __future__ import annotations
 
-import os
 import time
 from pathlib import Path
 
@@ -85,7 +84,7 @@ def system_text(ctx: Ctx, vps: dict[str, float]) -> str:
         hc = db.meta_get("health_ok")
         lines.append("📡 Surveillance externe : " + ("✅ active" if hc == "1" else "⏳ en attente" if hc == "" else "❌ ping refusé (URL ?)"))
     else:
-        lines.append("📡 Surveillance externe : non configurée (HEALTHCHECK_URL dans .env)")
+        lines.append("📡 Surveillance externe : non configurée (🔑 Clés et jetons → HEALTHCHECK_URL)")
     from core import backup
     lb = backup.last_backup(cfg)
     lines.append(f"💾 Sauvegarde de l'historique : " + (f"{_fmt_ts(lb.stat().st_mtime)} ({esc(str(lb.parent))})" if lb else "aucune encore (chaque nuit)"))
@@ -93,14 +92,6 @@ def system_text(ctx: Ctx, vps: dict[str, float]) -> str:
     views = ctx.views()
     running = sum(1 for v in views if ctx.mgr.is_running(v.inst))
     lines.append(f"👥 Comptes : {len(views)} · terminaux lancés : {running}")
-    from mt5 import window as winmod
-    for name, (ts, res) in sorted(winmod.LAST.items(), key=lambda x: -x[1][0])[:3]:
-        if not res.get("window"):
-            state = "❌ fenêtre introuvable"
-        else:
-            state = ("réduite" if res.get("minimized") else "non réduite") + (
-                f", masqué : {esc(', '.join(res['hidden']))}" if res.get("hidden") else ", aucun panneau masqué")
-        lines.append(f"🪟 {esc(name)} ({_fmt_ts(ts)}) : {state}")
     # BASE / EA
     probs = basemod.check_base(cfg)
     ex5 = cfg.paths.base / "MQL5" / "Experts" / cfg.mt5.ea_file
@@ -129,27 +120,22 @@ def system_text(ctx: Ctx, vps: dict[str, float]) -> str:
         lines.append("⬆ Mises à jour automatiques : non configurées ([update] github)")
     if db.meta_get("update_pending"):
         lines.append("🔔 <b>Une mise à jour attend d'être installée</b> : touche ⬆ Mises à jour.")
-    if os.name != "nt" and db.meta_get("install_pending"):
+    if db.meta_get("install_pending"):
         lines.append("🔔 <b>L'installation système a une mise à jour</b> : touche 🔧 Installation système.")
     return "\n".join(lines)
 
 
-def system_kb(pending: bool, previous: str = "", windows: bool = os.name == "nt", install: bool = False) -> Keyboard:
+def system_kb(pending: bool, previous: str = "", install: bool = False) -> Keyboard:
     extra: Keyboard = [[(f"⏪ Revenir au bot {previous}", "d:rbk")]] if previous else []
     return extra + [
         [(("🔔 " if pending else "") + "⬆ Mises à jour", "d:upd"), ("🔨 Compiler l'EA", "d:bld")],
-        # Bot 3.19.0 : Linux → installation système (droits administrateur), 🔔 quand le paquet en apporte une nouvelle
-        *([] if windows else [[(("🔔 " if install else "") + "🔧 Installation système", "d:rup")]]),
-        *([[("📜 Journaux", "d:logs"), ("🪟 Réduire les terminaux", "d:win")],
-           [("🏓 Ping", "d:png"), ("🧾 Journal des actions", "d:jra")],
-           [("📊 Remettre le bouton du bas", "d:menu"), ("🎬 Plex", "d:plex")],
-           [("⚡ Optimiser le VPS", "d:vpo")]] if windows else
-          # Bot 3.15.0 : Linux → pas de fenêtres à réduire (écran virtuel), Plex et optimisation propres à Windows
-          [[("🖥 Serveur", "d:srv"), ("📜 Journaux", "d:logs")],
-           [("🏓 Ping", "d:png"), ("🧾 Journal des actions", "d:jra")],
-           [("📊 Remettre le bouton du bas", "d:menu")]]),
+        # Bot 3.19.0 : installation système (droits administrateur), 🔔 quand le paquet en apporte une nouvelle
+        [(("🔔 " if install else "") + "🔧 Installation système", "d:rup")],
+        [("🖥 Serveur", "d:srv"), ("📜 Journaux", "d:logs")],
+        [("🏓 Ping", "d:png"), ("🧾 Journal des actions", "d:jra")],
+        [("📊 Remettre le bouton du bas", "d:menu")],
         [("🔄 Redémarrer le bot", "d:rst"), ("🔃", "d:sys")],
-        [("🔑 Clés et jetons", "d:key")] + ([("♻️ Réinitialiser", "d:rz")] if windows else []),   # Linux : dans 🖥 Serveur
+        [("🔑 Clés et jetons", "d:key")],
         [("☁️ Sauvegarder", "d:fbk"), ("☁️ Restaurer", "d:frs")],                    # Bot 3.21.0 : sauvegarde complète
         [("⬅ Accueil", "d:home")],
     ]
@@ -184,24 +170,6 @@ def crash_report(ctx: Ctx, now: float | None = None) -> tuple[str, bool]:
 def log_path(ctx: Ctx, name: str) -> Path:
     return ctx.cfg.paths.data / "logs" / name
 
-
-def plex_screen(ctx: Ctx, flash: str = "") -> tuple[str, Keyboard]:
-    """Bot 3.8.0 : écran 🎬 Plex (état, allumer / éteindre)."""
-    from core import plex
-    try:
-        st = plex.state(ctx.cfg.plex.exe)
-    except Exception as exc:
-        return f"🎬 <b>Plex</b>\n\n❌ état illisible : {esc(str(exc))}", [[("⬅ Système", "d:sys")]]
-    lines = [plex.status_text(st), ""]
-    if not st.exe:
-        lines.append("⚠️ Plex Media Server.exe introuvable : indique son chemin dans config.toml, section [plex], exe = …")
-    else:
-        lines.append(f"<i>{esc(st.exe)}</i>")
-    lines.append("Les terminaux MT5 ne sont pas touchés." + (" Plex tourne en priorité basse." if ctx.cfg.plex.low_priority else ""))
-    if flash:
-        lines = [flash, ""] + lines
-    btn = ("⏹ Éteindre Plex", "d:plexoff") if st.running else ("▶ Allumer Plex", "d:plexon")
-    return "\n".join(lines), [[btn, ("🔃", "d:plex")], [("⬅ Système", "d:sys")]]
 
 
 def keys_screen(ctx: Ctx, flash: str = "") -> tuple[str, Keyboard]:

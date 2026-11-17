@@ -970,26 +970,6 @@ async def test_terminaux_de_tous_les_comptes(svc):
 
 
 @pytest.mark.asyncio
-async def test_mise_a_jour_du_bot_arrete_puis_relance_un_par_un(svc):
-    """Bot 3.11.0 : arrêt vérifié de chaque terminal (liste mémorisée), puis relance un par un ; liste effacée à la fin."""
-    from mt5 import cpufree
-    from storage.db import ARRETE, DEMARRE
-    ctx, sender, dash, router, notifier, ea, conf = svc
-    st = ctx_stack(svc)
-    a = seed(st, 97, "Demo-Server 1")
-    b = seed(st, 98, "Demo-Server 1")
-    stopped = await router._terminals([a, b], "stop", "Arrêt pour la mise à jour du bot")
-    assert sorted(stopped) == sorted([a.id, b.id]) and not ctx.mgr.is_running(a) and not ctx.mgr.is_running(b)
-    assert ctx.db.get(a.id).desired_state == ARRETE
-    cpufree.remember(ctx.db, stopped)
-    await router.relaunch_after_update([ctx.db.get(a.id), ctx.db.get(b.id)])
-    assert ctx.mgr.is_running(a) and ctx.mgr.is_running(b)
-    assert ctx.db.get(a.id).desired_state == DEMARRE and ctx.db.get(b.id).desired_state == DEMARRE
-    assert cpufree.restore_after_restart(ctx.db) == []
-    assert any("Relance après la mise à jour" in m[1] for m in sender.sent)
-
-
-@pytest.mark.asyncio
 async def test_redemarrer_tous_ferme_ensemble_puis_lance_par_2(svc):
     """Bot 3.12.0 : 🔄 Redémarrer tous : tous fermés en même temps, puis lancés 2 par 2 (vert attendu), état « démarré »."""
     from storage.db import DEMARRE
@@ -1461,19 +1441,6 @@ async def test_redemarrage_complete_par_le_nouveau_bot(svc, tmp_path):
     assert "Mise à jour installée" in text and "Redémarré en 3" in text and "(mise à jour)" in text
     assert ctx.db.meta_get("restart_note") == ""
     await router.restart_report()                                   # une seule fois
-    # interventions de la surveillance citées
-    w = tmp_path / "watchdog.log"
-    now = _t.time()
-    w.write_text(_t.strftime("%Y-%m-%d %H:%M:%S", _t.localtime(now)) + " relance du bot (redémarrage voulu), essai 1\n"
-                 + _t.strftime("%Y-%m-%d %H:%M:%S", _t.localtime(now - 3600)) + " bot absent (1er constat)\n", encoding="utf-8")
-    got = rt.watchdog_events_since(now - 10, w)
-    assert "relance du bot" in got and "1er constat" not in got
-    # journaux de relance et de surveillance accessibles depuis Telegram
-    dash.goto("logs")
-    datas = [d for row in dash.render()[1] for _, d in row]
-    assert "d:rlog" in datas and "d:wlog" in datas
-    await router.on_callback("d:rlog")
-    assert "restart.log" in sender.sent[-1][1]
 
 
 @pytest.mark.asyncio

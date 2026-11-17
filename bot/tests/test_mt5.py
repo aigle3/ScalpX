@@ -676,41 +676,6 @@ async def test_deploiement_annule_en_retirant_la_maintenance(stack):
 
 
 # ---------------------------------------------------------------- Bot 3.7.2 : libération du CPU avant redémarrage
-@pytest.mark.asyncio
-async def test_liberation_cpu_ferme_un_par_un_jusqu_au_seuil(stack):
-    from mt5 import cpufree
-    cfg, db, procs, status, cmdq, mgr, ea = stack
-    insts = [seed(stack, k, "Demo-Server 1") for k in (1, 2, 3, 4)]
-    load = {"v": 95.0}
-
-    async def fake_stop(inst, force=False, set_desired=None):
-        procs.kill(Path(inst.folder) / "terminal64.exe")
-        load["v"] -= 30.0                                     # chaque terminal fermé libère 30 % de CPU
-        return "kill"
-    mgr.stop = fake_stop
-    steps = []
-
-    async def step(t):
-        steps.append(t)
-    closed = await cpufree.free_cpu(db, mgr, cpu_fn=lambda: load["v"], target_free=70, wait_s=0.05, sample_s=0.01, step=step)
-    assert len(closed) == 3                                   # 95 → 65 → 35 → 5 % : 3 fermetures suffisent
-    assert all(db.get(i).desired_state == MAINTENANCE for i in closed)
-    left = [i for i in insts if i.id not in closed]
-    assert len(left) == 1 and db.get(left[0].id).desired_state == DEMARRE and mgr.is_running(left[0])
-    assert any("redémarrage du bot" in t for t in steps)
-    back = cpufree.restore_after_restart(db)                  # nouveau bot : remis en DEMARRE, relancés
-    assert sorted(back) == sorted(closed) and all(db.get(i).desired_state == DEMARRE for i in closed)
-    assert cpufree.restore_after_restart(db) == []
-
-
-@pytest.mark.asyncio
-async def test_liberation_cpu_rien_a_fermer(stack):
-    from mt5 import cpufree
-    cfg, db, procs, status, cmdq, mgr, ea = stack
-    seed(stack)
-    assert await cpufree.free_cpu(db, mgr, cpu_fn=lambda: 20.0, target_free=70, wait_s=0.05, sample_s=0.01) == []
-
-
 def test_attente_sans_limite_par_defaut():
     from core.config import Timing
     assert Timing().wait_online_limit_s == 0                       # Bot 3.11.0 : le temps qu'il faut
@@ -732,21 +697,6 @@ async def test_attente_abandonnee_si_terminal_ferme():
     assert not await g.check()                                     # fermé depuis moins de grace_s
     await asyncio.sleep(0.06)
     assert await g.check()
-
-
-def test_liste_des_terminaux_arretes_pour_la_mise_a_jour(stack):
-    """Bot 3.11.0 : arrêtés (ARRETE) pour la mise à jour du bot : restent arrêtés au démarrage, liste gardée jusqu'à la relance."""
-    from mt5 import cpufree
-    from storage.db import ARRETE
-    cfg, db, procs, status, cmdq, mgr, ea = stack
-    a = seed(stack, 1, "Demo-Server 1")
-    db.set_desired(a.id, ARRETE)
-    cpufree.remember(db, [a.id])
-    assert cpufree.restore_after_restart(db, clear_list=False) == [a.id]
-    assert db.get(a.id).desired_state == ARRETE
-    assert cpufree.restore_after_restart(db, clear_list=False) == [a.id]     # toujours là (relance pas finie)
-    cpufree.clear(db)
-    assert cpufree.restore_after_restart(db) == []
 
 
 def test_reglages_par_defaut_fermeture_et_lancement():

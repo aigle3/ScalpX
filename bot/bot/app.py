@@ -445,25 +445,6 @@ async def j_opt(context: ContextTypes.DEFAULT_TYPE) -> None:
         s.router._bg(o.run())
 
 
-async def j_windows(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Fenêtres MT5 : un terminal dont la fenêtre n'a pas pu être rangée au lancement (VPS chargé), ou rouverte,
-    est rangé / réduit (comptes et terminal de backtest)."""
-    s = svc(context)
-    procs = s.ctx.mgr.procs
-    if not s.ctx.cfg.mt5.minimize or not hasattr(procs, "ensure_minimized"):
-        return
-    exes = [s.ctx.mgr.exe(i) for i in s.ctx.db.list() if s.ctx.mgr.is_running(i)]
-    bt = getattr(s.router, "bt", None)
-    if bt is not None and bt.is_running():
-        exes.append(bt.exe)
-
-    def run() -> list[str]:
-        return [r for r in (procs.ensure_minimized(e) for e in exes) if r]
-    done = await asyncio.to_thread(run)
-    if done:
-        log.info("fenêtres MT5 : %d rangée(s) ou réduite(s) au contrôle périodique", len(done))
-
-
 async def j_watchdog(context: ContextTypes.DEFAULT_TYPE) -> None:
     await svc(context).ctx.watchdog.tick()
 
@@ -521,8 +502,8 @@ async def j_update(context: ContextTypes.DEFAULT_TYPE) -> None:
             if left is not None and left <= 15 and s.ctx.db.meta_get("gh_exp_alert") != today:
                 s.ctx.db.meta_set("gh_exp_alert", today)                # une alerte par jour
                 await s.sender.send(s.chat_id, f"🔑 Le jeton GitHub expire dans <b>{max(left, 0)} jour(s)</b> ({res.token_expires}).\n"
-                                    "Crée-en un nouveau (lecture seule sur ScalpX), remplace GITHUB_TOKEN dans "
-                                    "C:\\ScalpX\\bot\\.env puis 🛠 Système → 🔄 Redémarrer le bot.", None, True)
+                                    "Crée-en un nouveau (lecture seule sur ScalpX) puis donne-le au bot : "
+                                    "🛠 Système → 🔑 Clés et jetons → GITHUB_TOKEN.", [[("🔑 GITHUB_TOKEN", "d:kset:GITHUB_TOKEN")]], True)
         err = "" if res.ok else res.error
         if err != s.ctx.db.meta_get("gh_err"):                    # une alerte par problème, et une à la résolution
             s.ctx.db.meta_set("gh_err", err)
@@ -604,14 +585,6 @@ async def startup(app: Application) -> None:
         await s.router.ask_missing_keys()
     except Exception:
         log.exception("demande des jetons manquants")
-    try:                                                            # Bot 3.6.2 : le bot passe avant le testeur sur un VPS chargé
-        import psutil
-        cls = getattr(psutil, "ABOVE_NORMAL_PRIORITY_CLASS", None)
-        if cls is not None:
-            psutil.Process().nice(cls)
-            log.info("bot en priorité « supérieure à la normale »")
-    except Exception:
-        log.warning("priorité du bot non modifiée", exc_info=True)
     try:
         from core import presets as cps
         gone = cps.remove_recommended(s.dash.store)                 # Bot 3.18.1 : preset « conseille » retiré (non voulu)
@@ -619,12 +592,6 @@ async def startup(app: Application) -> None:
             log.info("preset(s) %s supprimé(s)", ", ".join(gone))
     except Exception:
         log.exception("preset conseillé : suppression impossible")
-    try:
-        from core.selfwatch import ensure_watchdog
-        res = await asyncio.to_thread(ensure_watchdog, Path(__file__).resolve().parent.parent)
-        (log.info if res in ("ok", "hors Windows") else log.warning)("surveillance du bot (tâche ScalpX Watchdog) : %s", res)
-    except Exception:
-        log.exception("surveillance du bot : création de la tâche")
     try:
         n = s.ctx.db.bt_interrupted()                              # 🧪 backtest en cours au redémarrage : suivi perdu
         if n:
@@ -638,18 +605,7 @@ async def startup(app: Application) -> None:
     except Exception:
         log.exception("démarrage : nettoyage des créations refusées")
     try:
-        from mt5 import cpufree
-        from storage.db import ARRETE
-        back = cpufree.restore_after_restart(s.ctx.db, clear_list=False)   # fermés avant le redémarrage (mise à jour)
-        if back:
-            log.info("démarrage : %d terminal(aux) fermé(s) pour la mise à jour, à relancer", len(back))
         launched = await s.ctx.watchdog.startup_launch()
-        # Bot 3.11.0 : arrêtés pour la mise à jour → relancés UN PAR UN (le suivant attend le vert), comme « 🚀 Lancer tous »
-        todo = [i for i in (s.ctx.db.get(x) for x in back) if i is not None and i.desired_state == ARRETE]
-        if todo:
-            s.router._bg(s.router.relaunch_after_update(todo))
-        else:
-            cpufree.clear(s.ctx.db)
         await s.sender.reply_menu(s.chat_id, f"🤖 Bot {bot_version()} démarré · {len(launched)} terminal(aux) relancé(s).\n"
                                               f"Le bouton <b>{MENU_BUTTON}</b> (en bas) affiche le panneau.")
         await s.router.restart_report()                            # « ✅ Redémarré en N s » dans le message de la mise à jour
@@ -712,8 +668,6 @@ def build_application(cfg: Config, ctx_factory) -> Application:
     jq.run_repeating(timed(j_dash), interval=2, first=5, job_kwargs=JOB_KW)        # refresh() : toutes les refresh_s, republication après repost_s
     jq.run_repeating(timed(j_watchdog), interval=t.watchdog_interval_s, first=20, job_kwargs=JOB_KW)
     jq.run_repeating(timed(j_opt), interval=60, first=120, job_kwargs=JOB_KW)
-    if cfg.mt5.minimize and cfg.mt5.minimize_check_s > 0:
-        jq.run_repeating(timed(j_windows), interval=cfg.mt5.minimize_check_s, first=180, job_kwargs=JOB_KW)
     jq.run_repeating(timed(j_build), interval=20, first=40, job_kwargs=JOB_KW)
     jq.run_repeating(timed(j_update), interval=max(20, cfg.update.check_s), first=60, job_kwargs=JOB_KW)
     jq.run_repeating(timed(j_health), interval=60, first=15, job_kwargs=JOB_KW)
@@ -723,6 +677,5 @@ def build_application(cfg: Config, ctx_factory) -> Application:
     jq.run_daily(timed(j_prune), time=dtime(4, 0), job_kwargs=JOB_KW_DAILY)
     jq.run_daily(timed(j_backup), time=dtime(cfg.backup.hour % 24, 0), job_kwargs=JOB_KW_DAILY)
     jq.run_repeating(timed(j_ghbackup), interval=max(60, cfg.backup.github_check_s), first=90, job_kwargs=JOB_KW)
-    if os.name != "nt":
-        jq.run_repeating(timed(j_install), interval=300, first=120, job_kwargs=JOB_KW)
+    jq.run_repeating(timed(j_install), interval=300, first=120, job_kwargs=JOB_KW)
     return app

@@ -1,7 +1,6 @@
-"""Sauvegarde quotidienne de l'historique (data\\scalpx.db) : soldes, cycles, retraits, déploiements."""
+"""Sauvegarde quotidienne de l'historique (data/scalpx.db) : soldes, cycles, retraits, déploiements."""
 from __future__ import annotations
 
-import os
 import time
 from pathlib import Path
 
@@ -12,9 +11,6 @@ from storage.db import Database
 def backup_dir(cfg: Config) -> Path:
     if cfg.backup.dir:
         return Path(cfg.backup.dir)
-    od = os.environ.get("OneDrive") or os.environ.get("OneDriveConsumer")
-    if od and Path(od).is_dir():
-        return Path(od) / "ScalpX" / "sauvegardes"                 # hors du VPS : survit à une panne disque
     return cfg.paths.data / "backups"
 
 

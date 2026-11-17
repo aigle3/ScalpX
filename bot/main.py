@@ -1,7 +1,7 @@
 """Point d'entrée du bot central ScalpX.
 
-  python.exe main.py            → debug (console)
-  pythonw.exe main.py           → production (Planificateur de tâches, sans fenêtre)
+  python main.py                → à la main (console)
+  service systemd scalpx-bot    → production (linux/scalpx-bot.service, relancé par systemd)
 """
 from __future__ import annotations
 
@@ -89,13 +89,12 @@ def setup_logging(cfg: Config, console: bool) -> None:
 def acquire_lock(port: int, takeover: bool = True, wait_s: float = 40.0) -> socket.socket | None:
     """Verrou d'instance unique : un port local réservé.
     Si un ancien bot le tient, on lui demande de s'arrêter (takeover) puis on attend qu'il libère le port :
-    relancer le bot remplace donc toujours l'ancien, même lancé en arrière-plan (pythonw / tâche planifiée)."""
+    relancer le bot remplace donc toujours l'ancien, même lancé en arrière-plan."""
     deadline = time.monotonic() + (wait_s if takeover else 0)
     asked = False
     while True:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        if os.name != "nt":                      # Linux : n'autorise PAS deux écoutes, seulement la reprise après TIME_WAIT
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)   # Linux : reprise après TIME_WAIT (pas deux écoutes)
         try:
             s.bind(("127.0.0.1", port))
             s.listen(1)
@@ -160,10 +159,7 @@ def make_ctx(cfg: Config) -> "Ctx":
     common.mkdir(parents=True, exist_ok=True)
     status = StatusReader(common)
     cmdq = CommandQueue(common)
-    from mt5.window import WindowOptions, default_api
-    wopts = WindowOptions(minimize=cfg.mt5.minimize, hide_panels=cfg.mt5.hide_panels, maximize_chart=cfg.mt5.maximize_chart)
-    wine = None if os.name == "nt" else cfg.wine.options()         # Bot 3.15.0 : Linux → terminaux lancés par Wine
-    mgr = InstanceManager(cfg, db, PsutilProcesses(wopts, default_api(), wine=wine), status, cmdq)
+    mgr = InstanceManager(cfg, db, PsutilProcesses(wine=cfg.wine.options()), status, cmdq)   # terminaux lancés par Wine
     creator = InstanceCreator(cfg, db, mgr, status)
     deploy = DeployManager(cfg, db, mgr, status, cmdq)
     watchdog = Watchdog(cfg, db, mgr, status, _noop_alert)          # remplacé par le routeur au démarrage
@@ -270,8 +266,6 @@ def main() -> int:
     # Bot 3.14.2 : le verrou répond tout de suite (avant le chargement des modules, jusqu'à 1 min sur un VPS chargé) :
     # la surveillance ne prend plus un bot en train de démarrer pour un bot absent (relances en boucle)
     quit_l = QuitListener(lock)
-    from core.selfwatch import clear_restarting
-    clear_restarting(ROOT)                          # redémarrage voulu terminé : la surveillance reprend normalement
     log.info("démarrage : verrou obtenu en %.1f s, chargement des modules…", time.monotonic() - t_start)
     from bot.app import JOB_KW, build_application
     log.info("démarrage : modules chargés en %.1f s, préparation (base, terminaux)…", time.monotonic() - t_start)
@@ -311,7 +305,7 @@ STOPPING = threading.Event()          # arrêt demandé (mise à jour, redémarr
 
 
 def run() -> int:
-    """main() avec trace écrite dans data\\logs\\crash.log : sous pythonw (tâche planifiée) il n'y a pas de console."""
+    """main() avec trace écrite dans data/logs/crash.log (en plus du journal systemd)."""
     try:
         return main()
     except SystemExit:

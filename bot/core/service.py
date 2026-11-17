@@ -64,7 +64,7 @@ def explain_stop(reason: int, expected: bool) -> str:
         return "🔌 Terminal fermé à la demande du bot (arrêt, redémarrage ou mise à jour de l'EA). Normal."
     why = DEINIT_REASONS.get(reason, f"code {reason}")
     if reason == 9:
-        why += " sans demande du bot (fermé à la main, redémarrage de Windows ou plantage) ; le watchdog le relance s'il doit tourner"
+        why += " sans demande du bot (fermé à la main, redémarrage du VPS ou plantage) ; le watchdog le relance s'il doit tourner"
     return f"🔌 EA arrêté : {why}."
 
 

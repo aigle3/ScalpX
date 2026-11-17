@@ -1,13 +1,14 @@
 # ScalpX — bot Telegram central
 
-Un seul bot Telegram pilote tous les terminaux MT5 d'un VPS Windows (un terminal portable par compte).
+Un seul bot Telegram pilote tous les terminaux MT5 d'un VPS Ubuntu (un terminal portable par compte, sous Wine).
 Le bot **ne se connecte jamais aux comptes** et les EA **ne parlent jamais à Telegram** :
-tout passe par des fichiers dans `%APPDATA%\MetaQuotes\Terminal\Common\Files`.
+tout passe par des fichiers dans `Common/Files` du préfixe Wine
+(`/home/scalpx/.wine/drive_c/users/scalpx/AppData/Roaming/MetaQuotes/Terminal/Common/Files`).
 
 ```
 Telegram ⇄ bot Python ⇄ fichiers Common\Files ⇄ EA (un par terminal)
               │
-              ├─ crée / lance / arrête les terminaux C:\MT5\instances\<login>_<serveur>\ (copies de C:\MT5\BASE)
+              ├─ crée / lance / arrête les terminaux ~/mt5/instances/<login>_<serveur>/ (copies de ~/mt5/BASE) par Wine
               └─ se met à jour depuis GitHub (dépôt privé, jeton en lecture seule)
 ```
 
@@ -23,17 +24,15 @@ Telegram ⇄ bot Python ⇄ fichiers Common\Files ⇄ EA (un par terminal)
 
 ## Installation
 
-Voir `LISEZMOI.txt` à la racine du dépôt : `INSTALL.bat` installe tout (BASE depuis le MT5 du broker, EA, bot, venv,
-`.env` avec les jetons Telegram et GitHub, tâche planifiée « ScalpX Bot »). Vérification : `.venv\Scripts\python main.py --check`.
+Voir `linux/LISEZMOI.md` : `sudo bash linux/install.sh` installe tout (Wine, Xvfb, Python, MT5 dans BASE, EA, bot,
+services systemd `scalpx-xvfb` et `scalpx-bot`, droits administrateur limités) et ne demande que le token Telegram et le
+chat_id. Les jetons GitHub et healthchecks.io se donnent ensuite dans Telegram (🛠 Système → 🔑 Clés et jetons).
 
-- `.env` : `TELEGRAM_TOKEN`, `ALLOWED_CHAT_IDS`, `GITHUB_TOKEN` (jamais recopiés par les mises à jour).
-- `config.toml` : chemins, symbole/période, délais, `[update]` (dépôt GitHub). Toute option a une valeur par défaut.
-- Production : la tâche planifiée lance `pythonw.exe main.py` à l'ouverture de session (session Windows à garder ouverte).
-  Débogage : `.venv\Scripts\python.exe main.py --console`. Journaux : `data\logs\bot.log`, `compile.log`, `crash.log`.
-
-Ubuntu (Bot 3.15.0) : voir `linux/LISEZMOI.md` (`sudo bash linux/install.sh`). MT5, MetaEditor et le testeur passent
-par Wine (section `[wine]` de `config.toml` : préfixe, écran Xvfb `:99`) ; le bot tourne en service systemd `scalpx-bot`
-(relancé par systemd après une mise à jour ; `KillMode=process` : les terminaux continuent de tourner).
+- `.env` : `TELEGRAM_TOKEN`, `ALLOWED_CHAT_IDS`, `GITHUB_TOKEN`, `BACKUP_TOKEN`, `HEALTHCHECK_URL` (jamais recopiés par les mises à jour).
+- `config.toml` : chemins, `[wine]` (préfixe, écran `:99`, WebView2), symbole/période, délais, `[update]`. Toute option a une valeur par défaut.
+- Production : service systemd `scalpx-bot` (`Restart=always`, `KillMode=process` : un redémarrage du bot ne ferme pas
+  les terminaux). Contrôle : `.venv/bin/python main.py --check`. Journaux : `data/logs/bot.log`, `compile.log`, `crash.log`
+  et `journalctl -u scalpx-bot`.
 
 ## Utilisation (tout par boutons, aucune commande « / »)
 
@@ -75,8 +74,8 @@ par Wine (section `[wine]` de `config.toml` : préfixe, écran Xvfb `:99`) ; le 
 - **📝 Rapport quotidien** : capital global et évolution sur 24 h (hors dépôts et retraits), objectifs atteints / manqués, une ligne par compte, alertes seulement s'il y en a.
 - **🛠 Système** : versions bot/EA, VPS, BASE, GitHub (et expiration du jeton), surveillance externe, dernière sauvegarde,
   ⬆ mises à jour, 🔨 compiler l'EA, 📜 journaux, 🔄 redémarrer le bot, ⏪ revenir à la version précédente.
-- **Surveillance externe** : `HEALTHCHECK_URL` (.env, ex. healthchecks.io) reçoit un ping par minute ; s'il cesse, le service prévient.
-- **Sauvegarde** de l'historique (`scalpx.db`) chaque nuit dans `%OneDrive%\ScalpX\sauvegardes` (14 conservées).
+- **Surveillance externe** : `HEALTHCHECK_URL` (🔑 Clés et jetons, ex. healthchecks.io) reçoit un ping par minute ; s'il cesse, le service prévient.
+- **Sauvegarde** de l'historique (`scalpx.db`) chaque nuit dans `data/backups` (14 conservées) et ☁️ sauvegarde complète (base + presets) sur GitHub.
 - **Watchdog** : relance les terminaux DEMARRE disparus (3 fois par heure max, puis alerte) ; un arrêt volontaire n'est jamais relancé.
   Terminal vivant mais **EA muet** (plus de heartbeat) depuis `muet_restart_s` (300 s par défaut, 0 = jamais) : arrêt forcé puis relance, avec la même limite de 3 relances par heure (puis alerte « je n'insiste plus »). Les positions restent chez le broker et l'EA reprend dès son retour.
 - **🧾 Journal des actions** (🛠 Système) : tout ce qui est demandé depuis Telegram et change quelque chose (réglages, pause, objectif, fermeture, lancer/arrêter/redémarrer/supprimer un terminal) avec l'heure, le compte et le résultat ; la même action sur plusieurs comptes tient sur une ligne ; 30 jours conservés. Les simples consultations n'y figurent pas.
@@ -84,7 +83,7 @@ par Wine (section `[wine]` de `config.toml` : préfixe, écran Xvfb `:99`) ; le 
 ## Mises à jour
 
 1. Chaque commit sur `main` est testé par GitHub ; s'il passe, la branche `stable` avance. Le bot télécharge `stable`
-   (toutes les minutes) dans `C:\ScalpX\release`.
+   (toutes les minutes) dans `~/scalpx/release`.
    Une publication n'est proposée qu'après 2 min sans autre publication ; s'il y en a plusieurs, elles sont proposées
    une par une, dans l'ordre (la suivante après l'installation de la précédente).
 2. Telegram : « ⬆ Mise à jour disponible » avec la description et les versions (ex. Bot 1.2.0 → 1.3.0, EA 5.3.0 → 5.3.1).
@@ -97,18 +96,16 @@ Versions à trois niveaux, indépendantes : bot (`version.txt` du bot) et EA (`e
 
 Tout nouvel `.ex5` dans BASE (compilation automatique, bouton 🔨 ou F7 dans MetaEditor) est proposé : tous, un compte
 d'abord, une sélection ou plus tard. Compte par compte, **tout de suite** (positions et ordres laissés chez le broker avec leur TP, repris par le nouvel EA ; `deploy_wait_flat = true` dans `[timing]` pour attendre d'abord la fin de la série, comme avant) → sauvegarde de l'ancien `.ex5`
-(`ex5_backup\`) → arrêt propre → copie du seul `.ex5` → relance → vérification d'un heartbeat frais, état et cycle inchangés.
+(`ex5_backup/`) → arrêt propre → copie du seul `.ex5` → relance → vérification d'un heartbeat frais, état et cycle inchangés.
 Échec : ancien `.ex5` restauré, déploiement stoppé. Un déploiement interrompu (redémarrage du VPS) se reprend ou s'annule.
 
-Changer à la main `BASE\version.txt` déclenche aussi une compilation (version écrite dans les sources), sauf si les sources
+Changer à la main `BASE/version.txt` déclenche aussi une compilation (version écrite dans les sources), sauf si les sources
 sont plus récentes.
 
-## Fenêtre MT5
+## Écran virtuel et WebView2
 
-À chaque ouverture d'un terminal (création, relance, redémarrage, déploiement), le bot masque la boîte à outils,
-le navigateur et l'observation du marché, agrandit le graphique dans la fenêtre puis **réduit la fenêtre** (moins de
-CPU et de mémoire ; l'EA trade normalement). Réglable dans `config.toml` (`[mt5] minimize`, `hide_panels`,
-`maximize_chart`). 🛠 Système → **🪟 Réduire les terminaux** refait le rangement de tous les terminaux ouverts.
+Les terminaux s'affichent sur l'écran virtuel Xvfb `:99` (service `scalpx-xvfb`) : aucune fenêtre à ranger. Les pages web
+intégrées de MT5 (WebView2 / Edge, ≈ 300 Mo par terminal) sont coupées par défaut ; 🖥 Serveur → 🧩 les réactive.
 
 ## Profil MT5
 

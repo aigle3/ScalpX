@@ -1,6 +1,7 @@
 # Tests automatiques : sur « dev » (travail en cours, jamais proposé au VPS) et sur « main » (publication terminée).
 #  - tests du bot (Linux)
-#  - compilation de l'EA avec MetaEditor (Windows) : une erreur de compilation n'atteint jamais le VPS
+#  - compilation de l'EA avec MetaEditor (machine Windows de GitHub, contrôle seulement) : une erreur de compilation
+#    n'atteint jamais le VPS Ubuntu
 # Sur main, si tout passe, la branche « stable » avance : le bot du VPS ne télécharge QUE « stable ».
 name: Tests
 
@@ -37,21 +38,6 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - name: Syntaxe des scripts PowerShell (install.ps1, watchdog.ps1)
-        shell: powershell
-        run: |
-          $bad = 0
-          # script de relance généré par le bot (core/update.py) : vérifié aussi
-          Push-Location (Join-Path $env:GITHUB_WORKSPACE 'bot')
-          python -m pip install -q pydantic psutil
-          python -c "from pathlib import Path; from core.update import restart_script; open(r'$env:RUNNER_TEMP\restart_check.ps1','w',encoding='utf-8-sig').write(restart_script(1234, log_path=Path(r'C:\ScalpX\bot\data\logs\restart.log')))"
-          Pop-Location
-          foreach ($f in @(Get-ChildItem -Path $env:GITHUB_WORKSPACE -Recurse -Filter *.ps1) + @(Get-Item (Join-Path $env:RUNNER_TEMP 'restart_check.ps1'))) {
-            $errs = $null
-            [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$errs) | Out-Null
-            foreach ($e in $errs) { Write-Output "::error file=$($f.Name)::$($e.Message) (ligne $($e.Extent.StartLineNumber))"; $bad++ }
-          }
-          if ($bad) { exit 1 }
       - name: Installer MetaTrader 5 (pour MetaEditor)
         shell: pwsh
         run: |

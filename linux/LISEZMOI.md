@@ -1,8 +1,7 @@
 # ScalpX sur un VPS Ubuntu (Wine)
 
 Tout tourne sur la même machine : MT5 (un terminal portable par compte) sous **Wine**, avec un écran virtuel **Xvfb**,
-et le bot Telegram central en **service systemd**. Le bot, l'EA et les mises à jour (bouton « ⬆ Installer ») marchent
-comme sous Windows.
+et le bot Telegram central en **service systemd**.
 
 ## Prérequis
 - Ubuntu **24.04 ou 26.04** (22.04 accepté), 64 bits, sans bureau graphique. 8 Go de RAM pour une dizaine de comptes.
@@ -18,7 +17,6 @@ sudo bash linux/install.sh
 Le script installe tout (Wine, Xvfb, Python, MT5, EA, bot, services, droits limités du bot) et ne demande que le
 **token Telegram** et ton **chat_id**, seulement s'ils manquent. Au démarrage, le bot te demande dans Telegram les jetons
 GitHub qui lui manquent (mises à jour, sauvegarde) : tu les envoies, il les enregistre et efface ton message.
-Si l'installeur MT5 échoue, copie le dossier `C:\MT5\BASE` du VPS Windows dans `/home/scalpx/mt5/BASE` puis relance.
 
 Relancer l'installation (sans jeton : le bot garde toujours la dernière version téléchargée) :
 `sudo bash /home/scalpx/scalpx/release/linux/install.sh` — ou, une fois les droits du bot en place, 🛠 Système → 🔧.
@@ -27,11 +25,11 @@ Ensuite tout se fait dans Telegram :
 - **🛠 Système → 🔑 Clés et jetons** : jeton de sauvegarde GitHub, healthchecks.io, jeton des mises à jour (ton message est effacé aussitôt) ;
 - **🛠 Système → 🖥 Serveur** : CPU, RAM, disque, processus, démarrage auto,
   🔧 mise à jour de l'installation (droits administrateur, sans mot de passe), 🔁 redémarrage du VPS, 🧨 désinstallation complète ;
-- **♻️ Réinitialiser** : comptes et historique effacés, bot, BASE et presets gardés.
+- **🖥 Serveur → ♻️ Réinitialiser** : comptes et historique effacés, bot, BASE et presets gardés ;
+- **📄 Comptes (fichier)** : plusieurs comptes créés d'un coup (`numéro:mot de passe:serveur` par ligne), 2 par 2 ;
+- **☁️ Sauvegarder / Restaurer** (🛠 Système) : sauvegarde complète sur GitHub (historique, optimiseur, presets).
 
-⚠️ **Un compte ne doit jamais tourner sur les deux VPS en même temps** (deux EA = ordres en double). Avant d'ajouter
-un compte ici, arrête-le sur le VPS Windows (⏹ Arrêter). Et utilise un autre token Telegram tant que le bot Windows
-tourne : deux bots sur le même token se volent les messages.
+⚠️ **Un compte ne doit jamais tourner sur deux serveurs en même temps** (deux EA = ordres en double).
 
 ## Emplacements (utilisateur scalpx)
 | Quoi | Où |
@@ -49,17 +47,17 @@ sudo systemctl restart scalpx-bot         # redémarrer le bot (les terminaux MT
 sudo -u scalpx bash -c 'cd ~/scalpx/bot && .venv/bin/python main.py --check'   # contrôle de l'installation
 ```
 
-## Différences avec Windows
-- Pas de fenêtres : l'écran est virtuel. Les boutons « Réduire les terminaux », « ⚡ Optimiser le VPS » et « 🎬 Plex »
-  n'apparaissent pas.
-- Redémarrage du bot (mise à jour, bouton 🔄) : le bot s'arrête et systemd le relance. Les terminaux ne sont pas
-  arrêtés avec lui.
+## Fonctionnement
+- Écran virtuel : aucune fenêtre. Pages web intégrées de MT5 (WebView2) coupées par défaut (🖥 Serveur → 🧩).
+- Redémarrage du bot (mise à jour, bouton 🔄) : le bot s'arrête et systemd le relance. Les terminaux continuent de tourner.
 - Le VPS redémarre : Xvfb puis le bot démarrent seuls, et le bot relance les terminaux.
 
-## Sauvegarde des presets sur GitHub
+## Sauvegarde sur GitHub
 Dépôt privé `scalpx-sauvegarde` + jeton fine-grained limité à ce dépôt (Contents : Read and write), envoyé au bot
-par 🔑 Clés et jetons → BACKUP_TOKEN. Les presets y sont réécrits à chaque changement ; 💾 Presets → ☁️ Restaurer
-depuis GitHub les récupère sur un serveur neuf.
+par 🔑 Clés et jetons → BACKUP_TOKEN.
+- presets réécrits à chaque changement (💾 Presets → ☁️ Restaurer depuis GitHub) ;
+- sauvegarde complète chaque nuit (historique, optimiseur, presets ; 🛠 Système → ☁️ Restaurer sur un serveur neuf,
+  puis 📄 pour recréer les comptes : leur historique est repris).
 
 ## Sécurité
 Ferme l'accès SSH par mot de passe (clé uniquement) et n'ouvre aucun autre port : le bot n'en a pas besoin (il contacte

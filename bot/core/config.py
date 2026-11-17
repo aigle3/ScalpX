@@ -8,24 +8,20 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 
-IS_WINDOWS = os.name == "nt"
-_MT5_ROOT = Path(r"C:\MT5") if IS_WINDOWS else Path.home() / "mt5"      # Bot 3.15.0 : Linux → ~/mt5
+_MT5_ROOT = Path.home() / "mt5"
 
 
 def default_common_files() -> Path:
-    """%APPDATA%\\MetaQuotes\\Terminal\\Common\\Files (Linux : le même dossier dans le préfixe Wine)."""
-    if not IS_WINDOWS:
-        from mt5.wine import WineOptions, common_files
-        return common_files(WineOptions())
-    appdata = os.environ.get("APPDATA", "")
-    return Path(appdata) / "MetaQuotes" / "Terminal" / "Common" / "Files"
+    """Common\\Files de MT5 dans le préfixe Wine (fichiers d'échange bot ↔ EA)."""
+    from mt5.wine import WineOptions, common_files
+    return common_files(WineOptions())
 
 
 class Paths(BaseModel):
     base: Path = _MT5_ROOT / "BASE"
     instances: Path = _MT5_ROOT / "instances"
     archives: Path = _MT5_ROOT / "archives"
-    common_files: Path | None = None       # None → %APPDATA%\MetaQuotes\Terminal\Common\Files
+    common_files: Path | None = None       # None → Common\Files dans le préfixe Wine
     data: Path = Path("data")              # base SQLite, logs, graphiques, verrou
 
     def common(self) -> Path:
@@ -40,11 +36,7 @@ class MT5(BaseModel):
     symbol: str = "XAUUSD"
     period: str = "M5"
     profile: str = "Default"               # profil de graphiques MT5 que le bot VIDE dans chaque terminal avant le lancement (évite EURUSD, GBPUSD…)
-    minimize: bool = True                  # fenêtre MT5 réduite après chaque ouverture (moins de CPU/RAM)
-    minimize_check_s: int = 300            # contrôle périodique : fenêtres ouvertes de nouveau réduites (0 = jamais)
     max_bars: int = 5000                   # Bot 3.10.0 : barres max par graphique (moins de calcul et de RAM ; 0 = réglage MT5 inchangé)
-    hide_panels: bool = True               # boîte à outils, navigateur et observation du marché masqués
-    maximize_chart: bool = True            # graphique agrandi dans la fenêtre MT5
     default_server: str = ""
     servers: list[str] = Field(default_factory=list)
 
@@ -106,16 +98,13 @@ class Update(BaseModel):
     branch: str = "main"
     settle_min: int = 2                    # un nouveau commit n'est proposé qu'après N minutes sans autre publication
     validated_only: bool = True            # ne télécharger que la branche « stable » (avancée par GitHub quand les tests passent)
-    source: str = r"C:\ScalpX\release" if IS_WINDOWS else str(Path.home() / "scalpx" / "release")   # copie locale du paquet (GitHub)
+    source: str = str(Path.home() / "scalpx" / "release")   # copie locale du paquet (GitHub)
     check_s: int = 60                      # vérification toutes les N secondes
     enabled: bool = True
-    cpu_free_pct: int = 30                 # Bot 3.8.2 : 30 % (70 avant) ; Bot 3.7.2 : avant de redémarrer le bot, fermer des terminaux un par un jusqu'à
-    cpu_wait_s: int = 30                   # ce % de CPU libre (moyenne sur cpu_wait_s après chaque fermeture) ; 0 = jamais
-    close_terminals: bool = True           # Bot 3.11.0 : mise à jour du bot = tous les terminaux arrêtés un par un, puis relancés un par un
 
 
 class Backup(BaseModel):
-    dir: str = ""                          # vide → %OneDrive%\\ScalpX\\sauvegardes si OneDrive est présent, sinon data\\backups
+    dir: str = ""                          # vide → data/backups
     hour: int = 3                          # sauvegarde quotidienne de l'historique (scalpx.db)
     keep: int = 14                         # nombre de sauvegardes conservées
     github: str = ""                       # Bot 3.17.0 : dépôt de sauvegarde des presets ('' → <propriétaire>/scalpx-sauvegarde) ; jeton BACKUP_TOKEN (.env)
@@ -134,13 +123,8 @@ class Backtest(BaseModel):
     free_cores: int = 1                    # Bot 3.6.2 : cœurs laissés au bot et aux comptes (le testeur ne les utilise pas)
 
 
-class Plex(BaseModel):
-    exe: str = ""                          # Bot 3.8.0 : chemin de « Plex Media Server.exe » (vide : emplacement habituel)
-    low_priority: bool = True              # serveur lancé en priorité basse (les terminaux MT5 passent avant)
-
-
 class Wine(BaseModel):
-    """Bot 3.15.0 : Linux seulement (ignoré sous Windows). MT5, MetaEditor et le testeur passent par Wine."""
+    """MT5, MetaEditor et le testeur passent par Wine."""
     cmd: str = "wine"                      # commande Wine
     prefix: Path | None = None             # préfixe Wine (None → $WINEPREFIX, sinon ~/.wine)
     display: str = ":99"                   # écran virtuel Xvfb (service scalpx-xvfb)
@@ -163,7 +147,6 @@ class Config(BaseModel):
     update: Update = Update()
     backup: Backup = Backup()
     backtest: Backtest = Backtest()
-    plex: Plex = Plex()
     wine: Wine = Wine()
 
     # secrets (depuis .env, jamais depuis config.toml)
@@ -203,7 +186,7 @@ def load_config(config_path: Path, env_path: Path | None = None) -> Config:
     cfg.backup_token = env.get("BACKUP_TOKEN", os.environ.get("BACKUP_TOKEN", "")).strip()
     chats = env.get("ALLOWED_CHAT_IDS", env.get("CHAT_ID", os.environ.get("ALLOWED_CHAT_IDS", "")))
     cfg.allowed_chats = [int(x) for x in chats.replace(";", ",").split(",") if x.strip().lstrip("-").isdigit()]
-    if not IS_WINDOWS and cfg.paths.common_files is None:      # Linux : Common\Files dans le préfixe Wine configuré
+    if cfg.paths.common_files is None:                         # Common\Files dans le préfixe Wine configuré
         from mt5.wine import common_files
         cfg.paths.common_files = common_files(cfg.wine.options())
     if not cfg.mt5.servers and cfg.mt5.default_server:

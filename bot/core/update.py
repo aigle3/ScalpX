@@ -9,7 +9,7 @@ Paquet (structure du dépôt) :
 Le bot compare le paquet à ce qui est installé et propose « Installer » dans Telegram :
   EA  → sources et .set copiés dans BASE, puis BASE\\version.txt écrit en dernier (la compilation automatique suit,
         puis la proposition de déploiement sur les comptes) ;
-  bot → fichiers copiés dans le dossier du bot (jamais .env, config.toml, data\\, .venv\\), puis redémarrage.
+  bot → fichiers copiés dans le dossier du bot (jamais .env, config.toml, data/, .venv/), puis redémarrage.
 Jamais de .ex5 copié : BASE compile lui-même.
 """
 from __future__ import annotations
@@ -30,7 +30,7 @@ from core.config import Config
 
 log = logging.getLogger(__name__)
 
-BOT_EXT = {".py", ".txt", ".md", ".ini", ".xml", ".toml", ".bat", ".ps1"}
+BOT_EXT = {".py", ".txt", ".md", ".ini", ".xml", ".toml", ".sh"}
 BOT_SKIP_DIRS = {".venv", "data", "__pycache__", ".pytest_cache"}
 BOT_SKIP_FILES = {".env", "config.toml"}
 _VERSION_LINES = re.compile(r'^\s*(#define\s+SX_VERSION\b|#property\s+version\b|#property\s+description\s+"ScalpX v).*$', re.M)
@@ -106,7 +106,7 @@ def _bot_sources(src: Path) -> list[Path]:
 
 
 def _bot_files(root: Path) -> list[Path]:
-    """Fichiers de code/doc d'un dossier de bot (hors .env, config.toml, data\\, .venv\\, caches)."""
+    """Fichiers de code/doc d'un dossier de bot (hors .env, config.toml, data/, .venv/, caches)."""
     out = []
     for p in root.rglob("*"):
         if not p.is_file() or p.suffix.lower() not in BOT_EXT or p.name in BOT_SKIP_FILES:
@@ -275,62 +275,17 @@ def install_bot(plan: UpdatePlan, bot_root: Path) -> None:
 
 def pip_install(bot_root: Path) -> tuple[bool, str]:
     r = subprocess.run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "-q", "-r",
-                        str(bot_root / "requirements.txt")], capture_output=True, text=True, timeout=600,
-                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                        str(bot_root / "requirements.txt")], capture_output=True, text=True, timeout=600)
     return r.returncode == 0, (r.stderr or r.stdout or "")[-300:]
 
 
-TASK = "ScalpX Bot"
 STOP = threading.Event()                  # positionné après une mise à jour du bot : main.py arrête proprement ce processus
 
 
-def restart_script(pid: int, wait_s: int = 300, log_path: Path | None = None) -> str:
-    """Script PowerShell de relance : attend la fin du processus `pid` (au plus wait_s), puis lance la tâche ; si elle n'est
-    toujours pas en cours d'exécution 20 s plus tard, nouvel essai (jusqu'à 5)."""
-    if log_path:                                  # chaque étape dans data\\logs\\restart.log
-        log = (f"$l = '{str(log_path).replace(chr(39), chr(39) * 2)}'; function L($m) {{ Add-Content -Path $l -Encoding UTF8 "
-               "-Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' ' + $m) }; ")
-    else:
-        log = "function L($m) {}; "
-    return (log + f"L 'attente de la fin du bot (pid {int(pid)})'; "
-            f"Wait-Process -Id {int(pid)} -Timeout {int(wait_s)} -ErrorAction SilentlyContinue; L 'bot arrêté'; Start-Sleep -Seconds 3; "
-            f"for ($i = 1; $i -le 5; $i++) {{ schtasks /run /tn '{TASK}' | Out-Null; L ('relance de la tâche, essai ' + $i); "
-            f"Start-Sleep -Seconds 20; $q = schtasks /query /tn '{TASK}' /fo csv /nh; L ('état : ' + $q); "
-            f"if ($q -match 'Running|En cours') {{ break }} }}")
-
-
 def restart_bot(bot_root: Path) -> str:
-    """Relance le bot avec le nouveau code. Le nouveau processus remplace l'ancien (verrou : QUIT).
-    Tâche planifiée présente → elle est relancée après l'arrêt de celui-ci ; sinon nouveau processus détaché."""
-    from .selfwatch import kick, mark_restarting
-    mark_restarting(bot_root)                     # « je redémarre, pid N » : lu par la surveillance
-    if os.name != "nt" and os.environ.get("INVOCATION_ID"):
-        # Bot 3.15.0 : Linux, bot lancé par systemd (service scalpx-bot, Restart=always) : il suffit que ce processus
-        # s'arrête (STOP), systemd relance le nouveau code. Un processus lancé d'ici serait arrêté avec le service.
+    """Relance le bot avec le nouveau code. Service systemd (scalpx-bot, Restart=always) : il suffit que ce processus
+    s'arrête (STOP), systemd relance le nouveau code. Hors systemd (tests, lancement à la main) : nouveau processus."""
+    if os.environ.get("INVOCATION_ID"):
         return "systemd"
-    no_win = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    detached = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    has_task = os.name == "nt" and subprocess.run(["schtasks", "/query", "/tn", TASK], capture_output=True,
-                                                  creationflags=no_win).returncode == 0
-    if has_task:
-        # La tâche n'accepte qu'une instance (IgnoreNew) : elle n'est relancée qu'une fois CE processus terminé.
-        # Avant : relance fixe après 20 s, refusée si l'arrêt prenait plus longtemps (compilation en cours) → bot arrêté.
-        # 1) la tâche « ScalpX Watchdog », dans SA propre tâche planifiée : attend la fin de ce bot puis le relance.
-        if kick():
-            return "surveillance"
-        # 2) sinon (surveillance pas encore créée) : script lancé d'ici, sorti du « job » de la tâche ScalpX Bot si Windows
-        # le permet. Resté dedans, il la garde « en cours » tant qu'il tourne : sa propre relance était alors ignorée
-        # (redémarrages de 2 à 3 min, parfois jamais).
-        cmd = ["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command",
-               restart_script(os.getpid(), log_path=bot_root / "data" / "logs" / "restart.log")]
-        breakaway = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
-        try:
-            subprocess.Popen(cmd, creationflags=detached | no_win | breakaway, close_fds=True)
-        except OSError:
-            subprocess.Popen(cmd, creationflags=detached | no_win, close_fds=True)
-        return "task"
-    exe = Path(sys.executable)
-    if os.name == "nt" and exe.name.lower() == "python.exe" and (exe.with_name("pythonw.exe")).exists():
-        exe = exe.with_name("pythonw.exe")                            # pas de fenêtre noire orpheline
-    subprocess.Popen([str(exe), str(bot_root / "main.py")], cwd=str(bot_root), creationflags=detached | no_win, close_fds=True)
+    subprocess.Popen([sys.executable, str(bot_root / "main.py")], cwd=str(bot_root), start_new_session=True, close_fds=True)
     return "process"

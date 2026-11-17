@@ -168,9 +168,6 @@ class Dashboard:
             st, auto, sudo = getattr(self, "srv", (None, {}, True))
             w = getattr(self.ctx.mgr.procs, "wine", None)
             return sui.server_screen(st, auto, sudo, self._flash_text(), bool(w and w.webview))
-        if kind == "plex":                                  # Bot 3.8.0
-            from .system import plex_screen
-            return plex_screen(self.ctx, self._flash_text())
         if kind == "logs":
             return self._render_logs()
         if kind == "flt":
@@ -335,7 +332,6 @@ class Dashboard:
         kb: Keyboard = [
             [("🔄 Redémarrer tous", "d:tall:rst")],
             [("🚀 Lancer tous", "d:tall:start"), ("🛑 Arrêter tous", "d:tall:stop")],
-            [("🪟 Réduire les fenêtres", "d:win")],
             [("⬅ Actions", "d:act")],
         ]
         return self._with_flash(text), kb
@@ -373,7 +369,6 @@ class Dashboard:
     def _render_logs(self) -> tuple[str, Keyboard]:
         kb: Keyboard = [
             [("📜 Bot", "d:log"), ("🧾 Compilation", "d:clog"), ("💥 Plantages", "d:crash")],
-            [("🔄 Redémarrages", "d:rlog"), ("🛡 Surveillance", "d:wlog")],
             [("⬅ Système", "d:sys")],
         ]
         return self._with_flash("📜 <b>Journaux</b>\n\nLes dernières lignes arrivent dans un message à part (✖ pour le fermer)."), kb

@@ -162,6 +162,7 @@ fi
 # ---------------------------------------------------------------- 6. bot
 step "6/7  Bot Python ($BOT)"
 as_u mkdir -p "$BOT"
+NEWCFG=""; [ -f "$BOT/config.toml" ] || NEWCFG=1
 tar -C "$PKG/bot" --exclude=.env --exclude=data --exclude=.venv --exclude=__pycache__ \
     $( [ -f "$BOT/config.toml" ] && echo --exclude=config.toml ) -cf - . | tar -C "$BOT" -xf -
 chown -R "$U:$U" "$APP"
@@ -194,7 +195,7 @@ fi
 ok ".env prêt (lisible par $U seulement) : jetons GitHub et healthchecks.io à donner dans Telegram quand le bot les demande"
 
 CFG="$BOT/config.toml"
-if ! grep -q '^\[wine\]' "$CFG"; then                     # config.toml du paquet (Windows) → chemins Linux
+if [ -n "$NEWCFG" ]; then                                # config.toml neuf : chemins de cet utilisateur
     as_u "$BOT/.venv/bin/python" - "$CFG" "$MT" "$PFX" "$APP/release" "$U" "$DISP" <<'PYEOF'
 import re, sys
 cfg, mt, pfx, rel, user, disp = sys.argv[1:]
@@ -202,11 +203,12 @@ t = open(cfg, encoding="utf-8-sig").read()
 common = f"{pfx}/drive_c/users/{user}/AppData/Roaming/MetaQuotes/Terminal/Common/Files"
 for key, val in (("base", f"{mt}/BASE"), ("instances", f"{mt}/instances"), ("archives", f"{mt}/archives"), ("source", rel)):
     t = re.sub(rf'(?m)^{key}\s*=\s*"[^"]*"', f'{key} = "{val}"', t, count=1)
-t = re.sub(r'(?m)^#?\s*common_files\s*=.*$', f'common_files = "{common}"', t, count=1)
-t = t.rstrip() + f'\n\n[wine]\ncmd     = "wine"\nprefix  = "{pfx}"\ndisplay = "{disp}"         # écran virtuel (service scalpx-xvfb)\n'
+t = re.sub(r'(?m)^#?\s*common_files\s*=\s*"[^"]*"', f'common_files = "{common}"', t, count=1)
+t = re.sub(r'(?m)^prefix\s*=\s*"[^"]*"', f'prefix  = "{pfx}"', t, count=1)
+t = re.sub(r'(?m)^display\s*=\s*"[^"]*"', f'display = "{disp}"', t, count=1)
 open(cfg, "w", encoding="utf-8").write(t)
 PYEOF
-    ok "config.toml adapté à Linux"
+    ok "config.toml écrit pour $U"
 else
     ok "config.toml existant conservé"
 fi

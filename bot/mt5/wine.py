@@ -6,7 +6,6 @@ seul préfixe (faux disque C:), avec un écran virtuel Xvfb (DISPLAY). Wine voit
 
 Sous Wine, le « chemin de l'exécutable » d'un processus est celui du chargeur Wine : le terminal est reconnu par le
 premier argument de sa ligne de commande (chemin Windows de terminal64.exe), reconverti ici en chemin Linux.
-Sous Windows, rien de ce module ne sert (IS_WINDOWS).
 """
 from __future__ import annotations
 
@@ -15,7 +14,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-IS_WINDOWS = os.name == "nt"
 _RE_DRIVE = re.compile(r"^([A-Za-z]):[\\/]")
 
 

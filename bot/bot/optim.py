@@ -2,7 +2,7 @@
 
 Réglages (gardés en base, modifiables depuis Telegram) : opt_on (1/0), opt_hour (heure locale de lancement),
 opt_grp (prochaine catégorie), opt_day (dernière nuit faite), opt_scale / opt_idle (portée de recherche et passages
-sans changement par réglage). Journal détaillé : data\\logs\\optim.log.
+sans changement par réglage). Journal détaillé : data/logs/optim.log.
 """
 from __future__ import annotations
 

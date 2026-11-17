@@ -183,28 +183,6 @@ class Router:
             return ""
         elif sub == "sys":
             self.dash.goto("sys")
-        elif sub == "plex":                                     # Bot 3.8.0 : 🎬 serveur Plex
-            self.dash.goto("plex")
-        elif sub in ("plexon", "plexoff"):
-            from core import plex
-            pc = self.ctx.cfg.plex
-            self.dash.goto("plex")
-            self.dash.flash("⏳ " + ("Démarrage" if sub == "plexon" else "Arrêt") + " de Plex…")
-            await self.dash.refresh(force=True)
-            try:
-                res = await asyncio.to_thread(plex.start, pc.exe, pc.low_priority) if sub == "plexon" else \
-                      await asyncio.to_thread(plex.stop)
-            except Exception as exc:
-                log.exception("Plex")
-                res = f"❌ erreur : {exc}"
-            self.ctx.db.add_action("", "PLEX " + ("ALLUMÉ" if sub == "plexon" else "ÉTEINT"), not res.startswith(("❌", "⚠")), res)
-            if sub == "plexon" and not res.startswith("❌"):
-                await asyncio.sleep(3)                          # le serveur apparaît dans la liste des processus
-            self.dash.flash(("✅ " if not res.startswith(("❌", "⚠")) else "") + "Plex " + esc(res))
-        elif sub == "vpo":                                      # Bot 3.10.0 : ⚡ Optimiser le VPS
-            return await self._ask("⚡ <b>Optimiser le VPS ?</b>\nRéglages Windows qui libèrent du CPU (antivirus, services inutiles, "
-                                   "alimentation…), CPU mesuré avant / après (≈ 1 min). Les terminaux et l'EA continuent de trader.",
-                                   self.vps_optimize, ("sys",), "⚡ Optimiser")
         elif sub == "bulk":                                     # Bot 3.20.0 : 📄 plusieurs comptes depuis un fichier
             self.awaiting_bulk = True
             self.dash.goto("home")
@@ -238,7 +216,7 @@ class Router:
                                    "de backtest, tout l'historique (soldes, cycles, retraits, journaux, optimiseur) et les fichiers "
                                    "d'échange avec l'EA.\nGardés : le bot, BASE et les presets. "
                                    "Les positions restent chez le broker (TP en place).",
-                                   self._reset_confirm2, ("sys" if os.name == "nt" else "srv",), "♻️ Continuer")
+                                   self._reset_confirm2, ("srv",), "♻️ Continuer")
         elif sub == "crash":
             from .system import crash_report
             text, has = crash_report(self.ctx)
@@ -254,11 +232,10 @@ class Router:
             if message_id:
                 await self.sender.edit(self.chat_id, message_id, "💥 Historique des plantages effacé.", [[("✖ Fermer", "d:close")]])
             return ""
-        elif sub in ("log", "clog", "rlog", "wlog"):
-            from .system import BOT_ROOT, log_path, tail
-            name = {"log": "bot.log", "clog": "compile.log", "rlog": "restart.log", "wlog": "watchdog.log"}[sub]
-            # relance et surveillance : écrits par des scripts PowerShell, toujours dans le dossier du bot
-            path = BOT_ROOT / "data" / "logs" / name if sub in ("rlog", "wlog") else log_path(self.ctx, name)
+        elif sub in ("log", "clog"):
+            from .system import log_path, tail
+            name = {"log": "bot.log", "clog": "compile.log"}[sub]
+            path = log_path(self.ctx, name)
             txt = tail(path, 40 if sub == "clog" else 25)
             await self.sender.send(self.chat_id, f"📜 <b>{name}</b>\n" + (f"<pre>{esc(txt)}</pre>" if txt else "<i>vide ou absent</i>"),
                                    [[("✖ Fermer", "d:close")]], True)
@@ -278,13 +255,6 @@ class Router:
         elif sub == "menu":                                     # Bot 3.6.3 : bouton permanent « 📊 Tableau de bord »
             await self.sender.reply_menu(self.chat_id, "📊 Bouton « Tableau de bord » remis en bas de l'écran.")
             self.dash.flash("📊 Bouton du bas remis.")
-        elif sub == "win":
-            procs = self.ctx.mgr.procs
-            insts = [i for i in self.ctx.db.list() if self.ctx.mgr.is_running(i)]
-            if hasattr(procs, "rearrange"):
-                for i in insts:
-                    procs.rearrange(self.ctx.mgr.exe(i), settle=False)
-            self.dash.flash(f"🪟 {len(insts)} terminal(aux) : panneaux masqués, graphique agrandi, fenêtre réduite.")
         elif sub == "rst":
             return await self._ask("🔄 <b>Redémarrer le bot ?</b>\nEnviron 30 s sans bot. Les terminaux MT5 et l'EA continuent de trader.",
                                    self.restart_bot, ("sys",), "🔄 Redémarrer")
@@ -967,21 +937,6 @@ class Router:
         await self.dash.refresh(force=True)
         return good
 
-    async def relaunch_after_update(self, insts) -> None:
-        """Bot 3.11.0 : terminaux arrêtés pour la mise à jour du bot, relancés UN PAR UN (le suivant attend le vert).
-        La liste n'est effacée qu'à la fin : un redémarrage du bot pendant la relance reprend les terminaux restants.
-        Un terminal non relancé repasse « démarré » : la surveillance le relance."""
-        from mt5 import cpufree
-        from storage.db import ARRETE
-        try:
-            await self._terminals(insts, "start", "Relance après la mise à jour")
-        finally:
-            for i in insts:
-                cur = self.ctx.db.get(i.id)
-                if cur is not None and cur.desired_state == ARRETE:
-                    self.ctx.db.set_desired(i.id, DEMARRE)
-            cpufree.clear(self.ctx.db)
-
     # ------------------------------------------------------------------ 💾 presets centraux
     def _running(self) -> list:
         return [i for i in self.ctx.db.list() if self.ctx.mgr.is_running(i)]
@@ -1139,9 +1094,8 @@ class Router:
             self._bulk.forget()
         b = bulk.new_batch(rows, errors, self.ctx.db.exists_active)
         self._bulk = b if b.rows else None
-        kb = ([[(f"✅ {n} à la fois", f"d:bkgo:{b.token}:{n}") for n in bulk.PARALLEL[:2]],
-               [(f"✅ {n} à la fois", f"d:bkgo:{b.token}:{n}") for n in bulk.PARALLEL[2:]],
-               [("✖ Annuler", "d:bkno")]] if b.rows else [[("✖ Fermer", "d:close")]])
+        kb = ([[(f"✅ Créer {len(b.rows)} compte(s)", f"d:bkgo:{b.token}:{bulk.PARALLEL}")], [("✖ Annuler", "d:bkno")]]
+              if b.rows else [[("✖ Fermer", "d:close")]])
         b.msg = await self.sender.send(self.chat_id, bulk.summary(b) if (b.rows or b.errors or b.skipped)
                                        else "📄 Aucun compte trouvé dans ce fichier (format : numéro:mot de passe:serveur).",
                                        kb, False)
@@ -1276,8 +1230,6 @@ class Router:
 
     async def check_install(self) -> None:
         """Bot 3.19.0 (Linux) : le paquet téléchargé apporte une nouvelle installation système → 🔔 et un message (une fois)."""
-        if os.name == "nt":
-            return
         from core import server as sv, update as upd
         need = await asyncio.to_thread(sv.install_needed, upd.find_source(self.ctx.cfg))
         db = self.ctx.db
@@ -1359,7 +1311,7 @@ class Router:
     async def _reset_confirm2(self) -> None:
         n = len(self.ctx.db.list())
         await self._ask(f"⚠️ <b>Vraiment sûr ?</b>\n{n} compte(s) seront retirés de ce serveur. Impossible à annuler : il faudra "
-                        "recréer chaque compte avec ➕ (mot de passe redemandé).", self.reset_server, ("sys" if os.name == "nt" else "srv",),
+                        "recréer chaque compte avec ➕ (mot de passe redemandé).", self.reset_server, ("srv",),
                         "♻️ OUI, tout effacer")
 
     async def reset_server(self) -> None:
@@ -1915,21 +1867,6 @@ class Router:
                 ver = await asyncio.to_thread(upd.install_ea, self.ctx.cfg, plan)
                 out.append(f"📈 EA copié dans BASE" + (f" — compilation v{esc(ver)} dans quelques secondes" if ver else " (.set seulement)"))
             if plan.bot_files or plan.bot_remove:
-                if self.ctx.cfg.update.close_terminals:
-                    # Bot 3.11.0 : comme « 🛑 Arrêter tous » : terminaux fermés UN PAR UN (fermeture vérifiée), puis mise à jour ;
-                    # le nouveau bot les relance un par un (comme « 🚀 Lancer tous »). Positions et TP restent chez le broker.
-                    from mt5 import cpufree
-                    from storage.db import DEMARRE as _DEM
-                    running = await asyncio.to_thread(lambda: [i for i in self.ctx.db.list(states=(_DEM,)) if self.ctx.mgr.is_running(i)])
-                    if running:
-                        await self._upd_step(mid, "⏳ <b>Installation</b> : " + ("\n".join(out) + "\n" if out else "")
-                                             + f"arrêt des {len(running)} terminaux en même temps (relancés 2 par 2 après le redémarrage)…")
-                        stopped = await self._terminals(running, "stop", "Arrêt pour la mise à jour du bot")
-                        cpufree.remember(self.ctx.db, stopped)
-                        for i in running:                          # resté ouvert (clôture à 500 en cours…) : surveillé comme avant
-                            if i.id not in stopped:
-                                self.ctx.db.set_desired(i.id, _DEM)
-                        out.append(f"🔌 {len(stopped)}/{len(running)} terminal(aux) arrêté(s) : relancés 2 par 2 par le nouveau bot")
                 await self._upd_step(mid, "⏳ <b>Installation</b> : " + ("\n".join(out) + "\n" if out else "")
                                      + f"copie du bot ({len(plan.bot_files) + len(plan.bot_remove)} fichier(s))…")
                 await asyncio.to_thread(upd.install_bot, plan, bot_root)
@@ -1953,21 +1890,6 @@ class Router:
         if mid:
             await self.sender.edit(self.chat_id, mid, "✅ <b>Mise à jour installée</b>\n" + "\n".join(out), None)
         if plan.bot_files or plan.bot_remove:
-            uc = self.ctx.cfg.update
-            if uc.cpu_free_pct > 0 and not uc.close_terminals:   # Bot 3.7.2 (si close_terminals = false) : assez de CPU libre
-                from mt5 import cpufree
-                head = "✅ <b>Mise à jour installée</b>\n" + "\n".join(out[:-1]) + ("\n" if out[:-1] else "")
-
-                async def step(text: str) -> None:
-                    if mid:
-                        await self.sender.edit(self.chat_id, mid, head + "⏳ <b>Libération du CPU</b> : " + esc(text), None)
-                try:
-                    closed = await cpufree.free_cpu(self.ctx.db, self.ctx.mgr, target_free=float(uc.cpu_free_pct),
-                                                    wait_s=float(uc.cpu_wait_s), step=step)
-                    if closed:
-                        out.insert(len(out) - 1, f"🔌 {len(closed)} terminal(aux) fermé(s) pour libérer le CPU : relancés par le nouveau bot")
-                except Exception:
-                    log.exception("libération du CPU")
             self.note_restart(mid, "mise à jour", "✅ <b>Mise à jour installée</b>\n" + "\n".join(out))
             how = await asyncio.to_thread(upd.restart_bot, bot_root)
             log.warning("mise à jour du bot installée : redémarrage (%s)", how)
@@ -2000,11 +1922,8 @@ class Router:
         old, new = str(note.get("from") or "?"), bot_version()
         ver = f"Bot {esc(old)} → <b>{esc(new)}</b>" if old != new else f"Bot <b>{esc(new)}</b>"
         line = f"✅ <b>Redémarré en {took}</b> ({esc(str(note.get('why') or 'redémarrage'))}) · {ver}"
-        helped = watchdog_events_since(t0)
-        if helped:
-            line += "\n🛡 " + esc(helped)
-        elif dt > 120:
-            line += "\n⚠️ Plus long que prévu : 📜 Journaux → 🔄 Redémarrages pour le détail."
+        if dt > 120:
+            line += "\n⚠️ Plus long que prévu : 📜 Journaux → 📜 Bot pour le détail."
         log.info("redémarrage terminé en %d s (%s)", dt, note.get("why"))
         text = (str(note.get("text") or "") + "\n\n" if note.get("text") else "") + line
         mid = int(note.get("mid") or 0)
@@ -2055,24 +1974,6 @@ class Router:
         upd.restart_bot(BOT_ROOT)
         upd.STOP.set()
 
-    async def vps_optimize(self) -> None:
-        """Bot 3.10.0 : réglages Windows de vps_optimize.ps1 + CPU avant / après, résultat dans un message à part."""
-        from core import vpsopt
-        mid = await self.sender.send(self.chat_id, "⚡ <b>Optimisation du VPS</b>\n⏳ Mesure du CPU, réglages Windows, nouvelle mesure… (≈ 1 min)",
-                                     None, True)
-        try:
-            rep = await asyncio.to_thread(vpsopt.optimize, self.ctx.cfg)
-            text = vpsopt.report_text(rep, esc)
-            ok = not rep.error and not any(i.state == "echec" for i in rep.items)
-        except Exception as exc:
-            log.exception("optimisation du VPS")
-            text, ok = f"⚡ <b>Optimisation du VPS</b>\n❌ {esc(str(exc))}", False
-        self.ctx.db.add_action("", "OPTIMISER LE VPS", ok, "")
-        kb = [[("🔄 Redémarrer tous les terminaux", "d:tall:rst")], [("✖ Fermer", "d:close")]]
-        if mid:
-            await self.sender.edit(self.chat_id, mid, text, kb)
-        else:
-            await self.sender.send(self.chat_id, text, kb, True)
 
     async def restart_bot(self) -> None:
         """Relance le bot (même mécanisme qu'après une mise à jour) : terminaux et EA non touchés."""
@@ -2308,19 +2209,3 @@ class Router:
         label = inst.label if inst else iid
         self.ctx.db.add_incident(iid, kind, text)
         await self.notifier.emit(Notice(iid, label, kind, text, prio))
-
-
-def watchdog_events_since(t0: float, path=None) -> str:
-    """Interventions de la surveillance depuis t0 (data\\logs\\watchdog.log) : relance, arrêt forcé de l'ancien bot."""
-    from .system import BOT_ROOT, tail
-    txt = tail(path or BOT_ROOT / "data" / "logs" / "watchdog.log", 40)
-    out = []
-    for line in txt.splitlines():
-        try:
-            ts = time.mktime(time.strptime(line[:19], "%Y-%m-%d %H:%M:%S"))
-        except ValueError:
-            continue
-        msg = line[20:]
-        if ts >= t0 - 5 and ("relance" in msg or "arrêt forcé" in msg or "absent" in msg):
-            out.append(f"{line[11:19]} {msg}")
-    return ("surveillance : " + " · ".join(out[-3:])) if out else ""
