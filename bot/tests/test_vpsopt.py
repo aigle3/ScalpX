@@ -42,6 +42,18 @@ def test_script_powershell_present_et_encode():
         assert f"'{k}'" in txt
 
 
+def test_script_aucune_fonction_au_nom_d_alias_powershell():
+    """3.10.1 : une fonction « R » était masquée par l'alias intégré r (Invoke-History) : le script s'arrêtait dès la 1re ligne.
+    Les alias passent AVANT les fonctions dans PowerShell : nos fonctions ont des noms longs, jamais un alias connu."""
+    import re
+    txt = (vpsopt.BOT_ROOT / "vps_optimize.ps1").read_bytes().decode("utf-8-sig")
+    names = re.findall(r"(?im)^\s*function\s+([\w-]+)", txt)
+    aliases = {"r", "h", "c", "cd", "ls", "rm", "cp", "mv", "ps", "kill", "sleep", "sort", "where", "select", "start",
+               "echo", "type", "cat", "dir", "gsv", "sasv", "spsv", "gps", "set", "sc", "si", "sp", "ni", "gi"}
+    assert names and all(len(n) > 3 and n.lower() not in aliases for n in names)
+    assert not re.search(r"(?m)^\s*R\s", txt)
+
+
 def test_run_script_hors_windows():
     if os.name != "nt":
         assert vpsopt.run_script(Config()) == ([], "réservé à Windows")
