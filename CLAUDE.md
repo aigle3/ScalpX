@@ -14,6 +14,7 @@ la branche `stable` avance et le bot du VPS (qui ne lit QUE `stable`) propose «
 - `ea/MQL5/Presets/scalpx_v5.set` : préréglages (UTF-16 LE avec BOM).
 - `ea/version.txt` : version publiée de l'EA.
 - `INSTALL.bat`, `install.ps1`, `LISEZMOI.txt` : installation sur le VPS (Windows Server 2016, PowerShell 5.1).
+- `linux/` : installation sur un VPS Ubuntu (Wine + Xvfb + services systemd) : `install.sh` (LF, pas de CRLF), `LISEZMOI.md`.
 - `docs/CHANGELOG.md` : historique des modifications de l'EA.
 
 ## Règles

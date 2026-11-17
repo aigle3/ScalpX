@@ -503,7 +503,7 @@ def test_plex_etat_et_commandes(monkeypatch):
 def test_plex_ecran_systeme(monkeypatch):
     from core import plex
     from bot.system import plex_screen, system_kb
-    assert any(cb == "d:plex" for row in system_kb(False) for _, cb in row)
+    assert any(cb == "d:plex" for row in system_kb(False, windows=True) for _, cb in row)
 
     class C:
         class cfg:

@@ -304,6 +304,10 @@ def restart_bot(bot_root: Path) -> str:
     Tâche planifiée présente → elle est relancée après l'arrêt de celui-ci ; sinon nouveau processus détaché."""
     from .selfwatch import kick, mark_restarting
     mark_restarting(bot_root)                     # « je redémarre, pid N » : lu par la surveillance
+    if os.name != "nt" and os.environ.get("INVOCATION_ID"):
+        # Bot 3.13.0 : Linux, bot lancé par systemd (service scalpx-bot, Restart=always) : il suffit que ce processus
+        # s'arrête (STOP), systemd relance le nouveau code. Un processus lancé d'ici serait arrêté avec le service.
+        return "systemd"
     no_win = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     detached = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     has_task = os.name == "nt" and subprocess.run(["schtasks", "/query", "/tn", TASK], capture_output=True,

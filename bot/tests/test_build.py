@@ -29,8 +29,14 @@ def prepare(cfg, txt="5.0", age=60):
 
 def fake_metaeditor(cfg, errors=0):
     def run(cmd, timeout):
-        assert "/compile:" in cmd and "ScalpX_v5.mq5" in cmd and "/log:" in cmd
-        logp = cmd.split('/log:"')[1].rstrip('"')
+        if isinstance(cmd, list):                                # Linux : wine MetaEditor64.exe /compile:Z:\… (Bot 3.13.0)
+            from mt5.wine import from_win
+            text = " ".join(cmd)
+            logp = from_win(next(a for a in cmd if a.startswith("/log:"))[5:])
+        else:
+            text = cmd
+            logp = cmd.split('/log:"')[1].rstrip('"')
+        assert "/compile:" in text and "ScalpX_v5.mq5" in text and "/log:" in text
         res = f"Result: {errors} errors, 1 warnings, 120 msec elapsed"
         if errors:
             res = "SX_Core.mqh(3,1) : error 123: syntax error\r\n" + res
