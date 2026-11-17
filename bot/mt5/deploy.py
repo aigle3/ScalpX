@@ -375,7 +375,7 @@ class DeployManager:
     async def _run_batch(self, insts: list[Instance], version: str, view: dict[str, tuple[str, str]],
                          progress: ProgressCb | None) -> list[DeployOutcome]:
         """1) maintenance + sauvegarde de l'ancien .ex5 partout ; 2) fermeture de TOUS les terminaux en même temps ;
-        3) nouvel .ex5 copié partout ; 4) relance un par un, chacun attendu (nouvel EA en ligne) avant le suivant.
+        3) nouvel .ex5 copié partout ; 4) relance par groupes de 2 (Bot 3.12.0), chaque groupe attendu (nouvel EA en ligne).
         Un compte dont le nouvel EA ne répond pas retrouve son ancien .ex5 (les autres gardent le nouveau)."""
         t_start = time.monotonic()
         self.phase = "installation"
@@ -432,7 +432,8 @@ class DeployManager:
             except Exception as exc:
                 outcomes[inst.id] = DeployOutcome(inst.id, "failed", f"erreur : {exc}")
         todo = [i for i in stopped if i.id not in outcomes]
-        for k, inst in enumerate(todo, 1):
+        # Bot 3.12.0 : relance PAR GROUPES de launch_group (2) : le groupe suivant attend que ceux-ci soient revenus
+        async def relaunch(k: int, inst: Instance) -> None:
             old = self.status.read(inst.id)
             old_ts = old.ts if old is not None else 0
             t0 = time.time()
@@ -440,7 +441,7 @@ class DeployManager:
                 self.mgr.launch(inst)
             except Exception as exc:
                 outcomes[inst.id] = DeployOutcome(inst.id, "failed", f"relance impossible : {exc}")
-                continue
+                return
             log.info("déploiement groupé %s : terminal relancé (%d/%d)", inst.label, k, len(todo))
             await show(inst.id, RUNNING, f"🚀 terminal relancé ({k}/{len(todo)}) : attente du nouvel EA")
             # Bot 3.11.0 : le temps qu'il faut (wait_online_limit_s = 0) ; abandon seulement si le terminal se ferme
@@ -475,6 +476,9 @@ class DeployManager:
                                                  f"(dernier signe : {last})")
                 await asyncio.sleep(1.0)
             outcomes[inst.id] = res or DeployOutcome(inst.id, "failed", f"heartbeat du nouvel EA non reçu ({last})")
+        per = max(1, int(self.cfg.timing.launch_group))
+        for g in range(0, len(todo), per):
+            await asyncio.gather(*(relaunch(g + j + 1, inst) for j, inst in enumerate(todo[g:g + per])))
         # échecs : Bot 3.10.2, plus de retour à l'ancien EA (demandé) : nouvel EA laissé en place, terminal non touché,
         # compte remis « démarré » (surveillance normale) ; redémarrage du compte à la main si besoin
         for inst in [i for i in stopped if outcomes[i.id].status == "failed"]:

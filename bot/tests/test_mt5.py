@@ -437,6 +437,7 @@ async def test_deploiement_groupe_ferme_tout_puis_relance(stack):
     """Bot 3.7.0 : plusieurs comptes → tous les terminaux fermés AVANT la première relance, puis nouvel EA partout."""
     cfg, db, procs, status, cmdq, mgr, ea = stack
     cfg.timing.launch_stagger_s = 0
+    cfg.timing.launch_group = 2
     insts = [seed(stack, k, "Demo-Server 1") for k in (1, 2, 3)]
     ea.accounts[insts[1].id]["positions"] = 2
     publish(cfg, "5.1")
@@ -447,9 +448,10 @@ async def test_deploiement_groupe_ferme_tout_puis_relance(stack):
 
     def launch(inst, ini=None):
         prev = [e[1] for e in order if e[0] == "launch"]
-        if prev:                                                   # Bot 3.8.1 : le précédent est revenu avant
-            st = status.read(prev[-1])
-            assert st is not None and st.connecte, "terminal suivant relancé avant le retour du précédent"
+        done = prev[:len(prev) - len(prev) % 2]                    # Bot 3.12.0 : par 2 : les groupes précédents sont revenus
+        for iid in done:
+            st = status.read(iid)
+            assert st is not None and st.connecte, "groupe suivant relancé avant le retour du précédent"
         order.append(("launch", inst.id))
         return real_launch(inst, ini)
 
@@ -747,3 +749,9 @@ def test_liste_des_terminaux_arretes_pour_la_mise_a_jour(stack):
     assert cpufree.restore_after_restart(db, clear_list=False) == [a.id]     # toujours là (relance pas finie)
     cpufree.clear(db)
     assert cpufree.restore_after_restart(db) == []
+
+
+def test_reglages_par_defaut_fermeture_et_lancement():
+    from core.config import Timing
+    t = Timing()
+    assert t.kill_after_s == 10 and t.launch_group == 2              # Bot 3.12.0

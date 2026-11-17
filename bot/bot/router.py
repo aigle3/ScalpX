@@ -125,7 +125,8 @@ class Router:
             else:
                 what = {"rst": "🔄 Redémarrer", "start": "🚀 Lancer", "stop": "🛑 Arrêter"}[verb]
                 extra = "\nFermeture propre ; les positions restent ouvertes chez le broker." if verb != "start" else ""
-                extra += "\nUn par un : le suivant attend que le précédent soit en ligne (vert)." if verb != "stop" else "\nUn par un."
+                extra += "\nFermeture de tous en même temps, puis lancement 2 par 2 (le groupe suivant attend le vert)." if verb == "rst" else (
+                         "\nLancement 2 par 2 : le groupe suivant attend le vert." if verb == "start" else "\nTous en même temps.")
                 return await self._ask(f"<b>{what} {len(targets)} terminal(aux) ?</b>\n{esc(', '.join(i.label for i in targets[:15]))}{extra}",
                                        lambda: self._terminals(targets, verb), ("gterm",), what)
         elif sub == "flt":
@@ -806,49 +807,91 @@ class Router:
         await self.sender.send(self.chat_id, "📋 <b>Positions</b>\n\n" + "\n\n".join(parts)[:3900], [[("✖ Fermer", "d:close")]], True)
 
     async def _terminals(self, insts, verb: str, title: str = "") -> list[str]:
-        """Bot 3.9.0 : redémarrer / lancer / arrêter plusieurs terminaux UN PAR UN. Pour lancer / redémarrer, le suivant
-        n'est lancé qu'une fois le précédent en ligne et connecté (vert), ou après le délai (verify_deploy_s).
-        Bot 3.11.0 : renvoie les identifiants réussis (arrêt : terminal vérifié fermé) ; aussi utilisé par la mise à jour du bot."""
+        """Plusieurs terminaux : 🛑 arrêter / 🚀 lancer / 🔄 redémarrer tous (aussi pour les mises à jour du bot).
+        Bot 3.12.0 : fermeture de TOUS en même temps (propre, puis arrêt forcé au bout de kill_after_s), lancement PAR GROUPES
+        de launch_group (2) : le groupe suivant n'est lancé qu'une fois ceux du groupe en ligne et connectés (vert).
+        Renvoie les identifiants réussis (arrêt : terminal vérifié fermé ; lancement : en ligne)."""
+        from storage.db import MAINTENANCE
         label = title or {"rst": "Redémarrage", "start": "Lancement", "stop": "Arrêt"}[verb]
         n = len(insts)
-        done: list[str] = []
+        line: dict[str, str] = {i.id: "en attente" for i in insts}
         good: list[str] = []
-        mid = await self.sender.send(self.chat_id, f"⏳ <b>{label}</b> de {n} terminal(aux), un par un…", None, True)
+        mid = await self.sender.send(self.chat_id, f"⏳ <b>{label}</b> de {n} terminal(aux)…", None, True)
+        last_show = [0.0]
 
-        async def show(cur: str = "") -> None:
-            txt = f"⏳ <b>{label}</b> · {len(done)}/{n}\n" + "\n".join(done) + (("\n" + cur) if cur else "")
+        async def show(force: bool = False) -> None:
+            if not force and time.monotonic() - last_show[0] < 3:              # au plus une édition toutes les 3 s
+                return
+            last_show[0] = time.monotonic()
+            txt = f"⏳ <b>{label}</b> · {len(good)}/{n}\n" + "\n".join(f"<b>{esc(i.label)}</b> : {esc(line[i.id])[:150]}" for i in insts)
             try:
                 await self.sender.edit(self.chat_id, mid, txt[-3900:], None)
             except Exception:
                 log.debug("progression des terminaux", exc_info=True)
 
-        timeout = float(self.ctx.cfg.timing.wait_online_limit_s)      # Bot 3.11.0 : 0 = le temps qu'il faut
-        for k, i in enumerate(insts, 1):
-            name = f"<b>{esc(i.label)}</b>"
-            await show(f"{name} ({k}/{n}) : {'arrêt' if verb == 'stop' else 'lancement'}…")
-            t0 = time.time()
-            try:
-                if verb == "stop":
-                    r = await act.action_stop(self.ctx, i)
-                    if not await asyncio.to_thread(self.ctx.mgr.is_running, i):       # vérifié : bien fermé
-                        good.append(i.id)
+        # 1) arrêt : tous en même temps (fermer libère du CPU, inutile d'attendre)
+        to_start = list(insts)
+        if verb in ("stop", "rst"):
+            async def stop_one(i) -> None:
+                line[i.id] = "🔌 fermeture…"
+                try:
+                    if verb == "stop":
+                        r = await act.action_stop(self.ctx, i)
+                    else:                                    # redémarrage : MAINTENANCE pendant l'arrêt (la surveillance n'y touche pas)
+                        r = await self.ctx.mgr.stop(i, force=False, set_desired=MAINTENANCE)
+                        if r == "attente_cloture":
+                            self.ctx.db.set_desired(i.id, DEMARRE)
+                            r = "⏳ Clôture à 500 en cours : redémarrage reporté."
+                        act.journal(self.ctx, i, "TERMINAL redémarrer", not r.startswith("⏳"), r)
+                    if not await asyncio.to_thread(self.ctx.mgr.is_running, i):   # vérifié : bien fermé
+                        if verb == "stop":
+                            good.append(i.id)
+                        line[i.id] = "🔌 fermé" if verb == "rst" else str(r)
                     else:
-                        r = f"⚠️ toujours ouvert ({r})"
-                else:
-                    r = await (act.action_restart if verb == "rst" else act.action_start)(self.ctx, i)
-                    if r.startswith(("🔄", "🚀")):
-                        async def tick(sec: int, last: str, name=name, k=k) -> None:
-                            await show(f"{name} ({k}/{n}) : attente de l'EA {sec} s ({esc(last)})…")
-                        ok, msg = await act.wait_online(self.ctx, i, t0, timeout, tick)
-                        r = msg
+                        line[i.id] = f"⚠️ toujours ouvert ({r})"
+                        if verb == "rst" and i in to_start:
+                            to_start.remove(i)
+                except Exception as exc:
+                    log.exception("terminal %s", i.label)
+                    line[i.id] = f"❌ {exc}"
+                    if i in to_start:
+                        to_start.remove(i)
+                await show()
+            await show(True)
+            await asyncio.gather(*(stop_one(i) for i in insts))
+            await show(True)
+        # 2) lancement par groupes : chaque groupe attendu (vert) avant le suivant
+        if verb in ("start", "rst"):
+            timeout = float(self.ctx.cfg.timing.wait_online_limit_s)      # Bot 3.11.0 : 0 = le temps qu'il faut
+            per = max(1, int(self.ctx.cfg.timing.launch_group))
+
+            async def start_one(i) -> None:
+                line[i.id] = "🚀 lancement…"
+                t0 = time.time()
+                try:
+                    r = await act.action_start(self.ctx, i)
+                    if r.startswith("🚀"):
+                        async def tick(sec: int, last: str, i=i) -> None:
+                            line[i.id] = f"attente de l'EA {sec} s ({last})…"
+                            await show()
+                        ok, r = await act.wait_online(self.ctx, i, t0, timeout, tick)
                         if ok:
                             good.append(i.id)
-            except Exception as exc:
-                log.exception("terminal %s", i.label)
-                r = f"❌ {exc}"
-            done.append(f"{name} : {esc(str(r))[:150]}")
-            await show()
-        await self.sender.edit(self.chat_id, mid, f"🖥 <b>{label}</b> terminé · {n} terminal(aux)\n" + "\n".join(done),
+                    elif r.startswith("ℹ️"):                    # déjà lancé
+                        good.append(i.id)
+                except Exception as exc:
+                    log.exception("terminal %s", i.label)
+                    r = f"❌ {exc}"
+                line[i.id] = str(r)
+                await show()
+            for k in range(0, len(to_start), per):
+                await asyncio.gather(*(start_one(i) for i in to_start[k:k + per]))
+            for i in to_start:                                     # redémarrage interrompu : jamais laissé en MAINTENANCE
+                cur = self.ctx.db.get(i.id)
+                if verb == "rst" and cur is not None and cur.desired_state == MAINTENANCE:
+                    self.ctx.db.set_desired(i.id, DEMARRE)
+        await self.sender.edit(self.chat_id, mid, f"🖥 <b>{label}</b> terminé · {len(good)}/{n}\n"
+                               + "\n".join(f"<b>{esc(i.label)}</b> : {esc(line[i.id])[:150]}" for i in insts),
                                [[("✖ Fermer", "d:close")]])
         await self.dash.refresh(force=True)
         return good
@@ -1391,13 +1434,13 @@ class Router:
                     running = await asyncio.to_thread(lambda: [i for i in self.ctx.db.list(states=(_DEM,)) if self.ctx.mgr.is_running(i)])
                     if running:
                         await self._upd_step(mid, "⏳ <b>Installation</b> : " + ("\n".join(out) + "\n" if out else "")
-                                             + f"arrêt des {len(running)} terminaux, un par un (relancés après le redémarrage)…")
+                                             + f"arrêt des {len(running)} terminaux en même temps (relancés 2 par 2 après le redémarrage)…")
                         stopped = await self._terminals(running, "stop", "Arrêt pour la mise à jour du bot")
                         cpufree.remember(self.ctx.db, stopped)
                         for i in running:                          # resté ouvert (clôture à 500 en cours…) : surveillé comme avant
                             if i.id not in stopped:
                                 self.ctx.db.set_desired(i.id, _DEM)
-                        out.append(f"🔌 {len(stopped)}/{len(running)} terminal(aux) arrêté(s) : relancés un par un par le nouveau bot")
+                        out.append(f"🔌 {len(stopped)}/{len(running)} terminal(aux) arrêté(s) : relancés 2 par 2 par le nouveau bot")
                 await self._upd_step(mid, "⏳ <b>Installation</b> : " + ("\n".join(out) + "\n" if out else "")
                                      + f"copie du bot ({len(plan.bot_files) + len(plan.bot_remove)} fichier(s))…")
                 await asyncio.to_thread(upd.install_bot, plan, bot_root)

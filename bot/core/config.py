@@ -47,6 +47,8 @@ class Timing(BaseModel):
     create_timeout_s: int = 300           # Bot 3.6.2 : 5 min (VPS chargé : le terminal met plus de 2 min à charger l'EA)
     refused_s: int = 40                    # création : compte vu « non connecté » pendant ce délai → identifiants refusés
     stop_wait_s: int = 30                  # attente après FERMER_TERMINAL avant kill
+    kill_after_s: int = 10                 # Bot 3.12.0 : arrêt forcé au bout de ce délai si le terminal n'est pas fermé (remplace stop_wait_s ; 0 = stop_wait_s)
+    launch_group: int = 2                  # Bot 3.12.0 : terminaux lancés ensemble (lancer / redémarrer tous, mises à jour), puis attente du vert
     launch_stagger_s: int = 5              # écart entre deux lancements au démarrage
     ack_timeout_s: int = 20
     close500_wait_max_s: int = 300

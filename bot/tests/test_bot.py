@@ -990,6 +990,19 @@ async def test_mise_a_jour_du_bot_arrete_puis_relance_un_par_un(svc):
 
 
 @pytest.mark.asyncio
+async def test_redemarrer_tous_ferme_ensemble_puis_lance_par_2(svc):
+    """Bot 3.12.0 : 🔄 Redémarrer tous : tous fermés en même temps, puis lancés 2 par 2 (vert attendu), état « démarré »."""
+    from storage.db import DEMARRE
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    st = ctx_stack(svc)
+    insts = [seed(st, k, "Demo-Server 1") for k in (91, 92, 93)]
+    ctx.cfg.timing.wait_online_limit_s = 1                                 # pas d'EA simulé ici : attente courte
+    await router._terminals(insts, "rst")
+    assert all(ctx.mgr.is_running(i) and ctx.db.get(i.id).desired_state == DEMARRE for i in insts)
+    assert any("Redémarrage" in str(m) and "terminé" in str(m) for m in sender.msgs.values())
+
+
+@pytest.mark.asyncio
 async def test_plantages_dates_et_effacement(svc):
     import time as _t
     ctx, sender, dash, router, notifier, ea, conf = svc
