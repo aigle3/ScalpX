@@ -126,6 +126,25 @@ def http_get(url: str, headers: dict) -> tuple[int, bytes]:
         return e.code, b"", {k.lower(): v for k, v in (e.headers or {}).items()}
 
 
+def head_sha(get, repo: str, branch: str) -> str:
+    """Bot 4.8.12 : commit de la branche lu par le protocole git (github.com/…/info/refs), HORS quota de l'API GitHub
+    (60 requêtes/h sans jeton : la vérification chaque minute l'épuisait et bloquait le téléchargement). '' si illisible."""
+    try:
+        res = get(f"https://github.com/{repo}.git/info/refs?service=git-upload-pack",
+                  {"User-Agent": "git/2.40 scalpx-bot"})
+    except (urllib.error.URLError, OSError, ValueError):
+        return ""
+    if res[0] != 200:
+        return ""
+    want = f"refs/heads/{branch}".encode()
+    for line in res[1].split(b"\n"):
+        parts = line.strip().split(b" ")
+        if len(parts) >= 2 and parts[1].split(b"\x00")[0] == want:
+            sha = parts[0][-40:].decode("ascii", "ignore")
+            return sha if len(sha) == 40 else ""
+    return ""
+
+
 _SEEN = {"sha": "", "since": 0.0}             # dernier commit vu sur la branche et depuis quand
 
 
@@ -144,6 +163,18 @@ def fetch(cfg: Config, http: Http | None = None, force: bool = False, now: float
         return FetchResult(False, error="aucun dépôt GitHub configuré")
     dest = Path(cfg.update.source)
     try:
+        local = local_sha(dest)
+        head = head_sha(get, repo, branch)                                 # Bot 4.8.12 : sans consommer le quota de l'API
+        if head:
+            if head == local:
+                return FetchResult(True, False, head, "")
+            if installed and local and not local.startswith(installed) and not latest:
+                return FetchResult(True, False, local, "")
+            t = now if now is not None else time.time()
+            if head != _SEEN["sha"]:
+                _SEEN["sha"], _SEEN["since"] = head, t
+            if not force and t - _SEEN["since"] < cfg.update.settle_min * 60:
+                return FetchResult(True, False, head, "", waiting=True)
         res = get(f"{API}/repos/{repo}/commits/{branch}", _headers(cfg))
         code, body = res[0], res[1]
         expires = token_expiry(res[2] if len(res) > 2 else {})
@@ -179,6 +210,10 @@ def fetch(cfg: Config, http: Http | None = None, force: bool = False, now: float
                     j = nxt
         res = get(f"{API}/repos/{repo}/zipball/{sha}", _headers(cfg))
         code, data = res[0], res[1]
+        if code != 200:                                                    # Bot 4.8.12 : quota API épuisé → téléchargement direct
+            alt = get(f"https://codeload.github.com/{repo}/zip/{sha}", {"User-Agent": "scalpx-bot"})
+            if alt[0] == 200:
+                code, data = alt[0], alt[1]
         if code != 200:
             return FetchResult(False, error=_explain(code), token_expires=expires)
         info = {"sha": sha, "message": msg, "date": j.get("commit", {}).get("committer", {}).get("date", ""),

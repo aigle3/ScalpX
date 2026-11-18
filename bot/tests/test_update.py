@@ -348,3 +348,33 @@ def test_paquet_github_chemins_hors_dossier_refuses(tmp_path):
     assert (dest / "bot" / "main.py").read_text() == "ok"
     assert not (tmp_path / "release.new2").exists() and not (tmp_path.parent / "evil.txt").exists()
 
+
+
+def test_verification_sans_quota_api_et_telechargement_direct(tmp_path, cfg):
+    """Bot 4.8.12 : la branche est lue par info/refs (hors quota API) ; zipball refusé (quota) → codeload."""
+    import json
+    from core import github as gh
+    cfg.update.github, cfg.update.source = "aigle3/scalpx", str(tmp_path / "release")
+    sha = "a" * 40
+    calls = []
+
+    def http(url, headers):
+        calls.append(url)
+        if "/info/refs" in url:
+            return 200, b"001e# service=git-upload-pack\n0000" + f"003f{sha} refs/heads/stable\n".encode()
+        if url.endswith("/commits/stable"):
+            return 200, json.dumps({"sha": sha, "commit": {"message": "Bot 9.9.9 : test"}}).encode()
+        if "/zipball/" in url:
+            return 403, b""
+        if "codeload.github.com" in url:
+            return 200, _zip({"bot/main.py": b"print(2)"})
+        return 404, b""
+
+    gh._SEEN.update(sha="", since=0.0)
+    r = gh.fetch(cfg, http, now=1000.0)
+    assert r.waiting and not any("api.github.com" in c for c in calls)       # attente de stabilité : aucune requête API
+    r = gh.fetch(cfg, http, now=1000.0 + 3 * 60)
+    assert r.ok and r.changed and (tmp_path / "release" / "bot" / "main.py").read_text() == "print(2)"
+    calls.clear()
+    r = gh.fetch(cfg, http, now=2000.0)
+    assert r.ok and not r.changed and calls == [c for c in calls if "/info/refs" in c]   # déjà à jour : pas d'API
