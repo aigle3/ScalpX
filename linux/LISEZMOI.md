@@ -5,6 +5,8 @@ et le bot Telegram central en **service systemd**.
 
 ## Prérequis
 - Ubuntu **24.04 ou 26.04** (22.04 accepté), 64 bits, sans bureau graphique. 8 Go de RAM pour une dizaine de comptes.
+- Wine : l'installation prend **Wine devel de WineHQ** (≥ 11.7). MT5 refuse de démarrer avec Wine 10.3 à 11.6, dont Wine 11.0
+  « stable » (« a debugger has been found running ») ; un serveur qui a déjà MT5 garde son Wine.
 - Accès root (sudo).
 
 ## Installation (une seule commande, aucun jeton dedans)

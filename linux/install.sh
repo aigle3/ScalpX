@@ -67,22 +67,43 @@ fi
 dpkg --add-architecture i386
 apt-get update -qq
 apt-get install -y -qq ca-certificates curl wget gnupg xvfb xauth cabextract python3 python3-venv >/dev/null
-if ! command -v wine >/dev/null; then
-    # WineHQ (version récente) ; clé convertie en binaire (Ubuntu 26.04 refuse la clé texte).
-    # Dépôt absent ou refusé pour cette version d'Ubuntu : Wine d'Ubuntu à la place.
-    SRC="/etc/apt/sources.list.d/winehq-${VERSION_CODENAME}.sources"
+# Version de Wine : l'installeur et le terminal MT5 refusent de démarrer (« a debugger has been found running ») avec
+# Wine 10.3 à 11.6, dont Wine 11.0 « stable » de WineHQ. Il faut Wine ≤ 10.2 ou ≥ 11.7 (branche devel de WineHQ).
+wine_mm() { wine --version 2>/dev/null | sed -nE 's/^wine-([0-9]+)\.([0-9]+).*/\1 \2/p'; }
+wine_mt5_ok() {
+    local M m; read -r M m <<<"$(wine_mm)"
+    [ -n "${M:-}" ] || return 1
+    if [ "$M" -eq 10 ] && [ "$m" -ge 3 ]; then return 1; fi
+    if [ "$M" -eq 11 ] && [ "$m" -lt 7 ]; then return 1; fi
+    return 0
+}
+winehq_repo() {                                             # dépôt WineHQ (clé convertie en binaire : exigée par Ubuntu 26.04)
     mkdir -pm755 /etc/apt/keyrings
-    if wget -q --timeout=30 --tries=2 -O- https://dl.winehq.org/wine-builds/winehq.key | gpg --dearmor --yes -o /etc/apt/keyrings/winehq-archive.key \
-       && wget -q --timeout=30 --tries=2 -NP /etc/apt/sources.list.d/ "https://dl.winehq.org/wine-builds/ubuntu/dists/${VERSION_CODENAME}/winehq-${VERSION_CODENAME}.sources" \
-       && apt-get update -qq && apt-get install -y -qq --install-recommends winehq-stable >/dev/null; then
-        ok "Wine de WineHQ"
-    else
-        warn "dépôt WineHQ indisponible pour Ubuntu ${VERSION_ID} : Wine d'Ubuntu à la place"
-        rm -f "$SRC"
-        apt-get update -qq
+    wget -q --timeout=30 --tries=2 -O- https://dl.winehq.org/wine-builds/winehq.key | gpg --dearmor --yes -o /etc/apt/keyrings/winehq-archive.key \
+      && wget -q --timeout=30 --tries=2 -NP /etc/apt/sources.list.d/ "https://dl.winehq.org/wine-builds/ubuntu/dists/${VERSION_CODENAME}/winehq-${VERSION_CODENAME}.sources" \
+      && apt-get update -qq
+}
+WINE_CHANGED=""
+# Changer de Wine seulement s'il n'y a pas encore de MT5 (BASE) : un serveur qui tourne garde son Wine.
+if ! command -v wine >/dev/null || { ! wine_mt5_ok && [ ! -f "$BASE/terminal64.exe" ]; }; then
+    command -v wine >/dev/null && echo "  $(wine --version) refusé par MT5 (contrôle anti-débogueur) : passage à Wine devel de WineHQ (≥ 11.7)"
+    got=""
+    if winehq_repo; then
+        for pkg in winehq-devel winehq-staging; do
+            apt-get remove -y -qq winehq-stable wine-stable wine-stable-amd64 wine-stable-i386 wine wine64 wine32:i386 >/dev/null 2>&1 || true
+            if apt-get install -y -qq --install-recommends "$pkg" >>"$LOG" 2>&1 && wine_mt5_ok; then got="$pkg"; break; fi
+        done
+    fi
+    if [ -n "$got" ]; then
+        WINE_CHANGED=1
+        ok "Wine de WineHQ ($got)"
+    elif ! command -v wine >/dev/null; then
+        warn "Wine devel de WineHQ indisponible : Wine d'Ubuntu à la place"
+        rm -f "/etc/apt/sources.list.d/winehq-${VERSION_CODENAME}.sources"; apt-get update -qq
         apt-get install -y -qq wine >/dev/null
         apt-get install -y -qq wine64 wine32:i386 >/dev/null 2>&1 || true     # 22.04 / 24.04 : paquets séparés
     fi
+    wine_mt5_ok || warn "$(wine --version 2>/dev/null) : version connue pour bloquer MT5 (il faut ≤ 10.2 ou ≥ 11.7)"
 fi
 command -v wine >/dev/null || die "Wine non installé"
 ok "$(wine --version)"
@@ -109,24 +130,36 @@ ok "Xvfb actif"
 step "3/7  Préfixe Wine ($PFX)"
 # Préfixe en état de marche ? (« could not load kernel32.dll » = préfixe à moitié créé, ex. installation interrompue)
 pfx_ok() { as_u timeout 120 wine cmd /c ver >>"$LOG" 2>&1; }
-if [ -f "$PFX/system.reg" ] && ! pfx_ok; then
+if [ -f "$PFX/system.reg" ] && { [ -n "$WINE_CHANGED" ] || ! pfx_ok; }; then
     if [ -d "$MT/instances" ] && ls "$MT/instances" 2>/dev/null | grep -q .; then
         die "préfixe Wine ($PFX) hors service alors que des comptes existent : contacte le support avant de le recréer"
     fi
-    warn "préfixe Wine cassé (installation interrompue ?) : recréé"
+    if [ -n "$WINE_CHANGED" ]; then echo "  Nouveau Wine : préfixe recréé"; else warn "préfixe Wine cassé (installation interrompue ?) : recréé"; fi
     as_u wineserver -k 2>/dev/null || true; pkill -u "$U" -f 'wine|\.exe' 2>/dev/null || true; sleep 2
     rm -rf "$PFX"
 fi
 if [ ! -f "$PFX/system.reg" ]; then
     echo "  Création du préfixe Wine (1 à 3 min)…"
-    # Pas de fenêtre « installer Wine Mono / Gecko » : sur l'écran virtuel personne ne la voit et wineboot attendait
-    # sans fin (MT5 n'en a pas besoin). Attentes toujours bornées.
-    as_u env WINEDLLOVERRIDES="mscoree=;mshtml=" timeout 300 wineboot -i >>"$LOG" 2>&1 || warn "wineboot : délai dépassé, on continue"
+    # Fenêtres « installer Wine Mono / Gecko » invisibles sur l'écran virtuel (wineboot attendait sans fin) :
+    # - Gecko (moteur HTML) est NÉCESSAIRE à l'interface de l'installeur MT5 : pré-téléchargé dans le cache de Wine,
+    #   il s'installe sans fenêtre ;
+    # - Mono (.NET) n'est pas utilisé par MT5 : désactivé.
+    GK=2.47.4; as_u mkdir -p "$H/.cache/wine"
+    for a in x86 x86_64; do
+        f="$H/.cache/wine/wine-gecko-$GK-$a.msi"
+        [ -s "$f" ] || as_u curl -fsSL --connect-timeout 20 --max-time 300 -o "$f" "https://dl.winehq.org/wine/wine-gecko/$GK/wine-gecko-$GK-$a.msi" \
+            || { rm -f "$f"; warn "Gecko $a non téléchargé : l'installeur MT5 risque de ne pas s'afficher"; }
+    done
+    as_u env WINEDLLOVERRIDES="mscoree=" timeout 300 wineboot -i >>"$LOG" 2>&1 || warn "wineboot : délai dépassé, on continue"
     as_u timeout 60 wineserver -w || as_u wineserver -k || true
 fi
 # comme le script Linux officiel de MetaQuotes. Pas de « wineserver -w » ici : à une relance, les terminaux MT5 tournent
 # et il attendrait leur fermeture sans fin (blocage à l'étape 3).
-as_u env WINEDLLOVERRIDES="mscoree=;mshtml=" timeout 120 winecfg -v=win11 >/dev/null 2>&1 || true
+as_u env WINEDLLOVERRIDES="mscoree=" timeout 120 winecfg -v=win11 >/dev/null 2>&1 || true
+# MT5 refuse de démarrer s'il croit voir un débogueur : Wine déclare winedbg comme débogueur système (clé AeDebug).
+for k in 'HKLM\Software\Microsoft\Windows NT\CurrentVersion\AeDebug' 'HKLM\Software\Wow6432Node\Microsoft\Windows NT\CurrentVersion\AeDebug'; do
+    as_u timeout 60 wine reg delete "$k" /v Debugger /f >>"$LOG" 2>&1 || true
+done
 [ -f "$PFX/system.reg" ] || die "préfixe Wine non créé (détail : $LOG)"
 pfx_ok || die "Wine ne démarre pas dans le préfixe neuf ($(wine --version 2>/dev/null)) : détail dans $LOG"
 ok "préfixe prêt (Windows 11)"
