@@ -548,6 +548,14 @@ class Router:
             self.cancel_inputs()
             await self.cmd_start()
             return
+        # Bot 4.8.9 : même texte reçu deux fois (double envoi, réseau mobile qui réexpédie) juste après avoir servi de saisie :
+        # le doublon est ignoré en silence (avant : « rien n'attendait de saisie » + tableau de bord ramené).
+        last_t, last_at = getattr(self, "_last_input", ("", 0.0))
+        if not self.awaiting_any and text.strip() and text.strip() == last_t and time.monotonic() - last_at < 15:
+            log.info("texte reçu en double juste après une saisie : ignoré")
+            return
+        if self.awaiting_any:
+            self._last_input = (text.strip(), time.monotonic())
         if self.awaiting_bt:
             await self._bt_text(text)
             return
@@ -1378,7 +1386,8 @@ class Router:
             await self.sender.send(self.chat_id, "🔔 <b>Mise à jour de l'installation système disponible</b>\n"
                                    "Elle touche ce qui demande les droits administrateur (services, autorisations, scripts). "
                                    "Comptes, réglages et BASE sont gardés ; le bot redémarre (≈ 1 à 5 min).",
-                                   [[("🔧 Mettre à jour maintenant", "d:rup")], [("⏰ Plus tard (🛠 Système)", "d:close")]], True)
+                                   [[("🔧 Mettre à jour maintenant", "d:rup")], [("⏰ Plus tard (🛠 Système)", "d:close")]],
+                                   False)                      # Bot 4.8.9 : avec notification
 
     async def _reboot(self) -> None:
         from core import server as sv
@@ -2222,7 +2231,8 @@ class Router:
                 lines.append(f"• … et {left - shown} autre(s)")
         self._upd_msg = await self.sender.send(self.chat_id, "\n".join(lines),
                                                [[("⬆ Installer", f"upd:go:{plan.stamp}"), ("⏰ Plus tard", "upd:later")]]
-                                               + ([[(f"⏩ Tout installer d'un coup ({left + 1})", "upd:all")]] if left else []), True)
+                                               + ([[(f"⏩ Tout installer d'un coup ({left + 1})", "upd:all")]] if left else []),
+                                               False)          # Bot 4.8.9 : AVEC notification (avant : silencieux, rien sur le téléphone)
 
     async def _upd_cb(self, p: list[str]) -> str:
         from core import update as upd

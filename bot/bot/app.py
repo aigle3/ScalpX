@@ -191,22 +191,16 @@ async def h_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Aucune commande « / » : tout message (bouton 📊 du clavier, texte libre, /start) ramène le tableau de bord en bas."""
     m = update.message
     s = svc(context)
+    if m is None:                                               # Bot 4.8.9 : message MODIFIÉ après envoi : jamais retraité
+        return
     if m is not None:
         try:
             await s.sender.delete(update.effective_chat.id, m.message_id)    # garde la conversation propre
             s.dash.message_deleted(m.message_id)
         except Exception:
             pass
-    # Bot 3.6.3 : le bouton permanent « 📊 Tableau de bord » peut disparaître côté Telegram (autre appareil, historique
-    # effacé…). Tout message tapé le remet (au plus une fois toutes les 10 min ; le bouton lui-même ne le renvoie pas).
-    # Bot 4.8.3 : envoyé AVANT le traitement, pour que l'écran qui répond reste le dernier message.
-    if m is not None and (m.text or "") != MENU_BUTTON and not s.router.awaiting_any \
-            and time.monotonic() - getattr(s, "_menu_at", -1e9) > 600:
-        s._menu_at = time.monotonic()
-        try:
-            await s.sender.reply_menu(s.chat_id, "📊 Bouton « Tableau de bord » remis en bas de l'écran.")
-        except Exception:
-            log.warning("bouton du tableau de bord : envoi impossible", exc_info=True)
+    # Bot 4.8.9 : plus de « 📊 Bouton remis en bas » glissé au milieu des échanges (seulement au démarrage du bot, et par
+    # 🛠 Système → 📊 Remettre le bouton du bas).
     # Bot 4.8.8 : 💻 commande et 🏦 courtier ont leur propre message : le tableau de bord n'est jamais ramené pour eux
     busy = s.router.awaiting_any and not (s.router.awaiting_cmd or s.router.awaiting_broker)
     await s.router.on_text((m.text or "") if m is not None else "")

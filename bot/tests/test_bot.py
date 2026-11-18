@@ -740,8 +740,9 @@ async def test_mise_a_jour_onedrive_proposee_puis_installee(svc, tmp_path, monke
     make_pkg(tmp_path, ctx.cfg, bot_root)
     plan = u.plan_update(ctx.cfg, bot_root)
     await router.on_update_available(plan)
-    mid, text, kb = sender.sent[-1][:3]
+    mid, text, kb, silent = sender.sent[-1][:4]
     assert "Mise à jour ScalpX disponible" in text and kb[0][0][1] == f"upd:go:{plan.stamp}"
+    assert silent is False                                              # Bot 4.8.9 : notification sur le téléphone
     restarted = []
     monkeypatch.setattr(u, "restart_bot", lambda root: restarted.append(root) or "process")
     import bot.router as r
@@ -1971,3 +1972,18 @@ async def test_appui_sur_tableau_de_bord_un_seul_reste_meme_avec_un_orphelin(svc
         await router.on_text("📊 Tableau de bord")
     cur = int(ctx.db.meta_get("dash_msg_id"))
     assert orphan in deleted and first in deleted and cur not in deleted and ctx.db.meta_get("dash_ids") == str(cur)
+
+
+async def test_texte_recu_en_double_juste_apres_une_saisie_ignore(svc):
+    """Bot 4.8.9 : la commande collée arrive deux fois (double envoi / réseau) : le 2e exemplaire n'affiche ni « rien
+    n'attendait de saisie » ni le tableau de bord ; un autre texte, lui, est toujours traité."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    await dash.ensure()
+    dmid = ctx.db.meta_get("dash_msg_id")
+    await router.on_callback("d:shc")
+    await router.on_text("cat ~/scalpx/bot/version.txt")
+    assert "Exécuter cette commande" in sender.all_text()
+    await router.on_text("cat ~/scalpx/bot/version.txt")                   # doublon
+    assert ctx.db.meta_get("dash_msg_id") == dmid and "rien n'attendait" not in sender.all_text() + dash.render()[0]
+    await router.on_text("autre chose")
+    assert "rien n'attendait" in dash.render()[0]
