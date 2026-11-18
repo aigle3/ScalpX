@@ -162,7 +162,17 @@ class PsutilProcesses:
                 k, v = a.split(":", 1)
                 a = f"{k}:{w.to_win(v)}"
             conv.append(a)
-        return [self.wine.cmd, str(exe), *conv], w.env(self.wine), {"start_new_session": True}
+        opts = self.wine
+        try:                                                  # Bot 4.10.0 : environnement Wine du groupe du terminal
+            from dataclasses import replace
+            from .groups import prefix_for
+            main = self.wine.prefix_path()
+            pre = prefix_for(Path(exe).parent, main)
+            if pre != main:
+                opts = replace(self.wine, prefix=pre)
+        except Exception as exc:
+            log.warning("environnement Wine du terminal : %s", exc)
+        return [self.wine.cmd, str(exe), *conv], w.env(opts), {"start_new_session": True}
 
     def companions(self, exe: Path) -> list[psutil.Process]:
         """Bot 3.21.0 : processus annexes d'un terminal (WebView2 / Edge…) qui citent son dossier. Sous Wine ils

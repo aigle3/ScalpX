@@ -33,6 +33,7 @@ Un seul VPS Ubuntu · un terminal MT5 par compte · un bot Telegram central · z
 | 🤖 **Un bot pour tous les comptes** | Ajoute, démarre, arrête, règle et surveille chaque compte MT5 par boutons Telegram. |
 | 🖥 **Un seul serveur Ubuntu** | MT5 tourne sous Wine, sans écran (Xvfb) ; tout redémarre seul après un reboot. |
 | ⚡ **Wine allégé** | ntsync (synchronisation par le noyau) activé si disponible, mise à jour Microsoft Edge coupée : moins de CPU. |
+| 🍷 **Plusieurs environnements Wine** | 4 terminaux au plus par environnement (un wineserver chacun) : les terminaux ne font plus la queue derrière un seul processus ; nouveaux comptes placés automatiquement. |
 | 🏦 **Tous courtiers MT5** | RoboForex prêt d'office ; tout autre courtier s'ajoute depuis Telegram avec le lien de son installeur MT5 pour PC. |
 | 🪶 **Terminaux légers** | Aucun affichage sur les graphiques MT5 (masqués) : tout se lit et se règle dans Telegram. |
 | 💾 **Presets** | Réglages nommés (ex. « Martin ») appliqués à un ou plusieurs comptes, importés / exportés par fichier. |

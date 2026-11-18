@@ -98,6 +98,13 @@ def system_text(ctx: Ctx, vps: dict[str, float]) -> str:
     ex5_ts = ex5.stat().st_mtime if ex5.exists() else 0
     lines.append("")
     lines.append(f"📦 BASE : {'✅ conforme' if not probs else '❌ ' + esc(' ; '.join(probs))}")
+    try:                                                     # Bot 4.10.0 : environnements Wine (guichets)
+        from mt5 import groups as _g
+        gl = _g.summary(cfg, db)
+        if gl:
+            lines.append(esc(gl))
+    except Exception:
+        pass
     lines.append(f"📈 EA v{esc(basemod.read_version(cfg.paths.base) or '?')} · compilé le {_fmt_ts(ex5_ts)}")
     # mises à jour
     lines.append("")

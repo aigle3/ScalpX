@@ -1,0 +1,124 @@
+"""Bot 4.10.0 : terminaux répartis en plusieurs environnements Wine (un wineserver chacun)."""
+import os
+from pathlib import Path
+
+import pytest
+
+from mt5 import groups
+
+
+def test_repartition_par_4_quel_que_soit_le_nombre():
+    for total, want in ((12, [4, 4, 4]), (13, [4, 4, 4, 1]), (27, [4] * 6 + [3]), (31, [4] * 7 + [3]), (30, [4] * 7 + [2])):
+        cnt: dict[int, int] = {}
+        for _ in range(total):
+            g = groups.choose(cnt, 4)
+            cnt[g] = cnt.get(g, 0) + 1
+        assert sorted(cnt.values(), reverse=True) == want
+    assert groups.choose({1: 4, 2: 2, 3: 4}, 4) == 2               # place libérée : reprise en premier
+    assert groups.choose({1: 4}, 4, {1, 2}) == 2                    # environnement déjà créé mais vide
+
+
+def _prefix(p: Path, user: str) -> Path:
+    (p / "drive_c" / "windows").mkdir(parents=True)
+    (p / "system.reg").write_text("x")
+    (p / "dosdevices").mkdir()
+    os.symlink("../drive_c", p / "dosdevices" / "c:")
+    os.symlink(str(p / "drive_c"), p / "dosdevices" / "d:")          # lien absolu vers le principal
+    files = groups.common_dir(p, user) / "Files"
+    files.mkdir(parents=True)
+    (files / "statut.json").write_text("{}")
+    (p / "drive_c" / "users" / user / "Temp").mkdir(parents=True)
+    (p / "drive_c" / "users" / user / "Temp" / "gros.tmp").write_text("x")
+    return p
+
+
+def test_copie_du_prefixe_common_partage(tmp_path):
+    main = _prefix(tmp_path / ".wine", "u")
+    g1 = groups.ensure_prefix(main, 1, "u")
+    assert g1 == tmp_path / ".wine-g1" and groups.prefix_ready(g1)
+    link = groups.common_dir(g1, "u")
+    assert link.is_symlink() and (link / "Files" / "statut.json").is_file()      # même dossier d'échange bot ↔ EA
+    (link / "Files" / "nouveau.json").write_text("1")
+    assert (groups.common_dir(main, "u") / "Files" / "nouveau.json").is_file()
+    assert os.readlink(g1 / "dosdevices" / "c:") == "../drive_c"
+    assert os.readlink(g1 / "dosdevices" / "d:") == str(g1 / "drive_c")         # repointé vers la copie
+    assert not (g1 / "drive_c" / "users" / "u" / "Temp").exists()
+    assert groups.ensure_prefix(main, 1, "u") == g1                              # déjà prêt : rien recopié
+    assert groups.existing_groups(main) == {1}
+
+
+def test_prefixe_du_terminal_et_commande_wine(tmp_path):
+    from mt5.procs import PsutilProcesses
+    from mt5.wine import WineOptions
+    main = _prefix(tmp_path / ".wine", os.environ.get("USER") or os.environ.get("LOGNAME") or "scalpx")
+    term = tmp_path / "inst" / "a"
+    term.mkdir(parents=True)
+    exe = term / "terminal64.exe"
+    procs = PsutilProcesses(WineOptions(prefix=main))
+    assert procs.command(exe, ["/portable"])[1]["WINEPREFIX"] == str(main)       # pas de groupe : principal
+    groups.set_group(term, 2)
+    assert procs.command(exe, ["/portable"])[1]["WINEPREFIX"] == str(main)       # groupe pas encore prêt : principal
+    groups.ensure_prefix(main, 2)
+    assert procs.command(exe, ["/portable"])[1]["WINEPREFIX"] == str(tmp_path / ".wine-g2")
+    groups.set_group(term, 0)
+    assert groups.group_of(term) == 0
+
+
+@pytest.mark.asyncio
+async def test_assign_un_nouveau_compte(tmp_path):
+    from types import SimpleNamespace as NS
+    from mt5.wine import WineOptions
+    user = os.environ.get("USER") or os.environ.get("LOGNAME") or "scalpx"
+    main = _prefix(tmp_path / ".wine", user)
+    folders = []
+    for k in range(5):
+        f = tmp_path / "inst" / str(k)
+        f.mkdir(parents=True)
+        folders.append(f)
+    insts = [NS(id=str(k), folder=str(f)) for k, f in enumerate(folders)]
+    cfg = NS(wine=NS(group_size=2, options=lambda: WineOptions(prefix=main)))
+    db = NS(list=lambda: insts)
+    got = [await groups.assign(cfg, db, f, str(k)) for k, f in enumerate(folders)]
+    assert sorted(got) == [1, 1, 2, 2, 3]
+    assert await groups.assign(cfg, db, folders[0], "0") == got[0]               # garde son groupe
+    assert "3 environnement(s)" in groups.summary(cfg, db)
+    cfg.wine.group_size = 0
+    assert await groups.assign(cfg, db, tmp_path, "x") == 0 and groups.summary(cfg, db) == ""
+
+
+@pytest.mark.asyncio
+async def test_repartition_initiale_un_par_un_et_retour_si_echec(tmp_path):
+    import time
+    from types import SimpleNamespace as NS
+    from mt5.wine import WineOptions
+    user = os.environ.get("USER") or os.environ.get("LOGNAME") or "scalpx"
+    main = _prefix(tmp_path / ".wine", user)
+    insts = []
+    for k in range(3):
+        f = tmp_path / "inst" / f"{k}_S"
+        f.mkdir(parents=True)
+        insts.append(NS(id=f"{k}_S", folder=str(f), label=str(k), desired_state="DEMARRE"))
+    running = {i.id for i in insts}
+    launched = []
+
+    async def stop(inst, force=False, set_desired=None):
+        running.discard(inst.id)
+        return "propre"
+
+    def launch(inst, ini=None, by_bot=True):
+        running.add(inst.id)
+        launched.append((inst.id, groups.group_of(Path(inst.folder))))
+
+    mgr = NS(is_running=lambda i: i.id in running, folder_ok=lambda i: True, stop=stop, launch=launch)
+    ok = NS(connecte=True, age_s=lambda: 1)
+    status = NS(read=lambda iid: None if iid == "2_S" else ok)          # le 3e ne se connecte pas
+    cfg = NS(wine=NS(group_size=2, options=lambda: WineOptions(prefix=main)))
+    ctx = NS(cfg=cfg, db=NS(list=lambda: insts), mgr=mgr, status=status)
+    said = []
+
+    async def say(t):
+        said.append(t)
+    rep = await groups.rebalance(ctx, say, wait_s=0.1)
+    assert launched[:2] == [("0_S", 1), ("1_S", 1)] and launched[-1] == ("2_S", 0)
+    assert groups.group_of(Path(insts[2].folder)) == 0 and running == {"0_S", "1_S", "2_S"}
+    assert rep[0].startswith("✅") and rep[2].startswith("↩️") and any("1/3" in t for t in said)

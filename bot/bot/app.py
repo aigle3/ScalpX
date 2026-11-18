@@ -598,6 +598,49 @@ async def j_prepare(context: ContextTypes.DEFAULT_TYPE) -> None:
     asyncio.get_running_loop().create_task(svc(context).router.prepare_base())
 
 
+async def j_groups(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Bot 4.10.0 : comptes encore dans le préfixe Wine principal → répartis dans les environnements (un par un),
+    en tâche de fond, avec un message de suivi."""
+    from pathlib import Path as _P
+    from mt5 import groups
+    s = svc(context)
+    cfg = s.ctx.cfg
+    if int(getattr(cfg.wine, "group_size", 0) or 0) <= 0 or getattr(s, "_groups_task", None) is not None:
+        return
+    if s.ctx.deploy.running or s.router.building or s.router.installing:
+        return
+    if not any(groups.group_of(_P(i.folder)) == 0 and s.ctx.mgr.folder_ok(i) and i.desired_state != "EN_CREATION"
+               for i in s.ctx.db.list()):
+        return
+
+    async def run() -> None:
+        mid = 0
+
+        async def say(text: str) -> None:
+            nonlocal mid
+            try:
+                if mid and await s.sender.edit(s.chat_id, mid, text, None) in (EditResult.OK, EditResult.SAME):
+                    return
+            except Exception:
+                pass
+            mid = await s.sender.send(s.chat_id, text, None, True)
+
+        try:
+            await say("🍷 <b>Répartition des terminaux</b> dans plusieurs environnements Wine (moins d'attente derrière "
+                      "wineserver) : un compte à la fois, chacun redémarre ≈ 1 min…")
+            rep = await groups.rebalance(s.ctx, say)
+            if rep:
+                await say("🍷 <b>Répartition terminée</b>\n" + render.esc(groups.summary(cfg, s.ctx.db)) + "\n"
+                          + "\n".join(render.esc(r) for r in rep))
+        except Exception as exc:
+            log.exception("répartition des terminaux")
+            await s.sender.send(s.chat_id, f"⚠️ Répartition des terminaux interrompue : {render.esc(str(exc))}", None, True)
+        finally:
+            s._groups_task = None
+
+    s._groups_task = asyncio.get_running_loop().create_task(run())
+
+
 async def j_install(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Bot 3.19.0 (Linux) : installation système plus ancienne que le paquet → 🔔 🔧."""
     await svc(context).router.check_install()
@@ -736,5 +779,6 @@ def build_application(cfg: Config, ctx_factory) -> Application:
     jq.run_daily(timed(j_backup), time=dtime(cfg.backup.hour % 24, 0), job_kwargs=JOB_KW_DAILY)
     jq.run_repeating(timed(j_ghbackup), interval=max(60, cfg.backup.github_check_s), first=90, job_kwargs=JOB_KW)
     jq.run_repeating(timed(j_install), interval=300, first=120, job_kwargs=JOB_KW)
+    jq.run_repeating(timed(j_groups), interval=300, first=240, job_kwargs=JOB_KW)      # Bot 4.10.0 : environnements Wine
     jq.run_repeating(timed(j_prepare), interval=120, first=10, job_kwargs=JOB_KW)
     return app

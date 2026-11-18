@@ -102,6 +102,12 @@ class InstanceCreator:
     async def _attempt(self, inst: Instance, password: str, progress: Progress) -> tuple[Statut | None, Statut | None]:
         """Écrit le .ini, lance avec /config, attend un heartbeat valide ; le .ini est TOUJOURS supprimé."""
         folder = Path(inst.folder)
+        if int(getattr(self.cfg.wine, "group_size", 0) or 0) > 0 and folder.is_dir():   # Bot 4.10.0 : son environnement Wine
+            from . import groups
+            try:
+                await groups.assign(self.cfg, self.db, folder, inst.id, progress)
+            except Exception as exc:                      # jamais bloquant : le terminal reste dans le préfixe principal
+                log.error("environnement Wine pour %s : %s", inst.id, exc)
         try:
             content = build_ini(inst.login, password, inst.server, self.cfg.mt5.ea_name, self.cfg.mt5.set_name,
                                 self.cfg.mt5.symbol, self.cfg.mt5.period, self.cfg.mt5.profile,
