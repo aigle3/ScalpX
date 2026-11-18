@@ -1276,6 +1276,10 @@ class Router:
         from core import server as sv, update as upd
         need = await asyncio.to_thread(sv.install_needed, upd.find_source(self.ctx.cfg))
         db = self.ctx.db
+        if db.meta_get("update_pending"):
+            # Bot 4.5.1 : 🔧 installe toujours la DERNIÈRE version (stable) alors que le bot rattrape ses mises à jour une à
+            # une : tant qu'il est en retard, les empreintes diffèrent sans raison (cloche 🔧 qui revenait sans cesse).
+            need = ""
         if need != db.meta_get("install_pending"):
             db.meta_set("install_pending", need)
             await self.dash.refresh(force=True)

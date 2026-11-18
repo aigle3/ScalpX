@@ -1780,3 +1780,16 @@ async def test_serveur_neuf_n_ecrase_jamais_une_sauvegarde_existante(svc, monkey
     # autre serveur neuf, dépôt vide : écrit tout de suite
     ctx.db.meta_set("bkp_owner", ""); ctx.db.meta_set("fbk_ts", ""); pushed.clear(); remote.clear()
     assert await router.full_backup() == "" and pushed == ["complète"] and ctx.db.meta_get("bkp_owner") == "1"
+
+
+async def test_cloche_installation_systeme_cachee_tant_que_le_bot_rattrape_ses_mises_a_jour(svc, monkeypatch):
+    """Bot 4.5.1 : 🔧 installe toujours stable ; tant qu'une mise à jour du bot attend, pas de 🔔 🔧 (faux retard)."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    from core import server as sv
+    monkeypatch.setattr(sv, "install_needed", lambda package, *a, **k: "abcd1234abcd1234")
+    ctx.db.meta_set("update_pending", "1")
+    await router.check_install()
+    assert ctx.db.meta_get("install_pending") == "" and "installation système" not in sender.all_text()
+    ctx.db.meta_set("update_pending", "")                                # bot à jour : vrai retard → 🔔
+    await router.check_install()
+    assert ctx.db.meta_get("install_pending") == "abcd1234abcd1234" and "installation système" in sender.all_text()
