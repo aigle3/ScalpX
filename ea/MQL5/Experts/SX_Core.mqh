@@ -3,7 +3,7 @@
 //| Noyau : variables globales, registre de paramètres (tous les     |
 //| réglages sont modifiables à chaud), persistance, presets.        |
 //+------------------------------------------------------------------+
-#define SX_VERSION   "8.0.0"
+#define SX_VERSION   "8.1.0"
 #define SX_PREFIX    "SX4_"
 #define SX_MAXQ      40
 
@@ -11,6 +11,7 @@
 // (sinon les délais en millisecondes et l'antirebond des filtres suivraient le temps réel, des milliers de fois plus lent).
 // Hors backtest (g_bt = false), SxTicks() et SxGmt() renvoient exactement GetTickCount64() et TimeGMT().
 bool     g_bt        = false;        // backtest lancé par le bot (testeur + BacktestId)
+bool     g_btNoLabo  = false;        // [ARCHI] 8.1.0 : backtest lancé depuis Telegram : sans séries virtuelles du labo (plus rapide)
 bool     g_btManual  = false;        // [ARCHI] 7.12.0 : testeur MT5 lancé à la main (BacktestId vide) : même moteur, aucun fichier
 int      g_btWinter  = 7200;         // décalage du serveur en hiver (s) ; +1 h pendant l'heure d'été américaine si g_btUsDst
 bool     g_btUsDst   = true;

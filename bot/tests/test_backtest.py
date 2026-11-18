@@ -231,3 +231,125 @@ def test_gain_du_jour_depuis_historique_du_bot(svc):  # noqa: F811
     assert abs(g[a.id] - 30.0) < 1e-6                                     # 150 − 100 − 20 de dépôt
     dash.goto("home") if hasattr(dash, "goto") else None
     assert "jour +30.00" in dash.render()[0].replace(" ", " ").replace("EUR", "").replace("  ", " ") or True
+
+
+# ------------------------------------------------------------------ 🧪 backtest MT5 lancé depuis Telegram (Bot 4.13.0 / EA 8.1.0)
+DAY = 86400
+T0 = 1_760_000_000
+MANUAL_EVENTS = [
+    ev("BT_DEBUT", {"solde": 200}, T0),
+    ev("OBJECTIF_AUTO", {"creneau": "continu"}, T0 + 100), ev("OBJECTIF_ATTEINT", None, T0 + 200),
+    ev("BT_JOUR", {"solde": 200, "equity": 200}, T0),
+    ev("BT_JOUR", {"solde": 420, "equity": 410}, T0 + DAY),
+    ev("BT_RETRAIT", {"montant": 305, "solde": 200}, T0 + DAY + 3600),       # cycle gagné : 505 → 200
+    ev("BT_JOUR", {"solde": 260, "equity": 150}, T0 + 2 * DAY),
+    ev("BT_RECHARGE", {"montant": 150, "solde": 200}, T0 + 2 * DAY + 600),   # cycle perdu : 50 → 200
+    ev("BT_JOUR", {"solde": 330, "equity": 330}, T0 + 3 * DAY),
+]
+MANUAL_FIN = {"depart": 200, "solde": 330, "retraits": 305, "recharges": 150, "nb_recharges": 1, "cycles": 1, "dd_max": 75.0,
+              "trades": 40, "gagnants": 36, "perdants": 4, "longs": 22, "courts": 18, "gains_bruts": 520.0, "pertes_brutes": 260.0,
+              "meilleur": 30.0, "pire": -150.0, "fin": True}
+
+
+def test_cycles_trades_et_graphique_du_backtest():
+    from bot import render
+    from bot.charts import backtest_chart
+    r = bt.summarize(3, T0, T0 + 4 * DAY, MANUAL_FIN, MANUAL_EVENTS)
+    r.lo, r.hi = 200.0, 500.0
+    assert (r.cycles_won, r.cycles_lost) == (1, 1) and [m[1] for m in r.marks] == ["+", "-"]
+    assert r.net == pytest.approx(330 + 305 - 200 - 150) and r.profit_factor == pytest.approx(2.0)
+    assert r.cycle_durations() == [DAY + 3600, DAY - 3000]
+    back = bt.Result.from_json(r.to_json())
+    assert back.marks == r.marks and back.trades == 40 and back.hi == 500
+    text = render.bt_manual_result_text(3, "preset ⭐ Martin", r, "EUR", 125)
+    for s in ("Cycles : 2 terminé(s)", "✅ 1 gagné(s)", "❌ 1 perdu(s)", "Gain net +285.00", "40 fermés", "22 longs", "facteur de profit 2.00",
+              "Minimum 200.00 EUR", "Maximum 500.00 EUR", "Cycle gagné : 1 j 1 h"):
+        assert s in text, s
+    png = backtest_chart(r, "Backtest #3", "EUR")
+    assert png and png[:4] == b"\x89PNG"
+    old = bt.summarize(4, T0, T0 + DAY, {"depart": 125, "solde": 130}, [])         # EA < 8.1.0 : pas de statistiques des trades
+    assert old.trades == -1 and "Trades" not in render.bt_manual_result_text(4, "x", old, "EUR")
+
+
+class ManualTester(TesterProcs):
+    __test__ = False
+
+    def __init__(self, common: Path) -> None:
+        super().__init__(common)
+        self.params = ""
+
+    def launch(self, exe, ini=None):
+        rid = [l for l in Path(exe).parent.joinpath("MQL5/Profiles/Tester", bt.TESTER_SET).read_bytes()[2:]
+               .decode("utf-16-le").split("\r\n") if l.startswith("BacktestId=")][0].split("=")[1]
+        f = bt.bt_files(self.common, int(rid))
+        self.params = f["params"].read_text(encoding="utf-8")
+        self.inis.append(Path(ini).read_text(encoding="utf-8") if ini else "")
+        f["progress"].write_text(json.dumps({"sim": T0 + DAY, "solde": 420, "cycles": 0, "nb_recharges": 0}), encoding="utf-8")
+        f["events"].write_text("\n".join(json.dumps(e) for e in MANUAL_EVENTS), encoding="utf-8")
+        f["fin"].write_text(json.dumps(MANUAL_FIN), encoding="utf-8")
+        rep = Path(exe).parent / "reports"
+        rep.mkdir(exist_ok=True)
+        (rep / f"bt_{rid}.htm").write_bytes(b"<html>rapport</html>")
+        self.checks = 0
+        return FakeProcs.launch(self, exe, None)
+
+
+@pytest.mark.asyncio
+async def test_backtest_mt5_depuis_telegram(svc):  # noqa: F811
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    tp = ManualTester(ctx.cfg.paths.common())
+    router.bt.procs = tp
+    ctx.cfg.backtest.poll_s = 0.01
+    folder = router.bt.folder
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / ctx.cfg.mt5.terminal_exe).write_bytes(b"MZ")
+    dash.store.put("Autre", {"lot": "0.02", "seuil_reprise": "100", "seuil_arret": "300"})
+    dash.store.put("Martin", {"lot": "0.01", "sl_cont": "1", "seuil_on": "0", "seuil_reprise": "200", "seuil_arret": "500"})
+    dash.store.set_active("Martin")
+    await router.on_callback("d:rpt")
+    assert any(d == "d:bm" for row in dash.render()[1] for _, d in row)
+    await router.on_callback("d:bm")
+    text, kb = dash.render()
+    assert "à configurer" in text and any(d == "d:btc" for row in kb for _, d in row)
+    ctx.db.meta_set("bt_account", json.dumps({"login": 123, "server": "Broker-Demo"}))
+    text, kb = dash.render()
+    assert "⭐ Martin" in text and "Minimum : <b>200.00" in text and "Maximum : <b>500.00" in text and "Ticks réels" in text
+    # preset suivant puis retour à Martin (min / max repris du preset)
+    await router.on_callback("d:bmp")
+    assert "Autre" in dash.render()[0] and "100.00" in dash.render()[0]
+    await router.on_callback("d:bmp")
+    assert "⭐ Martin" in dash.render()[0]
+    # minimum, maximum et date de début saisis pour ce test
+    await router.on_callback("d:bmlo")
+    await router.on_text("600")
+    assert "doit être entre" in dash.render()[0]
+    await router.on_text("250")
+    await router.on_callback("d:bmhi")
+    await router.on_text("750,5")
+    await router.on_callback("d:bmdt")
+    await router.on_text("pas une date")
+    assert "non reconnue" in dash.render()[0]
+    start = time.strftime("%d/%m/%Y", time.localtime(time.time() - 10 * DAY))
+    await router.on_text(start)
+    text = dash.render()[0]
+    assert "250.00" in text and "750.50" in text and "changé pour ce test" in text and dash.bm.days in (9, 10, 11)
+    await router.on_callback("d:bmgo")
+    assert await _until(lambda: any("Backtest #" in s[1] and "terminé" in s[1] for s in sender.sent), 300)
+    assert "seuil_reprise=250\n" in tp.params and "seuil_arret=750.5\n" in tp.params and "seuil_on=1\n" in tp.params
+    assert "bt_sans_labo=1\n" in tp.params and "sl_cont=1\n" in tp.params and "lot=0.01\n" in tp.params
+    assert "Model=4" in tp.inis[-1] and "Deposit=250.00" in tp.inis[-1]
+    res_text = next(s[1] for s in sender.sent if "terminé" in s[1])
+    assert "✅ 1 gagné(s)" in res_text and "❌ 1 perdu(s)" in res_text and "preset ⭐ Martin" in res_text
+    assert await _until(lambda: sender.docs, 100)
+    assert sender.photos and sender.docs[0][0].endswith(".htm") and not list((folder / "reports").glob("bt_*"))
+    row = ctx.db.bt_list(1)[0]
+    assert row["kind"] == "manuel" and row["status"] == "ok"
+    # 🗂 derniers backtests : résultat et graphique renvoyés
+    await router.on_callback("d:bml")
+    assert any(d == f"d:bmg:{row['id']}" for r in dash.render()[1] for _, d in r)
+    n = len(sender.photos)
+    await router.on_callback(f"d:bmg:{row['id']}")
+    assert len(sender.photos) == n + 1
+    # ↺ min / max du preset
+    await router.on_callback("d:bmrs")
+    assert "Minimum : <b>200.00" in dash.render()[0]

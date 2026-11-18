@@ -253,11 +253,48 @@ class Result:
     params: dict = field(default_factory=dict)      # réglages testés (clé brute de l'EA → valeur)
     days: list = field(default_factory=list)        # [ts, solde, equity] par jour simulé
     slots: dict = field(default_factory=dict)       # créneau → [lancés, atteints]
+    # Bot 4.13.0 / EA 8.1.0 : backtest lancé depuis Telegram (🧪 Backtest)
+    marks: list = field(default_factory=list)       # [ts, "+" retrait (cycle gagné) | "-" recharge (cycle perdu), montant, solde après]
+    trades: int = -1                                # positions fermées (-1 : EA < 8.1.0, inconnu)
+    t_won: int = 0
+    t_lost: int = 0
+    t_long: int = 0
+    t_short: int = 0
+    gross_win: float = 0.0
+    gross_loss: float = 0.0
+    best: float = 0.0
+    worst: float = 0.0
+    lo: float = 0.0                                 # minimum (seuil de reprise) et maximum (seuil d'arrêt) du test
+    hi: float = 0.0
 
     @property
     def net(self) -> float:
         """Gain réel de la stratégie : solde final + retraits − dépôt initial − recharges."""
         return self.final + self.withdrawn - self.deposit - self.reloaded
+
+    @property
+    def cycles_won(self) -> int:
+        """Cycles gagnés : maximum atteint, retrait jusqu'au minimum (événements BT_RETRAIT, sinon compteur de l'EA)."""
+        n = sum(1 for m in self.marks if m[1] == "+")
+        return n if n or not self.cycles else self.cycles
+
+    @property
+    def cycles_lost(self) -> int:
+        """Cycles perdus : solde passé sous le minimum, compte rechargé au minimum."""
+        return self.reloads
+
+    @property
+    def profit_factor(self) -> float | None:
+        return self.gross_win / self.gross_loss if self.gross_loss > 0 else None
+
+    def cycle_durations(self) -> list[float]:
+        """Durée (s) de chaque cycle terminé (gagné ou perdu), du début du test ou de la remise au minimum précédente."""
+        out, start = [], self.d_from
+        for ts, *_ in self.marks:
+            if ts > start:
+                out.append(float(ts - start))
+            start = ts
+        return out
 
     @property
     def missed(self) -> int:
@@ -291,6 +328,12 @@ def summarize(rid: int, d_from: int, d_to: int, fin: dict | None, events: list[d
     r.dd_peak = float(f.get("dd_pic", 0) or 0)
     r.dd_eq = float(f.get("dd_eq", 0) or 0)
     r.stopouts = int(f["stopouts"]) if "stopouts" in f else -1
+    if "trades" in f:                                                    # EA 8.1.0
+        r.trades = int(f.get("trades", 0) or 0)
+        r.t_won, r.t_lost = int(f.get("gagnants", 0) or 0), int(f.get("perdants", 0) or 0)
+        r.t_long, r.t_short = int(f.get("longs", 0) or 0), int(f.get("courts", 0) or 0)
+        r.gross_win, r.gross_loss = float(f.get("gains_bruts", 0) or 0), float(f.get("pertes_brutes", 0) or 0)
+        r.best, r.worst = float(f.get("meilleur", 0) or 0), float(f.get("pire", 0) or 0)
     current = ""
     for e in events:
         t, d = e.get("type", ""), e.get("data") or {}
@@ -314,6 +357,9 @@ def summarize(rid: int, d_from: int, d_to: int, fin: dict | None, events: list[d
         elif t == "NOTIF" and "STOP LOSS D'URGENCE" in (e.get("texte") or ""):
             r.sl += 1
             current = ""
+        elif t in ("BT_RETRAIT", "BT_RECHARGE"):
+            r.marks.append([int(e.get("ts", 0) or 0), "+" if t == "BT_RETRAIT" else "-", float(d.get("montant", 0) or 0),
+                            float(d.get("solde", 0) or 0)])
         elif t == "BT_JOUR":
             r.days.append([int(e.get("ts", 0)), float(d.get("solde", 0) or 0), float(d.get("equity", 0) or 0)])
         elif t == "BT_DEBUT" and not r.deposit:

@@ -146,6 +146,8 @@ class Router:
             self.awaiting_cmd = False                           # Bot 4.6.0 : autre bouton → plus de commande attendue
         if data in ("d:home", "d:close") and self.awaiting_bt:
             self.cancel_inputs()                                # Bot 4.8.7 : quitter l'assistant l'annule
+        if (self.awaiting_bt or "").startswith("bm_") and not data.startswith("d:bm"):
+            self.awaiting_bt = None                             # Bot 4.13.0 : 🧪 saisie du backtest abandonnée (autre bouton)
         if self.awaiting_token and data not in ("d:bkp", "d:key", "d:noop"):
             # Bot 4.2.0 : tout autre bouton annule la saisie attendue (jeton / mot de passe) : un texte tapé plus tard
             # (nom de preset…) ne doit jamais devenir un jeton ou une clé de chiffrement.
@@ -227,6 +229,10 @@ class Router:
                 return r
         elif sub in ("btc", "btsv", "btq", "btx"):         # 🔑 terminal de test de l'optimiseur
             r = await self._bt_cb(sub, p)
+            if r is not None:
+                return r
+        elif sub in ("bm", "bmp", "bmd", "bmdt", "bmlo", "bmhi", "bmrs", "bmgo", "bml", "bmr", "bmg"):   # 🧪 backtest MT5
+            r = await self._bm_cb(sub, p)
             if r is not None:
                 return r
         elif sub in ("lst", "act", "rpt", "logs", "gterm", "wdr"):
@@ -724,6 +730,9 @@ class Router:
         from core.ids import valid_login, valid_server
         step, self.awaiting_bt = self.awaiting_bt, None
         d = self.dash
+        if step in ("bm_lo", "bm_hi", "bm_date"):            # Bot 4.13.0 : 🧪 backtest MT5 (minimum, maximum, date de début)
+            await self._bm_text(step, text)
+            return
         if step == "login":
             v = text.strip()
             if not valid_login(v):
@@ -780,8 +789,8 @@ class Router:
         del password
         if run.ok:
             await self.sender.send(self.chat_id, f"✅ <b>Terminal de test prêt</b> : compte {login} · {esc(server)}.\n"
-                                                 "Le mot de passe est mémorisé par MT5. L'optimiseur l'utilisera chaque nuit.",
-                                   [[("🤖 Optimiseur", "d:opt"), ("✖ Fermer", "d:close")]], False)
+                                                 "Le mot de passe est mémorisé par MT5. L'optimiseur et 🧪 Backtest MT5 l'utilisent.",
+                                   [[("🧪 Backtest MT5", "d:bm"), ("🤖 Optimiseur", "d:opt")], [("✖ Fermer", "d:close")]], False)
         else:
             await self.sender.send(self.chat_id, f"❌ <b>Configuration du terminal de test impossible</b>\n{esc(run.error)}",
                                    [[("🔑 Réessayer", "d:btc"), ("✖ Fermer", "d:close")]], False)
@@ -822,6 +831,183 @@ class Router:
         label = (f"preset {src[7:]}" if src.startswith("preset:") else "réglages de BASE (.set)" if ref is None
                  else f"compte {ref.label} (réglages actuels)")
         return params, label, deposit, currency, leverage, comm, slip
+
+    # ------------------------------------------------------------------ 🧪 backtest MT5 lancé depuis Telegram (Bot 4.13.0)
+    async def _bm_cb(self, sub: str, p: list[str]) -> str | None:
+        from core import backtest as bt
+        from . import backtest_ui as bui
+        d, s = self.dash, self.dash.bm
+        arg = p[2] if len(p) > 2 else ""
+        if self.awaiting_bt in ("bm_lo", "bm_hi", "bm_date") and sub not in ("bmlo", "bmhi", "bmdt"):
+            self.awaiting_bt = None                          # autre bouton : saisie abandonnée
+        if sub == "bm":
+            d.goto("bm")
+        elif sub == "bmp":
+            s.next_preset()
+            d.goto("bm")
+        elif sub == "bmd" and arg.isdigit() and 1 <= int(arg) <= bt.MAX_DAYS:
+            s.days = int(arg)
+            s.save()
+            d.goto("bm")
+        elif sub == "bmdt":
+            self.awaiting_bt = "bm_date"
+            d.flash("📅 Envoie la <b>date de début</b> (JJ/MM/AAAA), entre hier et il y a un an.", 180)
+            d.goto("bm")
+        elif sub in ("bmlo", "bmhi"):
+            lo, hi = s.lo_hi()
+            self.awaiting_bt = "bm_lo" if sub == "bmlo" else "bm_hi"
+            d.flash("⬇️ Envoie le <b>minimum</b> (solde de départ, et recharge après un cycle perdu), ex. 200. Actuel : "
+                    f"{bui._num(lo)}." if sub == "bmlo" else
+                    "⬆️ Envoie le <b>maximum</b> (atteint : retrait jusqu'au minimum, cycle gagné), ex. 500. Actuel : "
+                    f"{bui._num(hi)}.", 180)
+            d.goto("bm")
+        elif sub == "bmrs":
+            s.reset_limits()
+            d.flash("↺ Minimum et maximum du preset.")
+            d.goto("bm")
+        elif sub == "bmgo":
+            if self.bt.busy() or self.optim.running:
+                d.flash("⏳ Un test ou une optimisation est déjà en cours : attends sa fin.")
+            elif not self.bt.configured():
+                d.flash("🔑 Configure d'abord le terminal de test.")
+            elif not s.preset_name():
+                d.flash("❌ Aucun preset.")
+            else:
+                self._bg(self.start_manual_backtest())
+                return "Backtest lancé"
+            d.goto("bm")
+        elif sub == "bml":
+            d.goto("bml")
+        elif sub == "bmr" and arg.isdigit():
+            await self._bm_send_result(int(arg), with_files=False)
+            return ""
+        elif sub == "bmg" and arg.isdigit():
+            await self._bm_chart(int(arg))
+            return ""
+        return None
+
+    async def _bm_text(self, step: str, text: str) -> None:
+        from core import backtest as bt
+        d, s = self.dash, self.dash.bm
+        if step == "bm_date":
+            days = bt.parse_date(text)
+            if days is None:
+                self.awaiting_bt = "bm_date"
+                d.flash("❌ Date non reconnue : JJ/MM/AAAA, entre hier et il y a un an.", 180)
+            else:
+                s.days = days
+                s.save()
+                d.flash(f"📅 Début du backtest : {bt.human_date(bt.date_range(days)[0])}.")
+        else:
+            err = s.set_limit("lo" if step == "bm_lo" else "hi", text)
+            if err:
+                self.awaiting_bt = step
+                d.flash(err, 180)
+            else:
+                lo, hi = s.lo_hi()
+                d.flash(f"✅ Minimum {lo:g} · maximum {hi:g} pour les prochains backtests.")
+        d.goto("bm")
+        await d.refresh(force=True)
+
+    async def start_manual_backtest(self) -> None:
+        from core import backtest as bt
+        from mt5.backtester import Run
+        from . import backtest_ui as bui
+        s = self.dash.bm
+        name = s.preset_name()
+        inputs = await self._bt_inputs("preset:" + name)
+        if isinstance(inputs, str):
+            self.dash.flash("❌ " + inputs)
+            await self.dash.refresh(force=True)
+            return
+        _, _, _, currency, leverage, comm, slip = inputs
+        params = s.params()
+        lo, hi = s.lo_hi()
+        d_from, d_to = bt.date_range(s.days)
+        label = ("preset ⭐ " if name == self.dash.store.active else "preset ") + name
+        rid = self.ctx.db.bt_create(bui.MANUAL_KIND, d_from, d_to, "reel", label)
+        run = Run(rid, bui.MANUAL_KIND, d_from, d_to, "reel", f"{label} · min {bui._num(lo)} · max {bui._num(hi)}")
+        run.note(f"📋 {label} · départ {lo:.2f} {currency} · maximum {hi:.2f} · levier 1:{leverage}")
+        self.ctx.db.add_action("", f"Backtest #{rid} lancé ({label}, {bt.human_date(d_from)} → {bt.human_date(d_to)}, "
+                                   f"min {bui._num(lo)}, max {bui._num(hi)})", True)
+        self._bt_msg, self._bt_last = None, (0.0, "")
+        self.dash.flash(f"🧪 Backtest #{rid} lancé : suivi dans le message ci-dessous.")
+        self.dash.goto("bm")
+        await self.dash.refresh(force=True)
+        run = await self.bt.execute(run, params=params, deposit=lo, currency=currency, leverage=leverage, comm=comm, slip=slip,
+                                    notify=self._bt_notify, poll_s=self.ctx.cfg.backtest.poll_s)
+        status = "ok" if run.ok else ("arrete" if run.cancelled else "erreur")
+        if run.result is not None:
+            run.result.params = dict(params)
+            run.result.lo, run.result.hi = lo, hi
+            run.result.deposit = run.result.deposit or lo
+        self.ctx.db.bt_update(rid, status, run.result.to_json() if run.result else "", run.error)
+        if run.ok:
+            await self._bm_send_result(rid, with_files=True, duration_s=time.time() - run.started)
+        else:
+            await self.sender.send(self.chat_id, f"❌ <b>Backtest #{rid}</b> : {esc(run.error or 'échec')}",
+                                   [[("🧪 Backtest MT5", "d:bm"), ("✖ Fermer", "d:close")]], False)
+        await self.dash.refresh(force=True)
+
+    def _bm_result(self, rid: int):
+        from core import backtest as bt
+        row = self.ctx.db.bt_get(rid)
+        if row is None or not row["result"]:
+            return None, None
+        return row, bt.Result.from_json(row["result"])
+
+    def _bm_cur(self) -> str:
+        return next((v.st.devise for v in self.ctx.views() if v.st and v.st.devise), "") or self.ctx.cfg.alerts.expected_currency or ""
+
+    async def _bm_send_result(self, rid: int, *, with_files: bool, duration_s: float = 0) -> None:
+        row, res = self._bm_result(rid)
+        if res is None:
+            self.dash.flash(f"Résultat du backtest #{rid} introuvable.")
+            await self.dash.refresh(force=True)
+            return
+        text = render.bt_manual_result_text(rid, row["source"], res, self._bm_cur(), duration_s)
+        kb = [[("📈 Graphique", f"d:bmg:{rid}"), ("🧪 Nouveau backtest", "d:bm")], [("✖ Fermer", "d:close")]]
+        await self.sender.send(self.chat_id, text, kb, False)
+        await self._bm_chart(rid)
+        if with_files:
+            await self._bm_mt5_report(rid)
+
+    async def _bm_chart(self, rid: int) -> None:
+        from .charts import backtest_chart
+        row, res = self._bm_result(rid)
+        png = None
+        if res is not None:
+            title = (f"Backtest #{rid} · {res.cycles_won} cycle(s) gagné(s), {res.cycles_lost} perdu(s) · "
+                     f"gain net {res.net:+.0f} {self._bm_cur()}".strip())
+            png = await asyncio.to_thread(backtest_chart, res, title, self._bm_cur())
+        if png:
+            await self.sender.photo(self.chat_id, png, f"🧪 Backtest #{rid} : solde, cycles (▲ gagné · ▼ perdu) et gain net cumulé", True)
+        else:
+            self.dash.flash("📈 Pas assez de jours simulés pour un graphique.")
+            await self.dash.refresh(force=True)
+
+    async def _bm_mt5_report(self, rid: int) -> None:
+        """Rapport du testeur MT5 (Report=reports\\bt_<id>) : page HTML en pièce jointe et graphique du testeur, puis effacés."""
+        folder = self.bt.folder / "reports"
+        try:
+            files = sorted(folder.glob(f"bt_{rid}.*")) + sorted(folder.glob(f"bt_{rid}-*.png"))
+        except OSError:
+            files = []
+        for f in files:
+            try:
+                data = f.read_bytes()
+            except OSError:
+                continue
+            if f.suffix.lower() in (".htm", ".html") and data:
+                await self.sender.document(self.chat_id, data, f"backtest_{rid}_mt5{f.suffix.lower()}",
+                                           f"📎 Rapport complet du testeur MT5 (backtest #{rid}) : à ouvrir dans un navigateur")
+            elif f.suffix.lower() == ".png" and data and f.stem == f"bt_{rid}":
+                await self.sender.photo(self.chat_id, data, f"🖥 Graphique du testeur MT5 (backtest #{rid})", True)
+        for f in files:
+            try:
+                f.unlink()
+            except OSError:
+                pass
 
     async def _opt_cb(self, sub: str, p: list[str]) -> str | None:
         from .optim import GUIDE

@@ -36,6 +36,7 @@ Un seul VPS Ubuntu · un terminal MT5 par compte · un bot Telegram central · z
 | 🏦 **Tous courtiers MT5** | RoboForex prêt d'office ; tout autre courtier s'ajoute depuis Telegram avec le lien de son installeur MT5 pour PC. |
 | 🪶 **Terminaux légers** | Aucun affichage sur les graphiques MT5 (masqués) : tout se lit et se règle dans Telegram. |
 | 💾 **Presets** | Réglages nommés (ex. « Martin ») appliqués à un ou plusieurs comptes, importés / exportés par fichier. |
+| 🧪 **Backtest MT5 depuis Telegram** | Le vrai testeur de stratégie MT5 (ticks réels du broker) rejoue ScalpX avec un preset au choix (⭐ Martin par défaut), une date de début (1 jour à 1 an), un **minimum** et un **maximum** réglables à chaque test : au maximum, retrait jusqu'au minimum (cycle gagné) ; sous le minimum, recharge au minimum (cycle perdu) et le test continue. Suivi en direct, puis résultat (cycles gagnés / perdus et leur durée, gain net, drawdown, objectifs, trades), graphique des cycles et rapport complet du testeur MT5. |
 | 🤖 **Optimiseur nocturne automatique** | Chaque nuit, il teste une catégorie de réglages sur l'historique et applique tout seul la meilleure variante sûre à « Martin » et à tous les comptes ; Telegram affiche ancienne → nouvelle valeur. |
 | ⬆ **Mises à jour en un clic** | Chaque version testée est proposée dans Telegram ; rien ne s'installe sans ton accord. |
 | ☁️ **Sauvegarde privée** | Dans un dépôt **privé de ton compte GitHub**, chiffrée par **ton** mot de passe. |

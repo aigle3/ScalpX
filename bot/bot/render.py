@@ -511,7 +511,10 @@ def bt_progress_text(run, cur: str, now: float | None = None) -> str:
         out.append(f"💰 Solde {money(float(p.get('solde', 0)), cur)} · equity {money(float(p.get('equity', 0)), cur)} · "
                    f"DD max {float(p.get('dd_max', 0)):.1f} %")
         out.append(f"🎯 Objectifs {p.get('objectifs', 0)} · ✅ {p.get('atteints', 0)} · ⌛ {int(p.get('annules', 0)) + int(p.get('coupes', 0))} "
-                   f"ratés · 🚨 {p.get('sl', 0)} SL · 🏁 {p.get('cycles', 0)} cycle(s) 500 · 💸 retiré {money(float(p.get('retraits', 0)), cur)}")
+                   f"ratés · 🚨 {p.get('sl', 0)} SL")
+        out.append(f"🔁 Cycles : ✅ {p.get('cycles', 0)} gagné(s) · ❌ {p.get('nb_recharges', 0)} perdu(s) · "
+                   f"💸 retiré {money(float(p.get('retraits', 0)), cur)}"
+                   + (f" · 🔄 rechargé {money(float(p.get('recharges', 0)), cur)}" if float(p.get('recharges', 0) or 0) else ""))
         if p.get("note"):
             out.append(f"ℹ️ {esc(p.get('note'))}")
     else:
@@ -524,3 +527,60 @@ def bt_progress_text(run, cur: str, now: float | None = None) -> str:
     if run.done:
         out += ["", ("✅ Terminé." if run.ok else f"❌ {esc(run.error or 'Échec.')}")]
     return "\n".join(out)
+
+
+def _dur_long(sec: float) -> str:
+    s = int(sec)
+    if s < 86400:
+        return _dur(s)
+    return f"{s // 86400} j {(s % 86400) // 3600} h"
+
+
+def bt_manual_result_text(rid: int, source: str, res, cur: str, duration_s: float = 0) -> str:
+    """Bot 4.13.0 : résultat d'un backtest MT5 lancé depuis Telegram (cycles, gain, drawdown, objectifs, trades)."""
+    from core import backtest as bt
+    days = max(1, round((res.d_to - res.d_from) / 86400))
+    lo, hi = res.lo or res.deposit, res.hi
+    out = [f"✅ <b>Backtest #{rid} terminé</b> · {bt.period_label(days)} ({bt.human_date(res.d_from)} → {bt.human_date(res.d_to)})",
+           f"⚙️ {esc(source)} · ticks réels" + (f" · durée {_dur(duration_s)}" if duration_s else ""),
+           f"⬇️ Minimum {money(lo, cur)} · ⬆️ Maximum {money(hi, cur)}" if hi else f"⬇️ Minimum {money(lo, cur)}"]
+    out += [esc(line) for line in bt.settings_lines(getattr(res, "params", {}) or {})]
+    out.append("")
+    won, lost = res.cycles_won, res.cycles_lost
+    out.append(f"🔁 <b>Cycles : {won + lost} terminé(s)</b> · ✅ {won} gagné(s) · ❌ {lost} perdu(s)"
+               + (f" · réussite {won / (won + lost) * 100:.0f} %" if won + lost else ""))
+    durs = res.cycle_durations()
+    wd = [d for d, m in zip(durs, res.marks) if m[1] == "+"]
+    if wd:
+        out.append(f"⏱ Cycle gagné : {_dur_long(sum(wd) / len(wd))} en moyenne · le plus rapide {_dur_long(min(wd))} · "
+                   f"le plus long {_dur_long(max(wd))}")
+    if hi and hi > lo:
+        prog = max(0.0, min(1.0, (res.final - lo) / (hi - lo)))
+        out.append(f"⏳ Cycle en cours à la fin : solde {money(res.final, cur)} ({prog * 100:.0f} % du chemin {lo:.0f} → {hi:.0f})")
+    out.append(f"💸 Retiré {money(res.withdrawn, cur)}" + (f" · 🔄 rechargé {money(res.reloaded, cur)}" if res.reloaded else ""))
+    pct = f" ({res.net / lo * 100:+.0f} % du minimum)" if lo else ""
+    out.append(f"📈 <b>Gain net {money(res.net, cur, True)}</b>{pct}")
+    out.append(f"📉 Drawdown max {res.dd_max:.1f} %" + (
+        f" le {time.strftime('%d/%m/%Y %H:%M', time.gmtime(res.dd_ts))} (GMT) : equity {money(res.dd_peak, cur)} → {money(res.dd_eq, cur)}"
+        if getattr(res, "dd_ts", 0) else ""))
+    if res.stopouts > 0:
+        out.append(f"💀 <b>Stop-out {res.stopouts} fois</b> (compte vidé puis rechargé au minimum)")
+    rate = f" ({res.won / res.goals * 100:.0f} %)" if res.goals else ""
+    out.append(f"🎯 Objectifs : {res.goals} lancés · ✅ {res.won}{rate} · ⌛ {res.missed} manqués "
+               f"(sans série {res.cancelled}, coupés {res.cut})" + (f" · 🚨 {res.sl} SL" if res.sl else "")
+               + (f" · ⏭ {res.skipped} sautés" if res.skipped else ""))
+    if res.trades >= 0:
+        tr = f" ({res.t_won / res.trades * 100:.0f} %)" if res.trades else ""
+        pf = res.profit_factor
+        out.append(f"📊 Trades : {res.trades} fermés (📈 {res.t_long} longs · 📉 {res.t_short} courts) · ✅ {res.t_won} gagnants{tr} · "
+                   f"❌ {res.t_lost} perdants")
+        out.append(f"   Gains {money(res.gross_win, cur)} · pertes {money(-res.gross_loss, cur)}"
+                   + (f" · facteur de profit {pf:.2f}" if pf is not None else "")
+                   + f" · meilleur {money(res.best, cur, True)} · pire {money(res.worst, cur, True)}")
+    if res.slots and len(res.slots) > 1:
+        parts = [f"{s} {w}/{n}" for s, (n, w) in sorted(res.slots.items(), key=lambda kv: kv[0].zfill(5))]
+        out.append("🕐 Par créneau (✅/lancés) : " + " · ".join(parts))
+    if res.note:
+        out.append(f"ℹ️ {esc(res.note)}")
+    text = "\n".join(out)
+    return text if len(text) <= 4000 else text[:3990].rsplit("\n", 1)[0]

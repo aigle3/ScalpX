@@ -59,6 +59,8 @@ class Dashboard:
         self.bt = None                                      # mt5.backtester.BacktestManager (branché par le routeur)
         self.bt_wiz: tuple[str, dict] = ("login", {})       # configuration du compte du testeur (étape, données)
         self.optim = None                                   # bot.optim.Optimizer (branché par le routeur)
+        from .backtest_ui import ManualSettings
+        self.bm = ManualSettings(self)                      # Bot 4.13.0 : 🧪 réglages du prochain backtest MT5 (preset, début, min, max)
         self._load_state()
 
     # ---- état persistant (filtre / tri / page)
@@ -214,6 +216,12 @@ class Dashboard:
         if kind == "btw":                                   # 🔑 compte du terminal de test (optimiseur)
             from . import backtest_ui as bui
             return bui.render_wizard(self)
+        if kind == "bm":                                    # Bot 4.13.0 : 🧪 backtest MT5 lancé depuis Telegram
+            from . import backtest_ui as bui
+            return bui.render_manual(self, now)
+        if kind == "bml":
+            from . import backtest_ui as bui
+            return bui.render_list(self)
         if kind == "wdr":
             return self._render_withdrawals(now)
         if kind == "gterm":
@@ -335,7 +343,7 @@ class Dashboard:
         kb: Keyboard = [
             [("📝 Rapport des 24 h", "d:rep"), ("📈 Courbe des soldes", "d:chart")],
             [("🕐 Stats par créneau", "d:sst"), ("📤 Export CSV", "d:exp")],
-            [("🤖 Optimiseur automatique", "d:opt")],
+            [("🧪 Backtest MT5", "d:bm"), ("🤖 Optimiseur automatique", "d:opt")],
             [("⬅ Accueil", "d:home")],
         ]
         return self._with_flash(text), kb

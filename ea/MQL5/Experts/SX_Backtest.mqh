@@ -217,6 +217,7 @@ int BtLoadParams(string file = "")
       int p = StringFind(line, "=");
       if(p <= 0) continue;
       if(StringSubstr(line, 0, p) == "bt_labo_seul") { g_btLaboOnly = (StringToInteger(StringSubstr(line, p + 1)) != 0); continue; }
+      if(StringSubstr(line, 0, p) == "bt_sans_labo") { g_btNoLabo = (StringToInteger(StringSubstr(line, p + 1)) != 0); continue; }   // 8.1.0
       int id = FindParamByKey(StringSubstr(line, 0, p));
       if(id < 0) continue;
       double v = StringToDouble(StringSubstr(line, p + 1));
@@ -417,6 +418,36 @@ void BtOnDeal(ulong deal)
    EvTyped("BT_STOPOUT", 0, "", "{\"solde\":" + NumS(AccountInfoDouble(ACCOUNT_BALANCE)) + "}");
 }
 
+// 8.1.0 : statistiques des trades du test (positions fermées : nombre, longs / courts, gagnants / perdants, gains et pertes bruts)
+string BtTradeStats()
+{
+   int n = 0, w = 0, l = 0, lg = 0, sh = 0;
+   double gw = 0, gl = 0, best = 0, worst = 0;
+   if(HistorySelect(0, TimeCurrent() + 86400))
+   {
+      int total = HistoryDealsTotal();
+      for(int i = 0; i < total; i++)
+      {
+         ulong d = HistoryDealGetTicket(i);
+         if(d == 0) continue;
+         long ent = HistoryDealGetInteger(d, DEAL_ENTRY);
+         if(ent != DEAL_ENTRY_OUT && ent != DEAL_ENTRY_INOUT && ent != DEAL_ENTRY_OUT_BY) continue;
+         long typ = HistoryDealGetInteger(d, DEAL_TYPE);
+         if(typ != DEAL_TYPE_BUY && typ != DEAL_TYPE_SELL) continue;
+         double pr = HistoryDealGetDouble(d, DEAL_PROFIT) + HistoryDealGetDouble(d, DEAL_SWAP) + HistoryDealGetDouble(d, DEAL_COMMISSION);
+         n++;
+         if(typ == DEAL_TYPE_SELL) lg++; else sh++;    // sortie par une vente = position longue fermée
+         if(pr >= 0) { w++; gw += pr; } else { l++; gl -= pr; }
+         if(pr > best) best = pr;
+         if(pr < worst) worst = pr;
+      }
+   }
+   return ",\"trades\":" + IntegerToString(n) + ",\"gagnants\":" + IntegerToString(w) + ",\"perdants\":" + IntegerToString(l) +
+          ",\"longs\":" + IntegerToString(lg) + ",\"courts\":" + IntegerToString(sh) + ",\"gains_bruts\":" + NumS(gw) +
+          ",\"pertes_brutes\":" + NumS(gl) + ",\"meilleur\":" + NumS(best) + ",\"pire\":" + NumS(worst) +
+          ",\"labo\":" + BoolS(g_lbOn);
+}
+
 void BtDeinit(int reason)
 {
    if(!g_bt) return;
@@ -427,6 +458,8 @@ void BtDeinit(int reason)
           "), drawdown max " + DoubleToString(g_btMaxDD, 1) + " %, stop-out " + IntegerToString(g_btStopOuts));
    EvFlushPending();
    AFileWrite(BtFile("progress.json"), BtJson(false, 0));
-   AFileWrite(BtFile("fin.json"), BtJson(true, reason));
+   string fin = BtJson(true, reason);
+   fin = StringSubstr(fin, 0, StringLen(fin) - 1) + BtTradeStats() + "}";   // 8.1.0 : statistiques des trades
+   AFileWrite(BtFile("fin.json"), fin);
 }
 //+------------------------------------------------------------------+

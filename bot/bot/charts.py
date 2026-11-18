@@ -54,6 +54,61 @@ def total_chart(series: dict[str, Sequence], title: str) -> bytes | None:
     return _png(fig)
 
 
+def backtest_chart(res, title: str, cur: str = "") -> bytes | None:
+    """Bot 4.13.0 : backtest lancé depuis Telegram. En haut, solde et equity avec le minimum et le maximum du test ; chaque
+    retrait au maximum (▲ cycle gagné) et chaque recharge au minimum (▼ cycle perdu) est marqué. En bas, gain net cumulé
+    (retraits − recharges). None si pas assez de points."""
+    from datetime import timezone
+    days = [(int(d[0]), float(d[1]), float(d[2])) for d in (res.days or []) if len(d) >= 3]
+    marks = [(int(m[0]), m[1], float(m[2]), float(m[3]) if len(m) > 3 else 0.0) for m in (res.marks or []) if len(m) >= 3]
+    if len(days) + len(marks) < 2:
+        return None
+
+    def dt(ts: int) -> datetime:
+        return datetime.fromtimestamp(ts, tz=timezone.utc).replace(tzinfo=None)
+
+    pts = [(ts, b, 0) for ts, b, _ in days]                    # solde : un point par jour + avant / après chaque cycle
+    for ts, kind, amount, after in marks:
+        before = after + amount if kind == "+" else after - amount
+        pts += [(ts, before, 1), (ts, after, 2)]
+    pts.sort(key=lambda x: (x[0], x[2]))
+    fig, (ax, ax2) = plt.subplots(2, 1, figsize=(9, 5.4), dpi=110, sharex=True, gridspec_kw={"height_ratios": [3, 1.2]})
+    fig.patch.set_facecolor("#0e1422")
+    ax.plot([dt(p[0]) for p in pts], [p[1] for p in pts], color="#26c281", linewidth=1.5, label="Solde")
+    if days:
+        ax.plot([dt(d[0]) for d in days], [d[2] for d in days], color="#42a5f5", linewidth=0.9, alpha=0.7, label="Equity (fin de jour)")
+    if res.hi:
+        ax.axhline(res.hi, color="#ffa726", linestyle="--", linewidth=1, label=f"Maximum {res.hi:.0f}")
+    if res.lo:
+        ax.axhline(res.lo, color="#ef5350", linestyle=":", linewidth=1, label=f"Minimum {res.lo:.0f}")
+    won = [(dt(ts), after + amount) for ts, k, amount, after in marks if k == "+"]
+    lost = [(dt(ts), after - amount) for ts, k, amount, after in marks if k == "-"]
+    if won:
+        ax.scatter([w[0] for w in won], [w[1] for w in won], marker="^", color="#26c281", s=34, zorder=5,
+                   label=f"Cycle gagné ({len(won)})")
+    if lost:
+        ax.scatter([w[0] for w in lost], [w[1] for w in lost], marker="v", color="#ef5350", s=34, zorder=5,
+                   label=f"Cycle perdu ({len(lost)})")
+    _style(ax, title)
+    ax.legend(facecolor="#0e1422", edgecolor="#2a3650", labelcolor="#e2e8f0", fontsize=7, loc="upper left", ncol=2)
+    cum, xs, ys = 0.0, [dt(res.d_from)], [0.0]               # gain net cumulé (escalier)
+    for ts, kind, amount, _ in sorted(marks):
+        xs.append(dt(ts)); ys.append(cum)
+        cum += amount if kind == "+" else -amount
+        xs.append(dt(ts)); ys.append(cum)
+    xs.append(dt(max(res.d_to, days[-1][0] if days else res.d_to))); ys.append(cum)
+    ax2.plot(xs, ys, color="#ab47bc", linewidth=1.4)
+    ax2.fill_between(xs, ys, 0, color="#ab47bc", alpha=0.15)
+    ax2.axhline(0, color="#64748b", linewidth=0.8)
+    _style(ax2, "")
+    ax2.set_ylabel(f"Gain net cumulé {cur}".strip(), color="#94a3b8", fontsize=8)
+    span = max(1, res.d_to - res.d_from)
+    ax2.xaxis.set_major_formatter(mdates.DateFormatter("%d/%m %H:%M" if span <= 3 * 86400 else "%d/%m/%y" if span > 200 * 86400 else "%d/%m"))
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    return _png(fig)
+
+
 def _png(fig) -> bytes:
     buf = io.BytesIO()
     fig.savefig(buf, format="png", facecolor=fig.get_facecolor())
