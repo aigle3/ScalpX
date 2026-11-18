@@ -301,7 +301,18 @@ async def h_cb(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except TelegramError:
         pass
     s = svc(context)
+    before = (s.dash.screen, s.dash._flash_text())
     await s.router.on_callback(q.data, q.message.message_id if q.message else 0)
+    # Bot 4.13.2 : bouton d'un AUTRE message (résultat de backtest, alerte, rapport…) qui change l'écran du tableau de bord
+    # (ou y affiche une information) : l'écran est montré EN BAS. Avant, le tableau de bord était modifié plus haut dans la
+    # conversation, hors de vue : le bouton semblait ne rien faire.
+    mid = q.message.message_id if q.message else 0
+    if (q.data.startswith("d:") and q.data not in ("d:close",) and not s.dash.is_last
+            and mid != int(s.ctx.db.meta_get("dash_msg_id", "0") or 0)
+            and ((s.dash.screen, s.dash._flash_text()) != before or q.data == "d:home"
+                 or s.dash.screen[0] == q.data.split(":")[1])):         # écran déjà ouvert (ex. 🧪 Nouveau backtest) : montré aussi
+        await s.dash.show()
+        return
     # Bot 4.8.3 : bouton de sauvegarde / jeton touché sur un AUTRE message (proposition, alerte) : l'écran qui s'ouvre
     # est montré en bas, au lieu d'être modifié plus haut dans la conversation.
     sub = q.data.split(":")[1] if q.data.startswith("d:") and ":" in q.data else ""

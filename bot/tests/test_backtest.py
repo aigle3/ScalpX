@@ -372,3 +372,33 @@ async def test_suivi_telegram_en_echec_n_arrete_pas_le_test(stack):
     run = await m.execute(Run(12, "manuel", 0, 86400, "reel", "x"), params={}, deposit=200, currency="EUR", leverage=100,
                           notify=flaky, poll_s=0.01)
     assert run.ok and not run.error and run.result is not None and len(calls) > 3
+
+
+@pytest.mark.asyncio
+async def test_bouton_d_un_ancien_message_montre_l_ecran_en_bas(svc):  # noqa: F811
+    """Bot 4.13.2 : « 🧪 Nouveau backtest » touché sous un résultat : le tableau de bord (recouvert) est remis en bas."""
+    from types import SimpleNamespace
+    from bot import app as botapp
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    await dash.refresh(force=True)
+    dash_mid = int(ctx.db.meta_get("dash_msg_id", "0") or 0)
+    assert dash_mid
+    res_mid = await sender.send(1, "✅ Backtest #15 terminé", [[("🧪 Nouveau backtest", "d:bm")]])
+    dash.note_message(res_mid)
+    assert not dash.is_last
+
+    async def answer():
+        return None
+
+    def update(data, mid):
+        return SimpleNamespace(callback_query=SimpleNamespace(data=data, message=SimpleNamespace(message_id=mid), answer=answer))
+
+    context = SimpleNamespace(application=SimpleNamespace(bot_data={"svc": SimpleNamespace(router=router, dash=dash, ctx=ctx)}))
+    await botapp.h_cb(update("d:bm", res_mid), context)
+    assert dash.screen[0] == "bm" and dash.is_last
+    assert int(ctx.db.meta_get("dash_msg_id", "0")) > res_mid                    # republié sous le message du résultat
+    # même écran déjà ouvert : remis en bas aussi
+    other = await sender.send(1, "rapport", [[("🧪 Nouveau backtest", "d:bm")]])
+    dash.note_message(other)
+    await botapp.h_cb(update("d:bm", other), context)
+    assert dash.is_last and int(ctx.db.meta_get("dash_msg_id", "0")) > other
