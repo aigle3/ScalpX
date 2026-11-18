@@ -129,6 +129,18 @@ systemctl enable --now scalpx-xvfb.service >/dev/null
 sleep 2
 systemctl is-active --quiet scalpx-xvfb.service || die "Xvfb ne démarre pas (journalctl -u scalpx-xvfb)"
 ok "Xvfb actif"
+# Bot 4.9.0 : ntsync (synchronisation Windows faite par le noyau) : Wine ≥ 10.16 l'utilise tout seul s'il trouve
+# /dev/ntsync ; wineserver travaille alors beaucoup moins (il prenait ~ 55 % de CPU avec 12 terminaux).
+if modinfo ntsync >/dev/null 2>&1; then
+    echo ntsync > /etc/modules-load.d/scalpx-ntsync.conf
+    echo 'KERNEL=="ntsync", MODE="0666"' > /etc/udev/rules.d/60-scalpx-ntsync.rules
+    modprobe ntsync 2>/dev/null || true
+    udevadm control --reload 2>/dev/null || true; udevadm trigger --name-match=ntsync 2>/dev/null || true
+    [ -e /dev/ntsync ] && chmod 666 /dev/ntsync 2>/dev/null || true
+    [ -e /dev/ntsync ] && ok "ntsync actif (pris en compte au prochain démarrage de Wine : redémarrer le VPS)" || warn "ntsync non chargé"
+else
+    warn "ntsync absent de ce noyau ($(uname -r)) : Wine reste en mode classique"
+fi
 
 # ---------------------------------------------------------------- 3. préfixe Wine
 step "3/7  Préfixe Wine ($PFX)"
@@ -195,6 +207,15 @@ if ls "$PFX/drive_c/Program Files (x86)/Microsoft/EdgeWebView/Application"/*/mse
     ok "WebView2 installé"
 else
     warn "WebView2 non détecté : l'installation de MT5 risque d'échouer (relancer l'installation le réessaie)"
+fi
+# Bot 4.9.0 : WebView2 en place → service de mise à jour Microsoft Edge coupé pour de bon (il se relançait sous Wine
+# et consommait du CPU pour rien ; WebView2 n'a pas besoin de lui pour fonctionner)
+if ls "$PFX/drive_c/Program Files (x86)/Microsoft/EdgeWebView/Application"/*/msedgewebview2.exe >/dev/null 2>&1; then
+    for sv in edgeupdate edgeupdatem MicrosoftEdgeElevationService; do
+        as_u timeout 60 wine reg add "HKLM\\System\\CurrentControlSet\\Services\\$sv" /v Start /t REG_DWORD /d 4 /f >>"$LOG" 2>&1 || true
+    done
+    pkill -u "$U" -i -f 'MicrosoftEdgeUpdate|edgeupdate' || true
+    ok "mise à jour Microsoft Edge coupée"
 fi
 
 # ---------------------------------------------------------------- 4. BASE MT5

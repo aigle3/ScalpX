@@ -105,8 +105,8 @@ class TelegramSender:
         try:
             await self.bot.delete_message(chat_id=chat_id, message_id=message_id)
             return True
-        except TelegramError as e:
-            log.warning("suppression de message impossible : %s", type(e).__name__)
+        except TelegramError as e:                                      # déjà effacé / trop ancien : courant, sans gravité
+            (log.debug if type(e).__name__ == "BadRequest" else log.warning)("suppression de message impossible : %s", type(e).__name__)
             return False
 
 

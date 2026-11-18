@@ -112,7 +112,10 @@ class InstanceManager:
                         await asyncio.to_thread(self.procs.kill, self.exe(inst))
                 return "propre"
         n = await asyncio.to_thread(self.procs.kill, self.exe(inst))   # attente de fin (jusqu'à 10 s) hors de la boucle du bot
-        log.warning("terminal %s arrêté de force (%d processus)", inst.id, n or 0)
+        if n:
+            log.warning("terminal %s arrêté de force (%d processus)", inst.id, n)
+        else:                                                           # Bot 4.9.0 : déjà fermé, pas une anomalie
+            log.info("terminal %s fermé (plus aucun processus)", inst.id)
         await self.wait_exit(inst, 10)
         return "kill"
 
