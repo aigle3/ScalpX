@@ -543,6 +543,11 @@ async def j_health(context: ContextTypes.DEFAULT_TYPE) -> None:
         s.ctx.db.meta_set("health_ok", "1" if ok else "0")
 
 
+async def j_prepare(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Bot 4.5.0 : BASE pas encore prêt (compilation de départ de MT5) → préparé en tâche de fond."""
+    asyncio.get_running_loop().create_task(svc(context).router.prepare_base())
+
+
 async def j_install(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Bot 3.19.0 (Linux) : installation système plus ancienne que le paquet → 🔔 🔧."""
     await svc(context).router.check_install()
@@ -681,4 +686,5 @@ def build_application(cfg: Config, ctx_factory) -> Application:
     jq.run_daily(timed(j_backup), time=dtime(cfg.backup.hour % 24, 0), job_kwargs=JOB_KW_DAILY)
     jq.run_repeating(timed(j_ghbackup), interval=max(60, cfg.backup.github_check_s), first=90, job_kwargs=JOB_KW)
     jq.run_repeating(timed(j_install), interval=300, first=120, job_kwargs=JOB_KW)
+    jq.run_repeating(timed(j_prepare), interval=120, first=10, job_kwargs=JOB_KW)
     return app

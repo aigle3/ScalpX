@@ -1391,6 +1391,30 @@ class Router:
         upd.STOP.set()
 
     # ---- Bot 3.21.0 : ☁️ sauvegarde complète (base + presets) et restauration
+    async def prepare_base(self) -> None:
+        """Bot 4.5.0 : BASE pas encore « prêt » (MT5 neuf ou mis à jour) → MT5 ouvert une fois dans BASE jusqu'à la fin de
+        sa compilation de départ ; création de comptes refusée en attendant. Jamais deux préparations à la fois."""
+        from mt5 import base as basemod, prepare
+        cfg = self.ctx.cfg
+        if getattr(self, "_base_preparing", False) or prepare.is_ready(cfg.paths.base, cfg.mt5.terminal_exe):
+            return
+        if basemod.check_base(cfg):
+            return                                              # BASE incomplet : signalé ailleurs (🛠 Système, création)
+        self._base_preparing = True
+        try:
+            await self.sender.send(self.chat_id, "🔧 <b>Préparation de MT5</b> (dossier BASE) : compilation de départ des "
+                                   "programmes MetaQuotes, 2 à 10 min. La création de comptes attend la fin.", None, True)
+            ok, msg = await asyncio.to_thread(prepare.prepare, cfg)
+            self.ctx.db.add_action("", "PRÉPARATION DE BASE", ok, msg)
+            await self.sender.send(self.chat_id, ("✅ <b>MT5 prêt</b> : tu peux créer des comptes (➕ ou 📄)." if ok else
+                                                  f"⚠️ Préparation de MT5 : {esc(msg)}. Nouvel essai dans quelques minutes."),
+                                   None, not ok)
+        except Exception as exc:
+            log.exception("préparation de BASE")
+            await self.sender.send(self.chat_id, f"⚠️ Préparation de MT5 : {esc(str(exc))}", None, True)
+        finally:
+            self._base_preparing = False
+
     BKP_WAIT = "une sauvegarde existe déjà dans le dépôt : rien n'est écrasé"
 
     async def may_write_backup(self) -> bool:

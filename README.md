@@ -276,6 +276,14 @@ le clavier sous Ubuntu 26.04 (les questions restent sans réponse).
 </details>
 
 <details>
+<summary><b>« MT5 se prépare » : je ne peux pas créer de compte</b></summary>
+
+À sa première ouverture, MT5 compile ~130 programmes MetaQuotes (plusieurs minutes à 100 % de CPU). Le bot le fait
+une seule fois dans le dossier BASE, puis annonce **✅ MT5 prêt** : chaque compte créé ensuite démarre directement,
+sans refaire ce travail.
+</details>
+
+<details>
 <summary><b>Les terminaux s'arrêtent-ils pendant une mise à jour du bot ?</b></summary>
 
 Non : le bot redémarre seul, les terminaux MT5 continuent de trader.

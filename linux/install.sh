@@ -219,18 +219,39 @@ if [ ! -f "$BASE/terminal64.exe" ]; then
     echo "  Copie de $src vers BASE…"
     as_u mkdir -p "$BASE"
     as_u cp -a "$src/." "$BASE/"
-    echo "  Premier démarrage en mode portable (création de l'arborescence)…"
-    as_u wine "$BASE/terminal64.exe" /portable >/dev/null 2>&1 &
-    for _ in $(seq 1 60); do
-        [ -d "$BASE/MQL5/Experts" ] && [ -d "$BASE/Profiles/Charts" ] && break
-        sleep 2
-    done
-    sleep 10
-    as_u wineserver -k || true
-    sleep 3
     ok "BASE créé"
+fi
+# Premier démarrage de MT5 dans BASE : il compile alors ~130 programmes MetaQuotes (« full recompilation »). On attend la
+# fin (25 min max) : sinon CHAQUE compte créé refait ce travail (minutes à 100 % de CPU, aucun signal de l'EA).
+# Marque « BASE prêt » = taille:date de terminal64.exe (même calcul que le bot, mt5/prepare.py).
+base_ready() { [ -f "$BASE/.scalpx_base_prete" ] && [ "$(cat "$BASE/.scalpx_base_prete")" = "$(stat -c '%s:%Y' "$BASE/terminal64.exe")" ]; }
+journal() { for f in "$BASE"/logs/*.log; do [ -f "$f" ] && iconv -f UTF-16LE -t UTF-8 "$f" 2>/dev/null; done | tr -d '\r' || true; }
+HAS_ACCOUNTS=""; ls "$MT/instances" 2>/dev/null | grep -q . && HAS_ACCOUNTS=1
+if [ -f "$BASE/terminal64.exe" ] && ! base_ready && [ -z "$HAS_ACCOUNTS" ]; then
+    echo "  Premier démarrage de MT5 dans BASE : compilation de départ (2 à 10 min)…"; tg "🔧 Installation : compilation de départ de MT5 (2 à 10 min)…"
+    n0=$(journal | grep -c "recompilation has been finished" || true)
+    as_u wine "$BASE/terminal64.exe" /portable >/dev/null 2>&1 &
+    started=""; done_=""
+    for i in $(seq 1 300); do                               # 300 × 5 s = 25 min
+        sleep 5
+        j=$(journal)
+        [ "$(printf '%s' "$j" | grep -c "recompilation has been finished" || true)" -gt "${n0:-0}" ] && { done_=1; break; }
+        printf '%s' "$j" | grep -q "recompilation has been started" && started=1
+        [ -z "$started" ] && [ "$i" -ge 24 ] && [ -d "$BASE/MQL5/Experts" ] && { done_=1; break; }   # 2 min sans compilation : rien à faire
+        [ $((i % 12)) -eq 0 ] && echo "  … compilation en cours ($((i / 12)) min)"
+    done
+    sleep 5
+    pkill -u "$U" -f 'mt5[/\\]BASE[/\\]' || true                 # SEULEMENT MT5 / MetaEditor de BASE (jamais les comptes)
+    sleep 3
+    if [ -n "$done_" ]; then
+        stat -c '%s:%Y' "$BASE/terminal64.exe" > "$BASE/.scalpx_base_prete"; chown "$U:$U" "$BASE/.scalpx_base_prete"
+        ok "MT5 prêt (compilation de départ terminée)"
+    else
+        warn "compilation de départ de MT5 non terminée : le bot la reprendra tout seul (création de comptes en attente)"
+    fi
 else
-    ok "BASE déjà présent (conservé)"
+    if [ -n "$HAS_ACCOUNTS" ] && ! base_ready; then ok "BASE conservé (préparation de MT5 faite par le bot, sans toucher aux comptes)"
+    else ok "BASE déjà présent et prêt (conservé)"; fi
 fi
 [ -f "$BASE/Config/accounts.dat" ] && warn "BASE contient un compte mémorisé (Config/accounts.dat) : BASE doit rester SANS compte, supprime ce fichier."
 

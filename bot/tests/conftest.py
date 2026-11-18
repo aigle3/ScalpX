@@ -236,3 +236,12 @@ def _depot_de_sauvegarde_vide(monkeypatch):
     """Bot 4.4.0 : aucun test ne contacte GitHub pour savoir si une sauvegarde existe déjà (dépôt vide par défaut)."""
     from core import ghbackup
     monkeypatch.setattr(ghbackup, "existing", lambda cfg, http=None: (set(), ""))
+
+
+@pytest.fixture(autouse=True)
+def _base_prete(monkeypatch, request):
+    """Bot 4.5.0 : BASE considéré prêt (compilation de départ de MT5 faite), sauf dans les tests de mt5/prepare.py."""
+    if "prepare" in request.node.name or "base_pas_prete" in request.node.name:
+        return
+    from mt5 import prepare
+    monkeypatch.setattr(prepare, "is_ready", lambda base, exe: True)
