@@ -59,6 +59,11 @@ LOG="${SCALPX_LOG:-/var/log/scalpx-installation.log}"
 # ---------------------------------------------------------------- 1. paquets
 step "1/7  Paquets système (Wine, Xvfb, Python)"
 export DEBIAN_FRONTEND=noninteractive
+# VPS neuf : les mises à jour automatiques d'Ubuntu tiennent souvent apt quelques minutes → on attend (10 min max).
+apt-get() { command apt-get -o DPkg::Lock::Timeout=600 -o Acquire::http::Timeout=60 -o Acquire::Retries=3 "$@"; }
+if pgrep -x unattended-upgr >/dev/null 2>&1 || pgrep -f apt.systemd.daily >/dev/null 2>&1; then
+    echo "  Mises à jour automatiques d'Ubuntu en cours : attente de leur fin (10 min max)…"
+fi
 dpkg --add-architecture i386
 apt-get update -qq
 apt-get install -y -qq ca-certificates curl wget gnupg xvfb xauth cabextract python3 python3-venv >/dev/null
@@ -67,8 +72,8 @@ if ! command -v wine >/dev/null; then
     # Dépôt absent ou refusé pour cette version d'Ubuntu : Wine d'Ubuntu à la place.
     SRC="/etc/apt/sources.list.d/winehq-${VERSION_CODENAME}.sources"
     mkdir -pm755 /etc/apt/keyrings
-    if wget -qO- https://dl.winehq.org/wine-builds/winehq.key | gpg --dearmor --yes -o /etc/apt/keyrings/winehq-archive.key \
-       && wget -qNP /etc/apt/sources.list.d/ "https://dl.winehq.org/wine-builds/ubuntu/dists/${VERSION_CODENAME}/winehq-${VERSION_CODENAME}.sources" \
+    if wget -q --timeout=30 --tries=2 -O- https://dl.winehq.org/wine-builds/winehq.key | gpg --dearmor --yes -o /etc/apt/keyrings/winehq-archive.key \
+       && wget -q --timeout=30 --tries=2 -NP /etc/apt/sources.list.d/ "https://dl.winehq.org/wine-builds/ubuntu/dists/${VERSION_CODENAME}/winehq-${VERSION_CODENAME}.sources" \
        && apt-get update -qq && apt-get install -y -qq --install-recommends winehq-stable >/dev/null; then
         ok "Wine de WineHQ"
     else
@@ -115,14 +120,27 @@ as_u env WINEDLLOVERRIDES="mscoree=;mshtml=" timeout 120 winecfg -v=win11 >/dev/
 [ -f "$PFX/system.reg" ] || die "préfixe Wine non créé"
 ok "préfixe prêt (Windows 11)"
 # L'installeur MT5 exige WebView2 (sinon il s'arrête aussitôt sur une erreur invisible : NtRaiseHardError)
-if ! ls -d "$PFX/drive_c/Program Files (x86)/Microsoft/EdgeWebView" >/dev/null 2>&1; then
+if ! ls "$PFX/drive_c/Program Files (x86)/Microsoft/EdgeWebView/Application"/*/msedgewebview2.exe >/dev/null 2>&1; then
     echo "  Installation de Microsoft WebView2 (requis par l'installeur MT5, 2 à 10 min)…"; tg "🔧 Installation : WebView2 (2 à 10 min)…"
-    as_u curl -fsSL -o /tmp/webview2.exe "https://go.microsoft.com/fwlink/p/?LinkId=2124703" || die "téléchargement de WebView2 impossible"
+    as_u curl -fsSL --connect-timeout 20 --max-time 600 -o /tmp/webview2.exe "https://go.microsoft.com/fwlink/p/?LinkId=2124703" || die "téléchargement de WebView2 impossible"
     as_u timeout 600 wine /tmp/webview2.exe /silent /install >/dev/null 2>&1 || true
+    # Ce fichier n'est qu'un lanceur : il rend la main tout de suite et le service Microsoft (MicrosoftEdgeUpdate)
+    # télécharge puis installe WebView2 en arrière-plan. On attend qu'il ait fini (10 min max) AVANT de l'arrêter.
+    WV="$PFX/drive_c/Program Files (x86)/Microsoft/EdgeWebView/Application"
+    for i in $(seq 1 120); do
+        ls "$WV"/*/msedgewebview2.exe >/dev/null 2>&1 && break
+        [ $((i % 12)) -eq 0 ] && echo "  … WebView2 encore en cours ($((i / 12)) min)"
+        sleep 5
+    done
+    sleep 10                                                # fin de l'écriture des fichiers
     pkill -u "$U" -i -f 'msedge|edgeupdate' || true      # services Edge restés lancés (sans toucher aux terminaux MT5)
     sleep 3
 fi
-ls -d "$PFX/drive_c/Program Files (x86)/Microsoft/EdgeWebView" >/dev/null 2>&1 && ok "WebView2 installé" || warn "WebView2 non détecté : l'installation de MT5 risque d'échouer"
+if ls "$PFX/drive_c/Program Files (x86)/Microsoft/EdgeWebView/Application"/*/msedgewebview2.exe >/dev/null 2>&1; then
+    ok "WebView2 installé"
+else
+    warn "WebView2 non détecté : l'installation de MT5 risque d'échouer (relancer l'installation le réessaie)"
+fi
 
 # ---------------------------------------------------------------- 4. BASE MT5
 step "4/7  MetaTrader 5 : dossier BASE ($BASE)"
@@ -132,7 +150,7 @@ if [ ! -f "$BASE/terminal64.exe" ]; then
         got=""
         for url in $SETUP_URLS; do
             echo "  Téléchargement de l'installeur MT5 : $url"
-            if as_u curl -fsSL -o /tmp/mt5setup.exe "$url"; then got=1; break; fi
+            if as_u curl -fsSL --connect-timeout 20 --max-time 900 -o /tmp/mt5setup.exe "$url"; then got=1; break; fi
         done
         [ -n "$got" ] || die "installeur MT5 introuvable : relance avec MT5_SETUP_URL=<lien de l'installeur> sudo -E bash linux/install.sh"
         echo "  Installation de MT5 dans Wine (plusieurs minutes)…"
@@ -185,7 +203,9 @@ tar -C "$PKG/bot" --exclude=.env --exclude=data --exclude=.venv --exclude=__pyca
     $( [ -f "$BOT/config.toml" ] && echo --exclude=config.toml ) -cf - . | tar -C "$BOT" -xf -
 chown -R "$U:$U" "$APP"
 [ -x "$BOT/.venv/bin/python" ] || as_u "$PY" -m venv "$BOT/.venv"
-as_u "$BOT/.venv/bin/pip" install --disable-pip-version-check -q -r "$BOT/requirements.txt"
+echo "  Bibliothèques Python (1 à 5 min)…"
+as_u timeout 1800 "$BOT/.venv/bin/pip" install --disable-pip-version-check -q --timeout 60 --retries 3 -r "$BOT/requirements.txt" \
+    || die "bibliothèques Python non installées (réseau ?) : relance l'installation"
 ok "bibliothèques installées"
 
 ENVF="$BOT/.env"
@@ -235,7 +255,7 @@ else
     ok "config.toml existant conservé"
 fi
 as_u mkdir -p "$PFX/drive_c/users/$U/AppData/Roaming/MetaQuotes/Terminal/Common/Files" "$MT/instances" "$MT/archives" "$APP/release"
-(cd "$BOT" && as_u "$BOT/.venv/bin/python" main.py --check) || warn "contrôle incomplet : corrige les erreurs ci-dessus puis relance ce script"
+(cd "$BOT" && as_u timeout 180 "$BOT/.venv/bin/python" main.py --check) || warn "contrôle incomplet : corrige les erreurs ci-dessus puis relance ce script"
 
 # ---------------------------------------------------------------- droits limités du bot (🖥 Serveur dans Telegram)
 # Sans mot de passe, SEULEMENT : réactiver les 2 services ScalpX au démarrage, redémarrer le VPS, mettre à jour
