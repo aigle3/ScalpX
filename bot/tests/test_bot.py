@@ -1671,7 +1671,7 @@ async def test_jeton_de_sauvegarde_et_desinstallation_apres_10_s(svc, monkeypatc
     assert ("complète", ctx.cfg.backup_key) in pushed and ("presets", ctx.cfg.backup_key) in pushed
     assert "motdepasse-1" not in sender.all_text()
     text, _ = dash.render()
-    assert "moi/scalpx-sauvegarde" in text and "actif" in text
+    assert "moi/scalpx-sauvegarde" in text and "Tout est en place" in text
     calls = []
     monkeypatch.setattr(sv, "uninstall", lambda run=None: calls.append(1) or (True, ""))
     router.UNI_STEP_S = 0.01
@@ -1768,7 +1768,7 @@ async def test_serveur_neuf_n_ecrase_jamais_une_sauvegarde_existante(svc, monkey
     dash.store.put("Martin", {"fast": "12"})
     router.awaiting_token = "BACKUP_PASSWORD"
     await router.on_text("motdepasse-1")
-    assert pushed == [] and "Une sauvegarde existe déjà" in sender.all_text()
+    assert pushed == [] and "Restaurer cette sauvegarde" in sender.all_text()     # Bot 4.8.3 : dans l'écran Sauvegarde
     assert "rien n'a été écrasé" in dash.render()[0]
     assert await router.full_backup() == router.BKP_WAIT and pushed == []
     await router.backup_presets()
@@ -1835,3 +1835,24 @@ async def test_ajout_d_un_courtier_depuis_telegram(svc, monkeypatch):
     await router.on_text("https://exemple/exness5setup.exe")
     assert await _until(lambda: calls == [("https://exemple/exness5setup.exe", "Exness-MT5Real8")]
                         and "Courtier <b>exness</b> ajouté" in sender.all_text())
+
+
+async def test_ecran_sauvegarde_en_etapes_et_toujours_en_bas(svc, monkeypatch):
+    """Bot 4.8.3 : 🔑 jeton → l'écran Sauvegarde (pas Clés) dit « J'attends ton jeton » ; recouvert par d'autres messages,
+    il est republié EN BAS après l'envoi du jeton (pas de retour à l'accueil) ; étapes cochées."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    from core import envfile, ghbackup
+    monkeypatch.setattr(envfile, "set_key", lambda path, k, v: None)
+    monkeypatch.setattr(ghbackup, "ensure_repo", lambda cfg, http=None: ("moi/scalpx-sauvegarde", ""))
+    dash.waiting = lambda: router.awaiting_token
+    await router.on_callback("d:kset:BACKUP_TOKEN")
+    text, _ = dash.render()
+    assert dash.screen[0] == "bkp" and "J'attends ton jeton GitHub" in text and "👉 <b>1. Jeton GitHub</b>" in text
+    dash.note_message(10 ** 9)                                           # un autre message recouvre le tableau de bord
+    assert not dash.is_last
+    before = int(ctx.db.meta_get("dash_msg_id", "0") or 0)
+    await router.on_text("ghp_" + "B" * 36)
+    await dash.show()
+    text, _ = dash.render()
+    assert dash.screen[0] == "bkp" and dash.is_last and int(ctx.db.meta_get("dash_msg_id", "0")) != before
+    assert "✅ <b>1. Jeton GitHub</b>" in text and "✅ <b>2. Dépôt privé</b>" in text and "J'attends ton mot de passe" in text

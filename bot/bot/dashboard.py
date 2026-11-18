@@ -51,6 +51,8 @@ class Dashboard:
         self._last_edit = 0.0
         self._retry_until = 0.0
         self._covered_at: float | None = None               # depuis quand un autre message est sous le tableau de bord
+        self._covered_by = 0                                # Bot 4.8.3 : message qui l'a recouvert (effacé ensuite → plus recouvert)
+        self.waiting = lambda: ""                           # Bot 4.8.3 : saisie attendue (jeton / mot de passe), fournie par le routeur
         self.bt = None                                      # mt5.backtester.BacktestManager (branché par le routeur)
         self.bt_wiz: tuple[str, dict] = ("login", {})       # configuration du compte du testeur (étape, données)
         self.optim = None                                   # bot.optim.Optimizer (branché par le routeur)
@@ -162,10 +164,10 @@ class Dashboard:
             return self._render_reports()
         if kind == "bkp":                                   # Bot 4.2.0 : ☁️ sauvegarde GitHub
             from .system import backup_screen
-            return backup_screen(self.ctx, self._flash_text())
+            return backup_screen(self.ctx, self._flash_text(), self.waiting())
         if kind == "key":                                   # Bot 3.18.0 : 🔑 clés et jetons
             from .system import keys_screen
-            return keys_screen(self.ctx, self._flash_text())
+            return keys_screen(self.ctx, self._flash_text(), self.waiting())
         if kind == "srv":                                   # Bot 3.18.0 : 🖥 Serveur (Linux)
             from . import server_ui as sui
             st, auto, sudo = getattr(self, "srv", (None, {}, True))
@@ -491,6 +493,19 @@ class Dashboard:
         mid = int(self.ctx.db.meta_get("dash_msg_id", "0") or 0)
         if mid and message_id > mid and self._covered_at is None:
             self._covered_at = time.time()
+            self._covered_by = message_id
+
+    def message_deleted(self, message_id: int) -> None:
+        """Bot 4.8.3 : le message qui recouvrait le tableau de bord a été effacé (jeton, mot de passe…) : il est de nouveau le dernier."""
+        if self._covered_at is not None and message_id == self._covered_by:
+            self._covered_at = None
+
+    async def show(self) -> None:
+        """Bot 4.8.3 : écran en cours affiché EN BAS de la conversation (republié s'il est recouvert, sans revenir à l'accueil)."""
+        if self.is_last:
+            await self.refresh(force=True)
+        else:
+            await self.bring_down(home=False)
 
     @property
     def is_last(self) -> bool:

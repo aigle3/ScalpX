@@ -165,54 +165,94 @@ def log_path(ctx: Ctx, name: str) -> Path:
 
 
 
-def keys_screen(ctx: Ctx, flash: str = "") -> tuple[str, Keyboard]:
+def keys_screen(ctx: Ctx, flash: str = "", waiting: str = "") -> tuple[str, Keyboard]:
     """Bot 3.18.0 : 🔑 clés du .env saisies depuis Telegram (le message est effacé, la valeur n'est jamais réaffichée)."""
     from .router import SECRETS
-    lines = ["🔑 <b>Clés et jetons</b>", "<i>Touche une clé puis envoie sa valeur : elle est enregistrée dans le .env du bot "
-             "et ton message est effacé aussitôt. Rien à faire sur le VPS.</i>", ""]
+    lines = ["🔑 <b>Clés et jetons</b>", "<i>Touche une clé puis envoie sa valeur en message : enregistrée dans le .env du bot, "
+             "ton message effacé aussitôt.</i>", ""]
     kb: Keyboard = []
     for key, (attr, hint, _) in SECRETS.items():
         val = getattr(ctx.cfg, attr, "") or ""
-        shown = ("✅ " + (val[:11] + "…" + val[-4:] if len(val) > 20 else "défini")) if val else "❌ absent"
+        shown = ("✅ " + (val[:11] + "…" + val[-4:] if len(val) > 20 else "défini")) if val else "➖ non défini"
         lines.append(f"<b>{key}</b> : {esc(shown)}\n   <i>{esc(hint)}</i>")
         kb.append([(("✏️ " if val else "➕ ") + key, f"d:kset:{key}")])
+    if waiting in SECRETS:
+        lines += ["", f"✍️ <b>J'attends la valeur de {waiting}</b> : envoie-la en message (ou « effacer »). "
+                  "Tout autre bouton annule."]
     kb.append([("⬅ Système", "d:sys")])
     text = "\n".join(lines)
     return (f"{flash}\n\n{text}" if flash else text), kb
 
 
-def backup_screen(ctx: Ctx, flash: str = "") -> tuple[str, Keyboard]:
-    """Bot 4.2.0 : ☁️ sauvegarde sur GitHub (dépôt privé de l'utilisateur, chiffrée), pas à pas."""
+def backup_screen(ctx: Ctx, flash: str = "", waiting: str = "") -> tuple[str, Keyboard]:
+    """Bot 4.2.0 / 4.8.3 : ☁️ sauvegarde sur GitHub (dépôt privé de l'utilisateur, chiffrée), en étapes cochées avec
+    « 👉 À faire maintenant » : on voit toujours où on en est sans remonter la conversation."""
     from core import ghbackup
     cfg, db = ctx.cfg, ctx.db
     now = time.time()
     rp = ghbackup.repo(cfg)
-    lines = ["☁️ <b>Sauvegarde sur GitHub</b>", ""]
+    err = db.meta_get("ghb_err") or db.meta_get("fbk_err")
+    pts, fts = int(float(db.meta_get("ghb_ts") or 0)), int(float(db.meta_get("fbk_ts") or 0))
+    conflict = bool(cfg.backup_token and rp and db.meta_get("bkp_owner") != "1" and not fts and db.meta_get("bkp_conflict_ask"))
+    plain = db.meta_get("backup_plain") == "1"
+    tok, repo_ok, key_ok = bool(cfg.backup_token), bool(rp), bool(cfg.backup_key) or plain
+    done = bool(pts or fts)
+
+    def mark(ok: bool, now_: bool = False) -> str:
+        return "✅" if ok else ("👉" if now_ else "⬜")
+    lines = ["☁️ <b>Sauvegarde sur GitHub</b>",
+             "<i>Presets, historique et optimiseur, dans un dépôt PRIVÉ de ton compte GitHub, chiffré par ton mot de passe.</i>", ""]
+    lines.append(f"{mark(tok, not tok)} <b>1. Jeton GitHub</b>" + ("" if tok else " — à envoyer"))
+    lines.append(f"{mark(repo_ok, tok and not repo_ok)} <b>2. Dépôt privé</b> : "
+                 + (f"<b>{esc(rp)}</b>" if repo_ok else ("❌ " + esc(err) if tok and err else "créé ou retrouvé tout seul")))
+    lines.append(f"{mark(key_ok, repo_ok and not key_ok)} <b>3. Chiffrement</b> : "
+                 + ("mot de passe ✔" if cfg.backup_key else ("désactivé" if plain else "mot de passe à envoyer")))
+    if conflict:
+        lines.append("⏸ <b>4. Sauvegarde</b> : une sauvegarde d'un autre serveur existe déjà, rien n'est écrasé")
+    else:
+        lines.append(f"{mark(done, key_ok and not done)} <b>4. Sauvegarde</b> : "
+                     + ("presets " + (f"il y a {render.ago(now - pts)}" if pts else "—") + " · complète "
+                        + (f"il y a {render.ago(now - fts)}" if fts else "—") if done else "pas encore"))
+    if err and repo_ok:
+        lines.append(f"⚠️ {esc(err)}")
+    # ce qu'il faut faire maintenant (une seule chose)
+    lines.append("")
+    if waiting == "BACKUP_TOKEN":
+        todo = "✍️ <b>J'attends ton jeton GitHub</b> (ghp_… ou github_pat_…) : envoie-le en message, il est effacé aussitôt."
+    elif waiting == "BACKUP_PASSWORD":
+        todo = ("✍️ <b>J'attends ton mot de passe</b> de chiffrement (8 caractères au moins) : envoie-le en message, il est "
+                "effacé aussitôt. <b>Note-le</b> : sans lui, la sauvegarde est illisible.")
+    elif waiting == "RESTORE_PASSWORD":
+        todo = "✍️ <b>J'attends le mot de passe de la sauvegarde</b> à restaurer : envoie-le en message."
+    elif not tok:
+        todo = "👉 <b>À faire</b> : touche 🔑 Envoyer le jeton GitHub (comment le créer : ci-dessous)."
+    elif not repo_ok:
+        todo = "👉 <b>À faire</b> : vérifie le jeton (case « repo » cochée) puis 🔑 Autre jeton."
+    elif not key_ok:
+        todo = "👉 <b>À faire</b> : touche 🔒 Chiffrer et envoie un mot de passe."
+    elif conflict:
+        todo = "👉 <b>À faire</b> : ☁️ Restaurer cette sauvegarde (avec SON mot de passe), ou 🔁 Remplacer par ce serveur."
+    elif not done:
+        todo = "⏳ Première sauvegarde en cours…"
+    else:
+        todo = "✅ <b>Tout est en place</b> : sauvegarde automatique (presets dès qu'ils changent, complète chaque nuit)."
+    lines.append(todo)
     kb: Keyboard = []
-    if not cfg.backup_token:
-        lines += ["Non activée. Ce qu'elle garde : presets (Martin…), historique, état de l'optimiseur — dans un dépôt "
-                  "<b>privé</b> de TON compte GitHub, chiffré par ton mot de passe.", "",
-                  "<b>1.</b> Sur github.com : ta photo → Settings → Developer settings → Personal access tokens → "
-                  "<b>Tokens (classic)</b> → Generate new token (classic).",
-                  "<b>2.</b> Nom « scalpx-sauvegarde », expiration « No expiration », coche <b>repo</b>, puis Generate token.",
-                  "<b>3.</b> Touche 🔑 ci-dessous et envoie le jeton (ghp_…) : je crée le dépôt privé, puis je te demande "
-                  "un mot de passe de chiffrement.",
-                  "<i>Plus restreint : crée toi-même un dépôt PRIVÉ « scalpx-sauvegarde », puis un jeton « Fine-grained » "
-                  "limité à ce dépôt (Contents : Read and write).</i>"]
+    if not tok:
+        lines += ["", "<b>Créer le jeton</b> : github.com → ta photo → Settings → Developer settings → Personal access tokens → "
+                  "<b>Tokens (classic)</b> → Generate new token (classic) ; nom « scalpx-sauvegarde », coche <b>repo</b> → "
+                  "Generate token → copie-le.",
+                  "<i>Plus restreint : crée toi-même un dépôt PRIVÉ « scalpx-sauvegarde » puis un jeton « Fine-grained » limité à ce "
+                  "dépôt (Contents : Read and write).</i>"]
         kb.append([("🔑 Envoyer le jeton GitHub", "d:kset:BACKUP_TOKEN")])
     else:
-        err = db.meta_get("ghb_err") or db.meta_get("fbk_err")
-        pts, fts = int(float(db.meta_get("ghb_ts") or 0)), int(float(db.meta_get("fbk_ts") or 0))
-        lines += [f"📦 Dépôt : <b>{esc(rp) if rp else '⏳ à créer'}</b> (privé)",
-                  "🔒 Chiffrement : " + ("<b>actif</b> (mot de passe)" if cfg.backup_key else "<b>non</b> — 🔒 Chiffrer conseillé"),
-                  "💾 Presets : " + (f"il y a {render.ago(now - pts)}" if pts else "pas encore") + " (dès qu'ils changent)",
-                  "🗂 Sauvegarde complète : " + (f"il y a {render.ago(now - fts)}" if fts else "pas encore") + " (chaque nuit)"]
-        if err:
-            lines.append(f"⚠️ {esc(err)}")
-        kb += [[("☁️ Sauvegarder maintenant", "d:fbk"), ("☁️ Restaurer", "d:frs")],
-               [("🔒 " + ("Changer le mot de passe" if cfg.backup_key else "Chiffrer"), "d:bkpw")]
-               + ([] if cfg.backup_key else [("Sans chiffrement", "d:bkplain")]),
-               [("🔑 Autre jeton", "d:kset:BACKUP_TOKEN"), ("🚫 Désactiver", "d:bkoff")]]
+        if conflict:
+            kb.append([("☁️ Restaurer", "d:frs"), ("🔁 Remplacer", "d:bkown")])
+        elif key_ok:
+            kb.append([("☁️ Sauvegarder maintenant", "d:fbk"), ("☁️ Restaurer", "d:frs")])
+        kb.append([("🔒 " + ("Changer le mot de passe" if cfg.backup_key else "Chiffrer"), "d:bkpw")]
+                  + ([] if key_ok else [("Sans chiffrement", "d:bkplain")]))
+        kb.append([("🔑 Autre jeton", "d:kset:BACKUP_TOKEN"), ("🚫 Désactiver", "d:bkoff")])
     kb.append([("⬅ Système", "d:sys")])
     text = "\n".join(lines)
     return (f"{flash}\n\n{text}" if flash else text), kb

@@ -141,6 +141,7 @@ class Services:
         self.notifier = Notifier(self.sender, self.chat_id, cfg.alerts.silent_mode, hold_s=cfg.alerts.group_hold_s,
                                  total=lambda: len(ctx.db.list()))
         self.router = Router(ctx, self.sender, self.chat_id, self.dash, self.conf, self.notifier)
+        self.dash.waiting = lambda: self.router.awaiting_token                  # Bot 4.8.3
         ctx.watchdog.alert = self.router.alert
         self.monitor = Monitor(cfg, ctx.db, ctx.status, EventReader(cfg.paths.common()), self.notifier.emit)
         self.wizard = WizardCore(ctx, self.sender, self.chat_id, self.on_created)
@@ -187,21 +188,26 @@ async def h_guard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def h_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Aucune commande « / » : tout message (bouton 📊 du clavier, texte libre, /start) ramène le tableau de bord en bas."""
     m = update.message
+    s = svc(context)
     if m is not None:
         try:
-            await svc(context).sender.delete(update.effective_chat.id, m.message_id)    # garde la conversation propre
+            await s.sender.delete(update.effective_chat.id, m.message_id)    # garde la conversation propre
+            s.dash.message_deleted(m.message_id)
         except Exception:
             pass
-    s = svc(context)
-    await s.router.on_text((m.text or "") if m is not None else "")
     # Bot 3.6.3 : le bouton permanent « 📊 Tableau de bord » peut disparaître côté Telegram (autre appareil, historique
     # effacé…). Tout message tapé le remet (au plus une fois toutes les 10 min ; le bouton lui-même ne le renvoie pas).
+    # Bot 4.8.3 : envoyé AVANT le traitement, pour que l'écran qui répond reste le dernier message.
     if m is not None and (m.text or "") != MENU_BUTTON and time.monotonic() - getattr(s, "_menu_at", -1e9) > 600:
         s._menu_at = time.monotonic()
         try:
             await s.sender.reply_menu(s.chat_id, "📊 Bouton « Tableau de bord » remis en bas de l'écran.")
         except Exception:
             log.warning("bouton du tableau de bord : envoi impossible", exc_info=True)
+    busy = bool(s.router.awaiting_token)
+    await s.router.on_text((m.text or "") if m is not None else "")
+    if busy and not s.dash.is_last:                             # Bot 4.8.3 : réponse à un jeton / mot de passe → visible en bas
+        await s.dash.show()
 
 
 async def h_doc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -277,7 +283,13 @@ async def h_cb(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await q.answer()                                # coupe le sablier tout de suite
     except TelegramError:
         pass
-    await svc(context).router.on_callback(q.data, q.message.message_id if q.message else 0)
+    s = svc(context)
+    await s.router.on_callback(q.data, q.message.message_id if q.message else 0)
+    # Bot 4.8.3 : bouton de sauvegarde / jeton touché sur un AUTRE message (proposition, alerte) : l'écran qui s'ouvre
+    # est montré en bas, au lieu d'être modifié plus haut dans la conversation.
+    sub = q.data.split(":")[1] if q.data.startswith("d:") and ":" in q.data else ""
+    if sub in ("bkp", "bkpw", "bkplain", "kset", "bkt", "bkown", "key") and not s.dash.is_last:
+        await s.dash.show()
 
 
 # ---- assistant de création / reconnexion

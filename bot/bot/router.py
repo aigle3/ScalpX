@@ -212,9 +212,7 @@ class Router:
             self.dash.flash("☁️ Je ne te le proposerai plus : 🛠 Système → ☁️ Sauvegarde pour l'activer plus tard.")
         elif sub == "bkpw":                                     # mot de passe de chiffrement (nouveau ou changé)
             self.awaiting_token = "BACKUP_PASSWORD"
-            self.dash.goto("bkp")
-            self.dash.flash("🔒 Envoie un <b>mot de passe</b> (8 caractères au moins). Ton message est effacé ; "
-                            "note-le bien : sans lui, la sauvegarde est illisible.", 300)
+            self.dash.goto("bkp")                                   # Bot 4.8.3 : « ✍️ J'attends ton mot de passe » dans l'écran
         elif sub == "bkplain":
             self.awaiting_token = ""
             self.ctx.db.meta_set("backup_plain", "1")
@@ -263,9 +261,7 @@ class Router:
         elif sub in ("kset", "bkt") and (sub == "bkt" or (len(p) > 2 and p[2] in SECRETS)):
             key = "BACKUP_TOKEN" if sub == "bkt" else p[2]
             self.awaiting_token = key
-            self.dash.goto("key")
-            self.dash.flash(f"🔑 Envoie la valeur de <b>{key}</b> ({SECRETS[key][1]}). Ton message est effacé aussitôt ; "
-                            "envoie « effacer » pour la retirer.", 300)
+            self.dash.goto("bkp" if key == "BACKUP_TOKEN" else "key")   # Bot 4.8.3 : la consigne est dans l'écran
         elif sub == "rz":                                       # Bot 3.17.0 : ♻️ réinitialiser (double confirmation)
             return await self._ask("♻️ <b>Réinitialiser le serveur ?</b>\n"
                                    "Supprime <b>tous les comptes de ce serveur</b> (terminaux arrêtés, dossiers effacés), le terminal "
@@ -1198,12 +1194,12 @@ class Router:
         """Clé de .env reçue par message (déjà effacé de la conversation) : vérifiée, écrite, prise en compte tout de suite."""
         from core import envfile
         from .system import BOT_ROOT
-        self.dash.goto("key")
+        self.dash.goto("bkp" if key == "BACKUP_TOKEN" else "key")
         attr, hint, pattern = SECRETS[key]
         clear = value.lower() in ("effacer", "supprimer", "-")
         if not clear and not re.fullmatch(pattern, value):
-            self.dash.flash(f"❌ Valeur refusée pour {key} : attendu {hint}.")
-            await self.dash.refresh(force=True)
+            self.dash.flash(f"❌ Ce n'est pas un {key} valide ({hint}) : touche à nouveau 🔑 pour réessayer.")
+            await self.dash.show()
             return
         value = "" if clear else value
         try:
@@ -1225,24 +1221,23 @@ class Router:
             self.ctx.db.meta_set("ghb_hash", "")
             self.ctx.db.meta_set("ghb_err", "")
             self.dash.goto("bkp")
-            self.dash.flash("⏳ Jeton enregistré : recherche ou création du dépôt privé de sauvegarde…")
-            await self.dash.refresh(force=True)
+            self.dash.flash("⏳ Jeton reçu : je cherche ou crée ton dépôt privé…")
+            await self.dash.show()
             if not await self.backup_ready():
-                msg = f"❌ {esc(self.ctx.db.meta_get('ghb_err') or 'dépôt de sauvegarde indisponible')}"
+                msg = f"❌ Dépôt de sauvegarde : {esc(self.ctx.db.meta_get('ghb_err') or 'indisponible')}"
             elif not self.ctx.cfg.backup_key and self.ctx.db.meta_get("backup_plain") != "1":
                 self.awaiting_token = "BACKUP_PASSWORD"
-                msg = (f"✅ Dépôt privé <b>{esc(self.ctx.cfg.backup_repo)}</b> prêt.\n🔒 Envoie maintenant un <b>mot de passe</b> "
-                       "(8 caractères au moins) pour chiffrer la sauvegarde — ou touche « Sans chiffrement ».")
+                msg = f"✅ Jeton OK, dépôt privé <b>{esc(self.ctx.cfg.backup_repo)}</b> prêt. Étape suivante : le mot de passe."
             else:
                 await self.backup_presets()
                 await self.full_backup()
                 err = self.ctx.db.meta_get("ghb_err") or self.ctx.db.meta_get("fbk_err")
                 msg = f"❌ {esc(err)}" if err else f"✅ Sauvegarde active dans <b>{esc(self.ctx.cfg.backup_repo)}</b>."
             self.dash.flash(msg, 300)
-            await self.dash.refresh(force=True)
+            await self.dash.show()
             return
         self.dash.flash(msg)
-        await self.dash.refresh(force=True)
+        await self.dash.show()
 
     async def _server_cb(self, sub: str, p: list[str]) -> str:
         from core import server as sv
@@ -1547,6 +1542,8 @@ class Router:
         today = time.strftime("%Y-%m-%d")
         if db.meta_get("bkp_conflict_ask") != today:
             db.meta_set("bkp_conflict_ask", today)
+            if self.dash.screen[0] == "bkp":                    # Bot 4.8.3 : l'écran Sauvegarde le montre déjà (pas de doublon)
+                return False
             await self.sender.send(
                 self.chat_id, f"☁️ <b>Une sauvegarde existe déjà</b> dans <b>{esc(ghbackup.repo(self.ctx.cfg))}</b> "
                 "(serveur précédent). Je ne l'écrase pas.\n• <b>☁️ Restaurer</b> : la récupérer sur ce serveur (son mot de "
@@ -1737,8 +1734,8 @@ class Router:
         self.dash.goto("bkp")
         if len(pw) < 8:
             self.awaiting_token = "BACKUP_PASSWORD"
-            self.dash.flash("❌ 8 caractères au moins. Renvoie un mot de passe.", 300)
-            await self.dash.refresh(force=True)
+            self.dash.flash("❌ Trop court : 8 caractères au moins.", 300)
+            await self.dash.show()
             return
         key = await asyncio.to_thread(crypt.new_key, pw)
         del pw
@@ -1746,22 +1743,21 @@ class Router:
             await asyncio.to_thread(envfile.set_key, BOT_ROOT / ".env", "BACKUP_KEY", key)
         except (OSError, ValueError) as exc:
             self.dash.flash(f"❌ .env non modifié : {esc(str(exc))}")
-            await self.dash.refresh(force=True)
+            await self.dash.show()
             return
         self.ctx.cfg.backup_key = key
         self.ctx.db.meta_set("ghb_hash", "")
         self.ctx.db.add_action("", "SAUVEGARDE CHIFFRÉE", True, "")
-        self.dash.flash("⏳ 🔒 Chiffrement activé : nouvelle sauvegarde complète…")
-        await self.dash.refresh(force=True)
+        self.dash.flash("⏳ Mot de passe reçu : chiffrement activé, première sauvegarde en cours…")
+        await self.dash.show()
         err = await self.full_backup()
         await self.backup_presets()
         if err == self.BKP_WAIT:
             self.dash.flash("✅ Chiffrement prêt. Une sauvegarde d'un serveur précédent existe déjà : rien n'a été écrasé. "
                             "☁️ Restaurer la récupère (avec SON mot de passe).", 600)
         else:
-            self.dash.flash("✅ Sauvegarde chiffrée envoyée. <b>Note ce mot de passe</b> : sans lui, impossible de restaurer sur "
-                            "un nouveau serveur." if not err else f"❌ {esc(err)}")
-        await self.dash.refresh(force=True)
+            self.dash.flash("✅ Sauvegarde chiffrée envoyée. <b>Note ce mot de passe</b>." if not err else f"❌ {esc(err)}", 600)
+        await self.dash.show()
 
     async def backup_presets(self) -> None:
         """Toutes les 5 min : presets changés → réécrits sur GitHub (chiffrés si activé ; une alerte par problème)."""
