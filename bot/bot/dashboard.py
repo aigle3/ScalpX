@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import asyncio
 import logging
 import time
 
@@ -51,6 +52,7 @@ class Dashboard:
         self._last_edit = 0.0
         self._retry_until = 0.0
         self._covered_at: float | None = None               # depuis quand un autre message est sous le tableau de bord
+        self._lock = asyncio.Lock()                         # Bot 4.8.6 : une seule publication / mise à jour à la fois
         self._covered_by = 0                                # Bot 4.8.3 : message qui l'a recouvert (effacé ensuite → plus recouvert)
         self.waiting = lambda: ""                           # Bot 4.8.3 : saisie attendue (jeton / mot de passe), fournie par le routeur
         self.bt = None                                      # mt5.backtester.BacktestManager (branché par le routeur)
@@ -475,10 +477,11 @@ class Dashboard:
 
     async def ensure(self) -> int:
         """S'assure que le message du tableau de bord existe (le recrée s'il a disparu)."""
-        mid = int(self.ctx.db.meta_get("dash_msg_id", "0") or 0)
-        if mid:
-            return mid
-        return await self._create()
+        async with self._lock:
+            mid = int(self.ctx.db.meta_get("dash_msg_id", "0") or 0)
+            if mid:
+                return mid
+            return await self._create()
 
     async def _create(self) -> int:
         text, kb = self.render()
@@ -502,31 +505,45 @@ class Dashboard:
 
     async def show(self) -> None:
         """Bot 4.8.3 : écran en cours affiché EN BAS de la conversation (republié s'il est recouvert, sans revenir à l'accueil)."""
-        if self.is_last:
-            await self.refresh(force=True)
-        else:
-            await self.bring_down(home=False)
+        async with self._lock:
+            if self.is_last:
+                await self._refresh(force=True)
+            else:
+                await self._bring_down(home=False)
 
     @property
     def is_last(self) -> bool:
         return self._covered_at is None
 
     async def bring_down(self, home: bool = True) -> int:
-        """Remet le tableau de bord EN BAS de la conversation : ancien message supprimé, nouveau envoyé (silencieux)."""
+        """Remet le tableau de bord EN BAS de la conversation : ancien message supprimé, nouveau envoyé (silencieux).
+        Bot 4.8.6 : sous verrou — sinon la mise à jour automatique et un appui simultanés en créaient 2 ou 3."""
+        async with self._lock:
+            return await self._bring_down(home)
+
+    async def _bring_down(self, home: bool = True) -> int:
         old = int(self.ctx.db.meta_get("dash_msg_id", "0") or 0)
         if home:
             self.screen = ("dash",)
         self.ctx.db.meta_set("dash_msg_id", "0")
         mid = await self._create()
-        if old:
+        if old and old != mid:
             try:
                 await self.sender.delete(self.chat_id, old)
-            except Exception as exc:
+            except Exception as exc:                      # trop ancien (> 48 h) : vidé, pour ne pas laisser de vieux boutons
                 log.warning("ancien tableau de bord non supprimé : %s", exc)
+                try:
+                    await self.sender.edit(self.chat_id, old, "⬇️ Tableau de bord plus bas.", None)
+                except Exception:
+                    pass
         return mid
 
     async def refresh(self, force: bool = False, retry_after: float = 0.0) -> str:
         """Met à jour le message. Retourne 'edit', 'skip', 'same', 'recreated' ou 'wait'."""
+        async with self._lock:
+            return await self._refresh(force, retry_after)
+
+    async def _refresh(self, force: bool = False, retry_after: float = 0.0) -> str:
         now = time.time()
         if now < self._retry_until:
             return "wait"
@@ -538,7 +555,7 @@ class Dashboard:
         if not force and self._covered_at is not None:
             if now - self._covered_at >= cfg.repost_s:                      # recouvert depuis 5 min : republié en bas
                 # republié en bas en revenant à l'accueil : un rapport (labo, backtest…) laissé ouvert n'est pas renvoyé tout seul
-                await self.bring_down(home=self.screen[0] in ("sst", "wdr", "opt"))
+                await self._bring_down(home=self.screen[0] in ("sst", "wdr", "opt"))
                 return "recreated"
             return "skip"                                                   # recouvert : plus d'éditions automatiques
         if not force and now - self._last_edit < cfg.refresh_s:

@@ -1891,3 +1891,31 @@ async def test_double_appui_sur_un_bouton_ne_double_jamais_l_action(svc, monkeyp
     await router.on_callback("d:close", 101)                           # ✖ Fermer sur deux messages différents : les deux
     await router.on_callback("d:close", 102)
     assert closed == [101, 102]
+
+
+async def test_tableau_de_bord_jamais_publie_en_double(svc):
+    """Bot 4.8.6 : republication en bas + mise à jour automatique + appui simultanés → UN seul tableau de bord
+    (avant : 1, 2 ou 3 messages selon le hasard)."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    await dash.ensure()
+    real_send = sender.send
+    created = []
+
+    async def slow_send(chat, text, kb=None, silent=False):
+        await asyncio.sleep(0.05)                                         # réseau : laisse les autres tâches passer
+        mid = await real_send(chat, text, kb, silent)
+        created.append(mid)
+        return mid
+    sender.send = slow_send
+    deleted = []
+    real_del = sender.delete
+
+    async def dele(chat, mid):
+        deleted.append(mid)
+        return await real_del(chat, mid)
+    sender.delete = dele
+    dash.note_message(10 ** 9)
+    dash._covered_at -= 10 ** 6                                            # recouvert depuis longtemps : à republier
+    await asyncio.gather(dash.bring_down(home=False), dash.refresh(), dash.show(), dash.refresh(force=True))
+    alive = [m for m in created if m not in deleted]
+    assert len(alive) == 1 and int(ctx.db.meta_get("dash_msg_id")) == alive[0]
