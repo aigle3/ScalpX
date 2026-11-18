@@ -260,6 +260,8 @@ if [ -f "$BASE/terminal64.exe" ] && [ ! -f "$RF_MARK" ] && [ -n "$ROBO_SETUP" ];
         [ -f "$BASE/Config/servers.dat" ] && [ ! -f "$BASE/Config/servers.dat.metaquotes" ] && cp -a "$BASE/Config/servers.dat" "$BASE/Config/servers.dat.metaquotes"
         install -o "$U" -g "$U" -m 644 "$sd" "$BASE/Config/servers.dat"
         touch "$RF_MARK"; chown "$U:$U" "$RF_MARK"
+        as_u mkdir -p "$BASE/Config/brokers"                       # liste par courtier (le bot la copie dans chaque compte)
+        install -o "$U" -g "$U" -m 644 "$sd" "$BASE/Config/brokers/roboforex.dat"
         ok "serveurs RoboForex ajoutés à BASE"
     else
         warn "serveurs RoboForex introuvables : les comptes RoboForex ne pourront pas se connecter (relance 🔧 plus tard)"

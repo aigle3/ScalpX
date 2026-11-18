@@ -256,7 +256,7 @@ class Dashboard:
         if pages > 1:
             kb.append([("◀", f"d:p:{self.page - 1}"), (f"{self.page + 1}/{pages}", "d:r"), ("▶", f"d:p:{self.page + 1}")])
         kb.append([("⬅ Accueil", "d:home"), ("➕ Nouveau compte", "n")])
-        kb.append([("📄 Ajouter des comptes (fichier)", "d:bulk")])                 # Bot 3.20.0
+        kb.append([("📄 Ajouter des comptes (fichier)", "d:bulk"), ("🏦 Courtiers", "d:brk")])  # Bot 3.20.0 / 4.7.0
         return self._with_flash(text), kb
 
     def _render_actions(self) -> tuple[str, Keyboard]:

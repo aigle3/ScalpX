@@ -56,6 +56,7 @@ class Router:
         self.awaiting_preset: tuple[str, str] | None = None   # (compte modèle, preset remplacé) : nom attendu (texte)
         self.awaiting_goal: str | None = None               # compte (ou ALL_ID) dont on attend l'objectif (message texte)
         self.awaiting_import = False                        # Bot 3.16.0 : fichier / texte de presets attendu (📥 Importer)
+        self.awaiting_broker = ""                           # Bot 4.7.0 : "" | "name" | "url:<serveur>"
         self.awaiting_cmd = False                           # Bot 4.6.0 : 💻 commande attendue (message texte)
         self._pending_import = self._pending_restore = b""   # Bot 4.2.0 : fichier chiffré en attente de son mot de passe
         self.awaiting_token = ""                            # Bot 3.18.0 : clé de .env attendue (message texte), ex. BACKUP_TOKEN
@@ -90,6 +91,8 @@ class Router:
         """Traite un callback_data. Renvoie un court texte pour query.answer()."""
         parts = data.split(":")
         head = parts[0]
+        if self.awaiting_broker and data not in ("d:brkadd",):
+            self.awaiting_broker = ""                           # Bot 4.7.0 : autre bouton → ajout de courtier abandonné
         if self.awaiting_cmd and data != "d:shc":
             self.awaiting_cmd = False                           # Bot 4.6.0 : autre bouton → plus de commande attendue
         if self.awaiting_token and data not in ("d:bkp", "d:key", "d:noop"):
@@ -220,6 +223,12 @@ class Router:
             self.dash.flash("☁️ Sauvegarde sans chiffrement (dépôt privé) : 🔒 Chiffrer reste possible ici.")
             self._bg(self._after_plain())
             return ""
+        elif sub == "brk":                                      # Bot 4.7.0 : 🏦 courtiers connus
+            await self.brokers_screen()
+        elif sub == "brkadd":
+            self.awaiting_broker = "name"
+            await self.sender.send(self.chat_id, "🏦 <b>Ajouter un courtier</b> — 1/2 : envoie le <b>nom d'un serveur</b> de ce "
+                                   "courtier, tel qu'il s'écrit dans MT5 (ex. <code>Exness-MT5Real8</code>).", None, False)
         elif sub == "shc":                                      # Bot 4.6.0 : 💻 exécuter une commande sur le serveur
             self.awaiting_cmd = True
             self.dash.goto("srv")
@@ -485,6 +494,9 @@ class Router:
                 await self.dash.refresh(force=True)
                 return
             await self._goal_confirm(inst, v.replace(",", "."))
+            return
+        if self.awaiting_broker:
+            await self._broker_text(text)
             return
         if self.awaiting_cmd:
             self.awaiting_cmd = False
@@ -1431,6 +1443,48 @@ class Router:
             await self.sender.send(self.chat_id, f"⚠️ Préparation de MT5 : {esc(str(exc))}", None, True)
         finally:
             self._base_preparing = False
+
+    async def brokers_screen(self) -> None:
+        """Bot 4.7.0 : courtiers dont le bot a la liste de serveurs (création de compte possible)."""
+        from mt5 import brokers
+        base = self.ctx.cfg.paths.base
+        brokers.migrate(base)
+        names = brokers.known(base)
+        lst = ", ".join(f"<b>{esc(n)}</b>" for n in names) or "aucun"
+        await self.sender.send(
+            self.chat_id, f"🏦 <b>Courtiers connus</b> : {lst}\nUn compte ne peut être créé que si le début de son nom de serveur "
+            "correspond à un courtier connu (<code>RoboForex-Pro</code> → roboforex). Autre courtier : ➕ avec le lien de son "
+            "installeur MT5 pour PC (le bot l'installe à part, garde sa liste de serveurs, puis le supprime).",
+            [[("➕ Ajouter un courtier", "d:brkadd"), ("✖️ Fermer", "d:close")]], False)
+
+    async def _broker_text(self, text: str) -> None:
+        from mt5 import brokers
+        t = text.strip()
+        if self.awaiting_broker == "name":
+            if not brokers.key_of(t) or len(t) > 60 or " " in t:
+                await self.sender.send(self.chat_id, "❌ Nom de serveur invalide (ex. <code>Exness-MT5Real8</code>), renvoie-le.",
+                                       None, False)
+                return
+            self.awaiting_broker = "url:" + t
+            await self.sender.send(self.chat_id, "🏦 2/2 : envoie le <b>lien de l'installeur MT5 pour PC</b> de ce courtier (bouton "
+                                   "« Télécharger pour PC / Windows » de son site, <code>https://…</code>).", None, False)
+            return
+        server = self.awaiting_broker[4:]
+        self.awaiting_broker = ""
+        if not t.startswith("https://"):
+            await self.sender.send(self.chat_id, "❌ Le lien doit commencer par https:// : 🏦 Courtiers → ➕ pour recommencer.",
+                                   None, False)
+            return
+        k = brokers.key_of(server)
+        self.ctx.db.add_action("", "AJOUT COURTIER", True, f"{k} · {t[:120]}")
+        await self.sender.send(self.chat_id, f"⏳ Installation à part du MT5 du courtier <b>{esc(k)}</b> pour récupérer sa liste de "
+                               "serveurs (2 à 10 min). BASE et les comptes ne sont pas touchés.", None, True)
+
+        async def go() -> None:
+            ok, msg = await asyncio.to_thread(brokers.add_from_installer, self.ctx.cfg, t, server)
+            await self.sender.send(self.chat_id, (f"✅ Courtier <b>{esc(k)}</b> ajouté : tu peux créer ses comptes." if ok else
+                                                  f"❌ Courtier non ajouté : {esc(msg)}"), None, True)
+        asyncio.get_running_loop().create_task(go())
 
     SHELL_TIMEOUT_S = 120.0
 

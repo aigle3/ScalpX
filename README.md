@@ -32,6 +32,7 @@ Un seul VPS Ubuntu · un terminal MT5 par compte · un bot Telegram central · z
 |---|---|
 | 🤖 **Un bot pour tous les comptes** | Ajoute, démarre, arrête, règle et surveille chaque compte MT5 par boutons Telegram. |
 | 🖥 **Un seul serveur Ubuntu** | MT5 tourne sous Wine, sans écran (Xvfb) ; tout redémarre seul après un reboot. |
+| 🏦 **Tous courtiers MT5** | RoboForex prêt d'office ; tout autre courtier s'ajoute depuis Telegram avec le lien de son installeur MT5 pour PC. |
 | 🪶 **Terminaux légers** | Aucun affichage sur les graphiques MT5 (masqués) : tout se lit et se règle dans Telegram. |
 | 💾 **Presets** | Réglages nommés (ex. « Martin ») appliqués à un ou plusieurs comptes, importés / exportés par fichier. |
 | 🤖 **Optimiseur nocturne automatique** | Chaque nuit, il teste une catégorie de réglages sur l'historique et applique tout seul la meilleure variante sûre à « Martin » et à tous les comptes ; Telegram affiche ancienne → nouvelle valeur. |
@@ -114,6 +115,7 @@ flowchart TD
 | Ajouter plusieurs comptes d'un coup | 👥 Comptes → 📄 Ajouter des comptes (fichier) : texte, une ligne `numéro:mot de passe:serveur` par compte (créés 2 par 2) |
 | Appliquer mes réglages | ⚡ Actions → 💾 Presets → choisir le preset → 📤 Appliquer à tous les robots |
 | Importer / exporter des presets | 💾 Presets → 📥 Importer (fichier ou texte) / 📤 Tout exporter ; un seul : 📤 Exporter (fichier) |
+| Utiliser un autre courtier que RoboForex | 👥 Comptes → 🏦 Courtiers → ➕ : un nom de serveur (ex. `Exness-MT5Real8`) puis le lien « Télécharger pour PC » de son site |
 | Installer une mise à jour | 🛠 Système → ⬆ Mises à jour (🔔 quand une version attend) |
 | Voir le serveur | 🛠 Système → 🖥 Serveur (CPU, RAM, disque, processus) |
 | Redémarrer le VPS | 🖥 Serveur → 🔁 Redémarrer le VPS (confirmation) |

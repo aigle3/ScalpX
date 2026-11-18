@@ -245,3 +245,6 @@ def _base_prete(monkeypatch, request):
         return
     from mt5 import prepare
     monkeypatch.setattr(prepare, "is_ready", lambda base, exe: True)
+    if "courtier" not in request.node.name:                 # Bot 4.7.0 : tous les courtiers connus (sauf tests dédiés)
+        from mt5 import brokers
+        monkeypatch.setattr(brokers, "has", lambda base, server: True)

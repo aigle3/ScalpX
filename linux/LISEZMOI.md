@@ -56,6 +56,13 @@ sudo -u scalpx bash -c 'cd ~/scalpx/bot && .venv/bin/python main.py --check'   #
 - Redémarrage du bot (mise à jour, bouton 🔄) : le bot s'arrête et systemd le relance. Les terminaux continuent de tourner.
 - Le VPS redémarre : Xvfb puis le bot démarrent seuls, et le bot relance les terminaux.
 
+## Courtiers
+Un terminal MT5 ne se connecte qu'aux serveurs listés dans son `Config/servers.dat`, fourni par l'installeur MT5 DU courtier.
+L'installation prend l'installeur RoboForex (liste RoboForex prête). Autre courtier : 👥 Comptes → 🏦 Courtiers → ➕
+(nom d'un serveur + lien de l'installeur MT5 pour PC) : le bot l'installe à part dans Wine, garde sa liste dans
+`BASE/Config/brokers/<courtier>.dat`, puis le supprime ; chaque compte reçoit la liste de SON courtier
+(début du nom de serveur : `Exness-MT5Real8` → exness). Création refusée pour un courtier inconnu.
+
 ## Sauvegarde sur GitHub (privée, sur TON compte, chiffrée)
 🛠 Système → ☁️ Sauvegarde GitHub, ou le bouton ✅ Activer proposé après l'installation :
 1. Crée un **jeton classique** (github.com → Settings → Developer settings → Personal access tokens → Tokens (classic),

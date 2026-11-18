@@ -1814,3 +1814,24 @@ async def test_commande_serveur_confirmee_puis_executee(svc):
     router.SHELL_TIMEOUT_S = 0.5
     await router._shell_run("sleep 5")
     assert "arrêtée au bout" in sender.all_text()
+
+
+async def test_ajout_d_un_courtier_depuis_telegram(svc, monkeypatch):
+    """Bot 4.7.0 : 🏦 Courtiers → ➕ → nom de serveur → lien de l'installeur → liste de serveurs ajoutée."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    from mt5 import brokers
+    calls = []
+    monkeypatch.setattr(brokers, "add_from_installer", lambda cfg, url, server: calls.append((url, server)) or (True, "ok"))
+    await router.on_callback("d:brk")
+    assert "Courtiers connus" in sender.all_text()
+    await router.on_callback("d:brkadd")
+    await router.on_text("pas un serveur avec espaces")
+    assert router.awaiting_broker == "name"
+    await router.on_text("Exness-MT5Real8")
+    await router.on_text("http://pas-https")
+    assert not calls and "https://" in sender.all_text()
+    await router.on_callback("d:brkadd")
+    await router.on_text("Exness-MT5Real8")
+    await router.on_text("https://exemple/exness5setup.exe")
+    assert await _until(lambda: calls == [("https://exemple/exness5setup.exe", "Exness-MT5Real8")]
+                        and "Courtier <b>exness</b> ajouté" in sender.all_text())

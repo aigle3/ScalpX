@@ -76,21 +76,3 @@ def test_creation_refusee_tant_que_base_pas_prete(tmp_path, monkeypatch):
     monkeypatch.setattr(basemod, "check_base", lambda cfg: [])
     msg = cr.precheck("12345", "Demo-Server")
     assert msg and "MT5 se prépare" in msg
-
-
-def test_creation_roboforex_refusee_sans_serveurs_roboforex(tmp_path, monkeypatch):
-    """Bot 4.6.2 : BASE venu de l'installeur MetaQuotes (sans serveurs RoboForex) → création RoboForex refusée."""
-    from mt5 import base as basemod
-    from mt5.creator import InstanceCreator
-    monkeypatch.setattr(prepare, "is_ready", lambda base, exe: True)
-    monkeypatch.setattr(basemod, "check_base", lambda cfg: [])
-    monkeypatch.setattr(basemod, "folder_size_gb", lambda p: 0.0)
-    monkeypatch.setattr(basemod, "free_disk_gb", lambda p: 100.0)
-    cr = InstanceCreator.__new__(InstanceCreator)
-    cr.cfg = SimpleNamespace(paths=SimpleNamespace(base=tmp_path, instances=tmp_path / "inst"),
-                             mt5=SimpleNamespace(terminal_exe="t.exe"), alerts=SimpleNamespace(min_disk_gb=0))
-    cr.db = SimpleNamespace(exists_active=lambda iid: False)
-    assert "Serveurs RoboForex absents" in cr.precheck("12345", "RoboForex-Pro")
-    assert cr.precheck("12345", "Autre-Server") is None
-    (tmp_path / ".scalpx_serveurs_roboforex").touch()
-    assert cr.precheck("12345", "RoboForex-Pro") is None

@@ -61,9 +61,10 @@ class InstanceCreator:
         if not prepare.is_ready(self.cfg.paths.base, self.cfg.mt5.terminal_exe):
             return ("MT5 se prépare (compilation de départ du dossier BASE, 2 à 10 min) : réessaie quand le bot annonce "
                     "« ✅ MT5 prêt ». Sans ça, chaque compte refait cette compilation à 100 % de CPU.")
-        if server.lower().startswith("roboforex") and not (self.cfg.paths.base / ".scalpx_serveurs_roboforex").exists():
-            return ("Serveurs RoboForex absents du MT5 de BASE (installé depuis l'installeur MetaQuotes) : le compte ne "
-                    "pourrait pas se connecter. 🛠 Système → 🔧 Installation système les ajoute, sans toucher aux comptes.")
+        from . import brokers                                  # Bot 4.7.0 : liste de serveurs du courtier connue ?
+        brokers.migrate(self.cfg.paths.base)
+        if not brokers.has(self.cfg.paths.base, server):
+            return brokers.missing_message(server)
         need = max(self.cfg.alerts.min_disk_gb, basemod.folder_size_gb(self.cfg.paths.base) * 1.5)
         free = basemod.free_disk_gb(self.cfg.paths.instances)
         if free < need:
@@ -176,6 +177,8 @@ class InstanceCreator:
             await progress("📁 Copie de BASE…")
             self.cfg.paths.instances.mkdir(parents=True, exist_ok=True)
             await asyncio.to_thread(basemod.copy_base, self.cfg.paths.base, dest)
+            from . import brokers
+            brokers.apply(self.cfg.paths.base, server, dest)     # Bot 4.7.0 : serveurs du courtier de CE compte
             st, last = await self._attempt(inst, password, progress)
         except IniError as exc:
             return await self._fail(inst, "Données invalides : " + mask(str(exc), password))
@@ -310,6 +313,9 @@ class InstanceCreator:
             return CreateResult(False, "BASE non conforme : " + " ; ".join(problems), inst.id)
         await progress("📁 Copie de BASE…")
         await asyncio.to_thread(basemod.copy_base, self.cfg.paths.base, Path(inst.folder))
+        from . import brokers
+        brokers.migrate(self.cfg.paths.base)
+        brokers.apply(self.cfg.paths.base, inst.server, Path(inst.folder))   # Bot 4.7.0
         st, last = await self._attempt(inst, password, progress)
         if st is None:
             await self.mgr.stop(inst, force=True, set_desired=ARRETE)
