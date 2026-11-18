@@ -20,13 +20,25 @@ json() { python3 -c "import json,sys; d=json.load(sys.stdin); print(eval(sys.arg
 [ "$(id -u)" -eq 0 ] || die "lance avec sudo : curl -fsSL …/installer.sh | sudo bash"
 command -v curl >/dev/null && command -v python3 >/dev/null || { apt-get update -qq && apt-get install -y -qq curl python3 >/dev/null; }
 
+# Appels réseau toujours limités dans le temps ; 2e essai forcé en IPv4 (IPv6 du serveur souvent mal configurée).
+net() { curl -fsS --connect-timeout 10 --max-time 20 "$@" || curl -4 -fsS --connect-timeout 10 --max-time 20 "$@"; }
+
 say "=== ScalpX : installation rapide"
 echo "  Dans Telegram : @BotFather → /newbot → copie le TOKEN. Ton chat_id : écris à @userinfobot."
+say "=== Connexion à Telegram…"
+curl -s --connect-timeout 10 --max-time 20 -o /dev/null "$API" || curl -4 -s --connect-timeout 10 --max-time 20 -o /dev/null "$API" \
+    || die "Telegram injoignable depuis ce serveur (api.telegram.org) : vérifie la connexion Internet / le DNS du VPS, puis relance"
 TOK=""
 for _ in 1 2 3; do
     TOK=$(ask "Token du bot Telegram :")
-    [[ "$TOK" =~ ^[0-9]{6,}:[A-Za-z0-9_-]{30,}$ ]] && [ "$(curl -fsS "$API/bot$TOK/getMe" | json "d['ok']")" = "True" ] && break
-    echo "  token refusé par Telegram, recommence"; TOK=""
+    TOK="${TOK//[[:space:]]/}"
+    if [[ ! "$TOK" =~ ^[0-9]{6,}:[A-Za-z0-9_-]{30,}$ ]]; then
+        echo "  ce n'est pas un token (forme 123456789:AA…), recommence"; TOK=""; continue
+    fi
+    echo "  vérification du token auprès de Telegram…"
+    R=$(net "$API/bot$TOK/getMe" 2>/dev/null || true)
+    [ "$(echo "$R" | json "d['ok']")" = "True" ] && { echo "  ✅ bot @$(echo "$R" | json "d['result']['username']")"; break; }
+    echo "  token refusé par Telegram (ou révoqué), recommence"; TOK=""
 done
 [ -n "$TOK" ] || die "token Telegram requis"
 CHAT=""
@@ -40,6 +52,9 @@ done
 D=$(mktemp -d /root/scalpx-paquet.XXXXXX)
 trap 'rm -rf "$D"' EXIT
 say "=== Téléchargement de ScalpX (version validée)…"
-curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/stable" | tar xz -C "$D" --strip-components=1
+{ curl -fsSL --connect-timeout 15 --max-time 600 "https://codeload.github.com/$REPO/tar.gz/refs/heads/stable" \
+  || curl -4 -fsSL --connect-timeout 15 --max-time 600 "https://codeload.github.com/$REPO/tar.gz/refs/heads/stable"; } \
+  | tar xz -C "$D" --strip-components=1 \
+  || die "téléchargement impossible (dépôt $REPO pas encore public, ou GitHub injoignable)"
 [ -f "$D/linux/install.sh" ] || die "paquet incomplet"
 TELEGRAM_TOKEN="$TOK" ALLOWED_CHAT_IDS="$CHAT" bash "$D/linux/install.sh"
