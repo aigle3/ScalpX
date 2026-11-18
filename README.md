@@ -32,6 +32,7 @@ Un seul VPS Ubuntu · un terminal MT5 par compte · un bot Telegram central · z
 |---|---|
 | 🤖 **Un bot pour tous les comptes** | Ajoute, démarre, arrête, règle et surveille chaque compte MT5 par boutons Telegram. |
 | 🖥 **Un seul serveur Ubuntu** | MT5 tourne sous Wine, sans écran (Xvfb) ; tout redémarre seul après un reboot. |
+| 🪶 **Terminaux légers** | Aucun affichage sur les graphiques MT5 (masqués) : tout se lit et se règle dans Telegram. |
 | 💾 **Presets** | Réglages nommés (ex. « Martin ») appliqués à un ou plusieurs comptes, importés / exportés par fichier. |
 | 🧪 **Backtests et optimiseur** | Le testeur MT5 est lancé par le bot ; l'optimiseur propose des réglages, c'est toi qui valides. |
 | ⬆ **Mises à jour en un clic** | Chaque version testée est proposée dans Telegram ; rien ne s'installe sans ton accord. |
@@ -111,8 +112,8 @@ flowchart TD
 |---|---|
 | Ajouter un compte | 👥 Comptes → ➕ Nouveau compte (numéro, mot de passe, serveur) |
 | Ajouter plusieurs comptes d'un coup | 👥 Comptes → 📄 Ajouter des comptes (fichier) : texte, une ligne `numéro:mot de passe:serveur` par compte (créés 2 par 2) |
-| Appliquer mes réglages | ⚡ Actions → 💾 Presets → choisir le preset → appliquer |
-| Importer / exporter des presets | 💾 Presets → 📥 Importer (fichier ou texte) / 📤 Exporter |
+| Appliquer mes réglages | ⚡ Actions → 💾 Presets → choisir le preset → 📤 Appliquer à tous les robots |
+| Importer / exporter des presets | 💾 Presets → 📥 Importer (fichier ou texte) / 📤 Tout exporter ; un seul : 📤 Exporter (fichier) |
 | Installer une mise à jour | 🛠 Système → ⬆ Mises à jour (🔔 quand une version attend) |
 | Voir le serveur | 🛠 Système → 🖥 Serveur (CPU, RAM, disque, processus) |
 | Redémarrer le VPS | 🖥 Serveur → 🔁 Redémarrer le VPS (confirmation) |
@@ -166,7 +167,7 @@ sequenceDiagram
 | Quoi | Quand | Fichier |
 |---|---|---|
 | Presets | à chaque modification | `presets.enc` |
-| Sauvegarde complète (historique, optimiseur, presets) | chaque nuit, ou ☁️ Sauvegarder | `sauvegarde.enc` |
+| Sauvegarde complète (historique, optimiseur, presets) | chaque nuit, ou ☁️ Sauvegarder maintenant | `sauvegarde.enc` |
 | Copie locale de la base | chaque nuit (14 gardées) | `data/backups` sur le VPS |
 
 > [!CAUTION]
