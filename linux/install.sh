@@ -103,17 +103,20 @@ ok "Xvfb actif"
 # ---------------------------------------------------------------- 3. préfixe Wine
 step "3/7  Préfixe Wine ($PFX)"
 if [ ! -f "$PFX/system.reg" ]; then
-    as_u wineboot -i >/dev/null 2>&1 || true
-    as_u wineserver -w || true
+    echo "  Création du préfixe Wine (1 à 3 min)…"
+    # Pas de fenêtre « installer Wine Mono / Gecko » : sur l'écran virtuel personne ne la voit et wineboot attendait
+    # sans fin (MT5 n'en a pas besoin). Attentes toujours bornées.
+    as_u env WINEDLLOVERRIDES="mscoree=;mshtml=" timeout 300 wineboot -i >/dev/null 2>&1 || warn "wineboot : délai dépassé, on continue"
+    as_u timeout 60 wineserver -w || as_u wineserver -k || true
 fi
 # comme le script Linux officiel de MetaQuotes. Pas de « wineserver -w » ici : à une relance, les terminaux MT5 tournent
 # et il attendrait leur fermeture sans fin (blocage à l'étape 3).
-as_u timeout 120 winecfg -v=win11 >/dev/null 2>&1 || true
+as_u env WINEDLLOVERRIDES="mscoree=;mshtml=" timeout 120 winecfg -v=win11 >/dev/null 2>&1 || true
 [ -f "$PFX/system.reg" ] || die "préfixe Wine non créé"
 ok "préfixe prêt (Windows 11)"
 # L'installeur MT5 exige WebView2 (sinon il s'arrête aussitôt sur une erreur invisible : NtRaiseHardError)
 if ! ls -d "$PFX/drive_c/Program Files (x86)/Microsoft/EdgeWebView" >/dev/null 2>&1; then
-    echo "  Installation de Microsoft WebView2 (requis par l'installeur MT5)…"
+    echo "  Installation de Microsoft WebView2 (requis par l'installeur MT5, 2 à 10 min)…"; tg "🔧 Installation : WebView2 (2 à 10 min)…"
     as_u curl -fsSL -o /tmp/webview2.exe "https://go.microsoft.com/fwlink/p/?LinkId=2124703" || die "téléchargement de WebView2 impossible"
     as_u timeout 600 wine /tmp/webview2.exe /silent /install >/dev/null 2>&1 || true
     pkill -u "$U" -i -f 'msedge|edgeupdate' || true      # services Edge restés lancés (sans toucher aux terminaux MT5)
