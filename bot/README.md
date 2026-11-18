@@ -28,7 +28,7 @@ Voir `linux/LISEZMOI.md` : `sudo bash linux/install.sh` installe tout (Wine, Xvf
 services systemd `scalpx-xvfb` et `scalpx-bot`, droits administrateur limités) et ne demande que le token Telegram et le
 chat_id. Les jetons GitHub et healthchecks.io se donnent ensuite dans Telegram (🛠 Système → 🔑 Clés et jetons).
 
-- `.env` : `TELEGRAM_TOKEN`, `ALLOWED_CHAT_IDS`, `GITHUB_TOKEN` (facultatif, dépôt public), `BACKUP_TOKEN`, `BACKUP_REPO`, `BACKUP_KEY` (clé de chiffrement dérivée du mot de passe), `HEALTHCHECK_URL` (jamais recopiés par les mises à jour).
+- `.env` : `TELEGRAM_TOKEN`, `ALLOWED_CHAT_IDS`, `BACKUP_TOKEN`, `BACKUP_REPO`, `BACKUP_KEY` (clé de chiffrement dérivée du mot de passe), `HEALTHCHECK_URL` (jamais recopiés par les mises à jour).
 - `config.toml` : chemins, `[wine]` (préfixe, écran `:99`, WebView2), symbole/période, délais, `[update]`. Toute option a une valeur par défaut.
 - Production : service systemd `scalpx-bot` (`Restart=always`, `KillMode=process` : un redémarrage du bot ne ferme pas
   les terminaux). Contrôle : `.venv/bin/python main.py --check`. Journaux : `data/logs/bot.log`, `compile.log`, `crash.log`
@@ -121,7 +121,6 @@ Avant chaque lancement, le bot vide le profil `Default` du terminal de l'instanc
 | Création : « compte non connecté » | mot de passe ou nom de serveur différent de celui de MT5 |
 | 🟠 « EA en double » | un graphique de plus porte l'EA dans l'instance |
 | Bot : « Conflit 409 » | un autre bot utilise le même token |
-| Mises à jour : « jeton GitHub refusé » | `GITHUB_TOKEN` (facultatif) expiré : 🔑 Clés et jetons → effacer ou en envoyer un nouveau |
 | Mot de passe changé chez le broker | fiche compte → **🔑 Reconnecter** |
 
 ## Développement

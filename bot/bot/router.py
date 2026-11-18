@@ -29,7 +29,6 @@ log = logging.getLogger(__name__)
 
 # Bot 3.18.0 : clés de .env saisies depuis Telegram : nom → (attribut de Config, description, format accepté)
 SECRETS = {
-    "GITHUB_TOKEN": ("github_token", "facultatif (dépôt public) : jeton GitHub de lecture, mises à jour vérifiées chaque minute au lieu de 5", r"(github_pat_[A-Za-z0-9_]{20,255}|ghp_[A-Za-z0-9]{30,255})"),
     "BACKUP_TOKEN": ("backup_token", "jeton GitHub de sauvegarde des presets, github_pat_…", r"(github_pat_[A-Za-z0-9_]{20,255}|ghp_[A-Za-z0-9]{30,255})"),
     "HEALTHCHECK_URL": ("healthcheck_url", "adresse https://hc-ping.com/…", r"https://[A-Za-z0-9.-]+(/[A-Za-z0-9._~/-]*)?"),
 }
@@ -1242,9 +1241,6 @@ class Router:
             self.dash.flash(msg, 300)
             await self.dash.refresh(force=True)
             return
-        elif key == "GITHUB_TOKEN":
-            self.ctx.db.meta_set("gh_err", "")
-            msg += " Les mises à jour sont vérifiées à la prochaine minute."
         self.dash.flash(msg)
         await self.dash.refresh(force=True)
 

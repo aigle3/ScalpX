@@ -94,7 +94,7 @@ class Runtime(BaseModel):
 
 
 class Update(BaseModel):
-    github: str = ""                       # dépôt « propriétaire/nom » (ex. aigle3/scalpx) ; jeton GITHUB_TOKEN dans .env
+    github: str = ""                       # dépôt « propriétaire/nom » (public, sans jeton)
     branch: str = "main"
     settle_min: int = 2                    # un nouveau commit n'est proposé qu'après N minutes sans autre publication
     validated_only: bool = True            # ne télécharger que la branche « stable » (avancée par GitHub quand les tests passent)
@@ -151,7 +151,6 @@ class Config(BaseModel):
 
     # secrets (depuis .env, jamais depuis config.toml)
     token: str = ""
-    github_token: str = ""
     backup_token: str = ""                 # BACKUP_TOKEN (.env) : jeton GitHub de l'utilisateur pour SA sauvegarde privée
     backup_repo: str = ""                  # BACKUP_REPO (.env) : <login>/scalpx-sauvegarde, choisi à l'activation (Bot 4.2.0)
     backup_key: str = ""                   # BACKUP_KEY (.env) : clé de chiffrement dérivée du mot de passe ('' = non chiffrée)
@@ -183,7 +182,6 @@ def load_config(config_path: Path, env_path: Path | None = None) -> Config:
     if env_path.exists():
         env = parse_env(env_path.read_text(encoding="utf-8-sig"))
     cfg.token = env.get("TELEGRAM_TOKEN", os.environ.get("TELEGRAM_TOKEN", "")).strip()
-    cfg.github_token = env.get("GITHUB_TOKEN", os.environ.get("GITHUB_TOKEN", "")).strip()
     cfg.healthcheck_url = env.get("HEALTHCHECK_URL", os.environ.get("HEALTHCHECK_URL", "")).strip()
     cfg.backup_token = env.get("BACKUP_TOKEN", os.environ.get("BACKUP_TOKEN", "")).strip()
     cfg.backup_repo = env.get("BACKUP_REPO", os.environ.get("BACKUP_REPO", "")).strip()

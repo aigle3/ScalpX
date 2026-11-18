@@ -69,7 +69,7 @@ def setup_logging(cfg: Config, console: bool) -> None:
     if console:
         handlers.append(logging.StreamHandler())
     global SECRETS
-    SECRETS = SecretFilter(cfg.token, cfg.github_token, cfg.healthcheck_url)
+    SECRETS = SecretFilter(cfg.token, cfg.backup_token, cfg.healthcheck_url)
     for h in handlers:
         h.setFormatter(fmt)
         h.addFilter(SECRETS)

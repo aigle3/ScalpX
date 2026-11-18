@@ -102,11 +102,11 @@ def _zip(files: dict[str, bytes]) -> bytes:
 def test_github_telecharge_le_paquet_une_fois_par_commit(tmp_path, cfg):
     import json
     from core import github as gh
-    cfg.update.github, cfg.update.source, cfg.github_token = "aigle3/scalpx", str(tmp_path / "release"), "github_pat_x"
+    cfg.update.github, cfg.update.source = "aigle3/scalpx", str(tmp_path / "release")
     state = {"sha": "s1", "zips": 0}
 
     def http(url, headers):
-        assert headers["Authorization"] == "Bearer github_pat_x"
+        assert "Authorization" not in headers                            # Bot 4.8.1 : dépôt public, aucun jeton
         if url.endswith("/repos/aigle3/scalpx/commits/stable"):           # seulement les publications validées
             return 200, json.dumps({"sha": state["sha"], "commit": {"message": "Ajout pause news\n\ndétails", "committer": {"date": "2026-10-28"}}}).encode()
         if "/zipball/" in url:
@@ -129,11 +129,14 @@ def test_github_telecharge_le_paquet_une_fois_par_commit(tmp_path, cfg):
     assert gh.fetch(cfg, http, force=True).changed and state["zips"] == 2      # bouton « Mises à jour » : immédiat
 
 
-def test_github_jeton_refuse(tmp_path, cfg):
+def test_github_erreurs_sans_jeton(tmp_path, cfg):
+    """Bot 4.8.1 : dépôt public, aucun jeton : limite de requêtes et dépôt non public expliqués."""
     from core import github as gh
     cfg.update.github, cfg.update.source = "aigle3/scalpx", str(tmp_path / "release")
-    r = gh.fetch(cfg, lambda url, h: (401, b""))
-    assert not r.ok and "jeton" in r.error
+    r = gh.fetch(cfg, lambda url, h: (403, b""))
+    assert not r.ok and "limite" in r.error
+    r = gh.fetch(cfg, lambda url, h: (404, b""))
+    assert not r.ok and "public" in r.error
 
 
 def test_fichiers_retires_du_depot_supprimes(tmp_path, cfg):

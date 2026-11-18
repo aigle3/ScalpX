@@ -56,7 +56,7 @@ lock_port = 47653
 log_level = "INFO"
 
 [update]
-github  = "aigle3/ScalpX"        # dépôt des mises à jour (jeton GITHUB_TOKEN en lecture seule, donné dans Telegram)
+github  = "aigle3/ScalpX"        # dépôt des mises à jour (public : aucun jeton)
 branch  = "main"
 source  = "/home/scalpx/scalpx/release"   # copie locale du paquet téléchargé
 check_s = 60

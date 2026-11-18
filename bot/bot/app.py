@@ -495,15 +495,6 @@ async def j_update(context: ContextTypes.DEFAULT_TYPE) -> None:
     if cfg.update.github:
         inst_c = (s.ctx.db.meta_get("installed_commit") or "").split(" ")[0]
         res = await loop.run_in_executor(None, lambda: gh.fetch(cfg, installed=inst_c))
-        if res.token_expires:
-            s.ctx.db.meta_set("gh_token_exp", res.token_expires)
-            left = gh.days_left(res.token_expires)
-            today = time.strftime("%Y-%m-%d")
-            if left is not None and left <= 15 and s.ctx.db.meta_get("gh_exp_alert") != today:
-                s.ctx.db.meta_set("gh_exp_alert", today)                # une alerte par jour
-                await s.sender.send(s.chat_id, f"🔑 Le jeton GitHub expire dans <b>{max(left, 0)} jour(s)</b> ({res.token_expires}).\n"
-                                    "Crée-en un nouveau (lecture seule sur ScalpX) puis donne-le au bot : "
-                                    "🛠 Système → 🔑 Clés et jetons → GITHUB_TOKEN.", [[("🔑 GITHUB_TOKEN", "d:kset:GITHUB_TOKEN")]], True)
         err = "" if res.ok else res.error
         if err != s.ctx.db.meta_get("gh_err"):                    # une alerte par problème, et une à la résolution
             s.ctx.db.meta_set("gh_err", err)
@@ -676,7 +667,7 @@ def build_application(cfg: Config, ctx_factory) -> Application:
     jq.run_repeating(timed(j_opt), interval=60, first=120, job_kwargs=JOB_KW)
     jq.run_repeating(timed(j_build), interval=20, first=40, job_kwargs=JOB_KW)
     # Bot 4.2.0 : dépôt public lu sans jeton → 60 appels GitHub par heure au plus : vérification toutes les 5 min
-    upd_s = max(20, cfg.update.check_s) if cfg.github_token else max(300, cfg.update.check_s)
+    upd_s = max(120, cfg.update.check_s)          # Bot 4.8.1 : dépôt public, sans jeton (60 requêtes/h max chez GitHub)
     jq.run_repeating(timed(j_update), interval=upd_s, first=60, job_kwargs=JOB_KW)
     jq.run_repeating(timed(j_health), interval=60, first=15, job_kwargs=JOB_KW)
     jq.run_daily(timed(j_report), time=dtime(cfg.reports.daily_hour, 0), job_kwargs=JOB_KW_DAILY)

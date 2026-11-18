@@ -1,6 +1,6 @@
 """Téléchargement du paquet depuis un dépôt GitHub privé (lecture seule).
 
-Toutes les check_s secondes : dernier commit de la branche (API GitHub, jeton GITHUB_TOKEN de .env).
+Toutes les check_s secondes : dernier commit de la branche (API GitHub, dépôt public : aucun jeton).
 S'il a changé : archive zip de ce commit téléchargée et extraite dans [update] source (remplacement atomique),
 avec .commit.json (sha, message, date). core.update compare ensuite ce paquet à l'installation.
 """
@@ -43,8 +43,6 @@ def _msg(c: dict) -> str:
 
 def _headers(cfg: Config) -> dict[str, str]:
     h = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "scalpx-bot"}
-    if cfg.github_token:
-        h["Authorization"] = f"Bearer {cfg.github_token}"
     return h
 
 
@@ -72,9 +70,9 @@ def days_left(expires: str, now: float | None = None) -> int | None:
 
 
 def _explain(code: int) -> str:
-    return {401: "jeton GitHub refusé (expiré ou faux : GITHUB_TOKEN dans .env)",
-            403: "accès GitHub refusé (droits du jeton ou limite de requêtes)",
-            404: "dépôt ou branche introuvable (ou jeton sans accès à ce dépôt)"}.get(code, f"erreur GitHub {code}")
+    return {403: "GitHub limite les requêtes (réessai automatique)",
+            429: "GitHub limite les requêtes (réessai automatique)",
+            404: "dépôt ou branche introuvable (le dépôt ScalpX doit être public)"}.get(code, f"erreur GitHub {code}")
 
 
 def extract_zip(data: bytes, dest: Path, info: dict) -> None:
