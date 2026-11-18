@@ -353,3 +353,22 @@ async def test_backtest_mt5_depuis_telegram(svc):  # noqa: F811
     # ↺ min / max du preset
     await router.on_callback("d:bmrs")
     assert "Minimum : <b>200.00" in dash.render()[0]
+
+
+@pytest.mark.asyncio
+async def test_suivi_telegram_en_echec_n_arrete_pas_le_test(stack):
+    """Bot 4.13.1 : « Timed out » de Telegram pendant le suivi → le test continue et donne son résultat."""
+    cfg, db, *_ = stack
+    tp = TesterProcs(cfg.paths.common())
+    m = _mgr(cfg, db, tp)
+    db.meta_set("bt_account", json.dumps({"login": 1, "server": "S"}))
+    calls = []
+
+    async def flaky(run):
+        calls.append(run.stage)
+        if len(calls) % 2:
+            raise TimeoutError("Timed out")
+
+    run = await m.execute(Run(12, "manuel", 0, 86400, "reel", "x"), params={}, deposit=200, currency="EUR", leverage=100,
+                          notify=flaky, poll_s=0.01)
+    assert run.ok and not run.error and run.result is not None and len(calls) > 3

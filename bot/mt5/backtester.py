@@ -133,6 +133,16 @@ class BacktestManager:
                       comm: float = 0.0, slip: float = 0.0, password: str = "", acc: dict | None = None,
                       notify: Notify = _noop, poll_s: float = 4.0) -> Run:
         """Lance le testeur et suit l'avancement jusqu'à la fin (notify(run) à chaque étape et toutes les poll_s)."""
+        user_notify = notify
+
+        async def notify(r: Run) -> None:
+            # Bot 4.13.1 : un message de suivi qui échoue (Telegram « Timed out », réseau coupé) ne doit jamais arrêter
+            # le test : avant, l'erreur remontait et le backtest finissait en « Erreur inattendue : Timed out ».
+            try:
+                await user_notify(r)
+            except Exception as exc:
+                log.warning("backtest #%s : message de suivi non envoyé (%r) : le test continue", r.rid, exc)
+
         async with self._lock:
             self.run = run
             try:
