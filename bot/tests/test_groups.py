@@ -133,3 +133,42 @@ def test_annonce_news_une_seule_fois_pour_tous_les_comptes():
     b = service.event_to_notice(Evenement(id="2_S", type="NOTIF", texte="📰 NEWS DANS 15 min" + body), "2", Path("."))
     c = service.event_to_notice(Evenement(id="2_S", type="NOTIF", texte="📰 NEWS DANS 15 min\n━━━━\n🔴 USD · NFP"), "2", Path("."))
     assert a is not None and a.label == "Tous les comptes" and b is None and c is not None
+
+
+@pytest.mark.asyncio
+async def test_retour_a_un_seul_environnement(tmp_path, monkeypatch):
+    from types import SimpleNamespace as NS
+    from mt5.wine import WineOptions
+    user = os.environ.get("USER") or os.environ.get("LOGNAME") or "scalpx"
+    main = _prefix(tmp_path / ".wine", user)
+    groups.ensure_prefix(main, 1)
+    groups.ensure_prefix(main, 2)
+    insts = []
+    for k in range(3):
+        f = tmp_path / "inst" / f"{k}_S"
+        f.mkdir(parents=True)
+        groups.set_group(f, 1 + k % 2)
+        insts.append(NS(id=f"{k}_S", folder=str(f), label=str(k), desired_state="DEMARRE"))
+    running = {"0_S", "1_S"}
+    launched = []
+
+    async def stop(inst, force=False, set_desired=None):
+        running.discard(inst.id)
+        return "propre"
+
+    def launch(inst, ini=None, by_bot=True):
+        running.add(inst.id)
+        launched.append((inst.id, groups.group_of(Path(inst.folder))))
+
+    async def fast_sleep(_):
+        return None
+    monkeypatch.setattr(groups.asyncio, "sleep", fast_sleep)
+    cfg = NS(wine=NS(group_size=0, options=lambda: WineOptions(prefix=main)))
+    db = NS(list=lambda include_archived=False: insts)
+    ctx = NS(cfg=cfg, db=db, mgr=NS(is_running=lambda i: i.id in running, stop=stop, launch=launch),
+             status=NS(read=lambda iid: NS(connecte=True, age_s=lambda: 1)))
+    assert len(groups.leftovers(cfg, db)[0]) == 3
+    rep = await groups.regroup(ctx, None, wait_s=1)
+    assert all(g == 0 for _, g in launched) and running == {"0_S", "1_S", "2_S"}
+    assert not (tmp_path / ".wine-g1").exists() and not (tmp_path / ".wine-g2").exists()
+    assert groups.leftovers(cfg, db) == ([], []) and any("2 environnement(s)" in r for r in rep)

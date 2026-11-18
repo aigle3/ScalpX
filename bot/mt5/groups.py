@@ -264,3 +264,58 @@ async def _connected(status, iid: str, wait_s: float) -> bool:
             return True
         await asyncio.sleep(3)
     return False
+
+
+def leftovers(cfg, db) -> tuple[list, list[Path]]:
+    """Bot 4.11.0 (groupes désactivés) : comptes encore dans un environnement de groupe, environnements de groupe présents."""
+    main = cfg.wine.options().prefix_path()
+    insts = [i for i in db.list(include_archived=True) if group_of(Path(i.folder)) > 0]
+    pres = [group_prefix(main, n) for n in sorted(existing_groups(main))]
+    pres += [p for p in Path(main).parent.glob(f"{Path(main).name}-g*.copie")]
+    return insts, pres
+
+
+async def regroup(ctx, say=None, wait_s: float = 600.0) -> list[str]:
+    """Bot 4.11.0 : retour à UN seul environnement Wine (groupes désactivés) : chaque compte d'un groupe est relancé dans
+    le préfixe principal, un par un ; puis les environnements de groupe vides sont supprimés (place disque rendue)."""
+    from storage.db import ARCHIVE, DEMARRE, MAINTENANCE
+    cfg, db, mgr, status = ctx.cfg, ctx.db, ctx.mgr, ctx.status
+    insts, _ = leftovers(cfg, db)
+    report: list[str] = []
+    for k, inst in enumerate(insts, 1):
+        if inst.desired_state == ARCHIVE or not Path(inst.folder).is_dir():
+            set_group(Path(inst.folder), 0) if Path(inst.folder).is_dir() else None
+            continue
+        if say:
+            await say(f"🍷 Retour à un seul environnement Wine : {k}/{len(insts)} · {inst.label}…")
+        running = mgr.is_running(inst)
+        want_run = running or inst.desired_state in (DEMARRE, MAINTENANCE)
+        if running:
+            r = await mgr.stop(inst, force=False, set_desired=None)
+            if r == "attente_cloture":                       # réessayé au prochain passage (5 min) ; son environnement reste
+                report.append(f"⏳ {inst.label} : clôture à 500 en cours, déplacé au prochain passage")
+                continue
+        set_group(Path(inst.folder), 0)
+        if want_run:
+            if not mgr.is_running(inst):
+                mgr.launch(inst)
+            ok = await _connected(status, inst.id, wait_s)
+            report.append(("✅ " if ok else "⚠️ ") + f"{inst.label}" + ("" if ok else " : pas encore reconnecté"))
+        else:
+            report.append(f"✅ {inst.label} (arrêté)")
+    # environnements de groupe : supprimés quand plus aucun compte ne s'en sert
+    await asyncio.sleep(20)                                  # leurs wineservers s'arrêtent seuls une fois vides
+    main = cfg.wine.options().prefix_path()
+    used = {group_of(Path(i.folder)) for i in db.list(include_archived=True)}
+    freed = 0
+    for n in sorted(existing_groups(main)):
+        if n in used:
+            continue
+        pre = group_prefix(main, n)
+        await asyncio.to_thread(shutil.rmtree, pre, True)
+        freed += 1
+    for p in Path(main).parent.glob(f"{Path(main).name}-g*.copie"):
+        await asyncio.to_thread(shutil.rmtree, p, True)
+    if freed:
+        report.append(f"🗑 {freed} environnement(s) Wine supprimé(s) (place disque rendue)")
+    return report

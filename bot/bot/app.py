@@ -605,13 +605,19 @@ async def j_groups(context: ContextTypes.DEFAULT_TYPE) -> None:
     from mt5 import groups
     s = svc(context)
     cfg = s.ctx.cfg
-    if int(getattr(cfg.wine, "group_size", 0) or 0) <= 0 or getattr(s, "_groups_task", None) is not None:
+    if getattr(s, "_groups_task", None) is not None:
         return
     if s.ctx.deploy.running or s.router.building or s.router.installing:
         return
-    if not any(groups.group_of(_P(i.folder)) == 0 and s.ctx.mgr.folder_ok(i) and i.desired_state != "EN_CREATION"
-               for i in s.ctx.db.list()):
-        return
+    on = int(getattr(cfg.wine, "group_size", 0) or 0) > 0
+    if on:
+        if not any(groups.group_of(_P(i.folder)) == 0 and s.ctx.mgr.folder_ok(i) and i.desired_state != "EN_CREATION"
+                   for i in s.ctx.db.list()):
+            return
+    else:                                                       # Bot 4.11.0 : groupes désactivés → retour au principal
+        insts, pres = groups.leftovers(cfg, s.ctx.db)
+        if not insts and not pres:
+            return
 
     async def run() -> None:
         mid = 0
@@ -626,11 +632,18 @@ async def j_groups(context: ContextTypes.DEFAULT_TYPE) -> None:
             mid = await s.sender.send(s.chat_id, text, None, True)
 
         try:
-            await say("🍷 <b>Répartition des terminaux</b> dans plusieurs environnements Wine (moins d'attente derrière "
-                      "wineserver) : un compte à la fois, chacun redémarre ≈ 1 min…")
-            rep = await groups.rebalance(s.ctx, say)
-            if rep:
-                await say("🍷 <b>Répartition terminée</b>\n" + render.esc(groups.summary(cfg, s.ctx.db)) + "\n"
+            if on:
+                await say("🍷 <b>Répartition des terminaux</b> dans plusieurs environnements Wine (moins d'attente derrière "
+                          "wineserver) : un compte à la fois, chacun redémarre ≈ 1 min…")
+                rep = await groups.rebalance(s.ctx, say)
+                if rep:
+                    await say("🍷 <b>Répartition terminée</b>\n" + render.esc(groups.summary(cfg, s.ctx.db)) + "\n"
+                              + "\n".join(render.esc(r) for r in rep))
+            else:
+                await say("🍷 <b>Retour à un seul environnement Wine</b> (la répartition n'a pas fait gagner de CPU) : "
+                          "un compte à la fois, chacun redémarre ≈ 1 min…")
+                rep = await groups.regroup(s.ctx, say)
+                await say("🍷 <b>Retour terminé</b> : tous les terminaux sont dans l'environnement principal.\n"
                           + "\n".join(render.esc(r) for r in rep))
         except Exception as exc:
             log.exception("répartition des terminaux")

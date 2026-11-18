@@ -130,7 +130,8 @@ class Wine(BaseModel):
     display: str = ":99"                   # écran virtuel Xvfb (service scalpx-xvfb)
     debug: str = "-all"                    # WINEDEBUG
     webview: bool = False                  # Bot 3.21.0 : pages web intégrées de MT5 (WebView2) ; coupées = ≈ 300 Mo de RAM gagnés par terminal
-    group_size: int = 4                    # Bot 4.10.0 : terminaux max par environnement Wine (un wineserver chacun) ; 0 = un seul
+    group_size: int = 0                    # Bot 4.10.0 : terminaux max par environnement Wine (un wineserver chacun) ; 0 = un seul.
+                                           # Bot 4.11.0 : 0 par défaut (mesuré sans gain sur le VPS : terminaux regroupés)
 
     def options(self):
         from mt5.wine import WineOptions
