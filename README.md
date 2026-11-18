@@ -117,6 +117,7 @@ flowchart TD
 | Installer une mise à jour | 🛠 Système → ⬆ Mises à jour (🔔 quand une version attend) |
 | Voir le serveur | 🛠 Système → 🖥 Serveur (CPU, RAM, disque, processus) |
 | Redémarrer le VPS | 🖥 Serveur → 🔁 Redémarrer le VPS (confirmation) |
+| Lancer une commande sur le serveur (diagnostic, sans SSH) | 🖥 Serveur → 💻 Exécuter une commande (confirmée, utilisateur `scalpx`, 2 min max, sortie renvoyée) |
 | Tout effacer sauf bot, BASE et presets | 🖥 Serveur → ♻️ Réinitialiser (double confirmation) |
 | Tout désinstaller | 🖥 Serveur → 🧨 Tout désinstaller (3 confirmations, la dernière après 10 s) |
 

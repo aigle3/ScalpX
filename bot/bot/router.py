@@ -56,6 +56,7 @@ class Router:
         self.awaiting_preset: tuple[str, str] | None = None   # (compte modèle, preset remplacé) : nom attendu (texte)
         self.awaiting_goal: str | None = None               # compte (ou ALL_ID) dont on attend l'objectif (message texte)
         self.awaiting_import = False                        # Bot 3.16.0 : fichier / texte de presets attendu (📥 Importer)
+        self.awaiting_cmd = False                           # Bot 4.6.0 : 💻 commande attendue (message texte)
         self._pending_import = self._pending_restore = b""   # Bot 4.2.0 : fichier chiffré en attente de son mot de passe
         self.awaiting_token = ""                            # Bot 3.18.0 : clé de .env attendue (message texte), ex. BACKUP_TOKEN
         self.awaiting_bulk = False                          # Bot 3.20.0 : fichier de comptes attendu (📄)
@@ -89,6 +90,8 @@ class Router:
         """Traite un callback_data. Renvoie un court texte pour query.answer()."""
         parts = data.split(":")
         head = parts[0]
+        if self.awaiting_cmd and data != "d:shc":
+            self.awaiting_cmd = False                           # Bot 4.6.0 : autre bouton → plus de commande attendue
         if self.awaiting_token and data not in ("d:bkp", "d:key", "d:noop"):
             # Bot 4.2.0 : tout autre bouton annule la saisie attendue (jeton / mot de passe) : un texte tapé plus tard
             # (nom de preset…) ne doit jamais devenir un jeton ou une clé de chiffrement.
@@ -217,6 +220,12 @@ class Router:
             self.dash.flash("☁️ Sauvegarde sans chiffrement (dépôt privé) : 🔒 Chiffrer reste possible ici.")
             self._bg(self._after_plain())
             return ""
+        elif sub == "shc":                                      # Bot 4.6.0 : 💻 exécuter une commande sur le serveur
+            self.awaiting_cmd = True
+            self.dash.goto("srv")
+            self.dash.flash("💻 Envoie la <b>commande</b> à exécuter sur le serveur (utilisateur <code>scalpx</code>, sans droits "
+                            "administrateur ; « sudo » en tête est retiré). Tu confirmes avant l'exécution ; arrêt au bout de "
+                            "2 min ; la sortie revient ici.", 300)
         elif sub == "bkown":                                    # Bot 4.4.0 : remplacer la sauvegarde d'un autre serveur
             async def own() -> None:
                 self.ctx.db.meta_set("bkp_owner", "1")
@@ -476,6 +485,10 @@ class Router:
                 await self.dash.refresh(force=True)
                 return
             await self._goal_confirm(inst, v.replace(",", "."))
+            return
+        if self.awaiting_cmd:
+            self.awaiting_cmd = False
+            await self._shell_ask(text)
             return
         if self.awaiting_bulk:
             self.awaiting_bulk = False
@@ -1418,6 +1431,52 @@ class Router:
             await self.sender.send(self.chat_id, f"⚠️ Préparation de MT5 : {esc(str(exc))}", None, True)
         finally:
             self._base_preparing = False
+
+    SHELL_TIMEOUT_S = 120.0
+
+    async def _shell_ask(self, text: str) -> None:
+        """Bot 4.6.0 : 💻 commande reçue → confirmation (la commande affichée telle qu'elle partira)."""
+        import re as _re
+        cmd = text.strip()
+        cmd = _re.sub(r"^sudo\s+(-\S+\s+)*", "", cmd)              # le bot n'a pas les droits administrateur
+        if not cmd or len(cmd) > 2000:
+            self.dash.goto("srv")
+            self.dash.flash("❌ Commande vide ou trop longue (2000 caractères au plus).")
+            await self.dash.refresh(force=True)
+            return
+
+        async def run() -> None:
+            await self._shell_run(cmd)
+        await self._ask(f"💻 <b>Exécuter cette commande ?</b>\n<pre>{esc(cmd)}</pre>Utilisateur <code>scalpx</code>, arrêt au bout "
+                        f"de {int(self.SHELL_TIMEOUT_S // 60)} min.", run, ("srv",), "▶️ Exécuter")
+
+    async def _shell_run(self, cmd: str) -> None:
+        import os as _os
+        t0 = time.monotonic()
+        self.ctx.db.add_action("", "COMMANDE", True, cmd[:200])
+        await self.sender.send(self.chat_id, f"⏳ <pre>{esc(cmd[:300])}</pre>", None, True)
+        try:
+            proc = await asyncio.create_subprocess_shell(
+                cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+                cwd=_os.path.expanduser("~"), start_new_session=True)
+            try:
+                out, _ = await asyncio.wait_for(proc.communicate(), self.SHELL_TIMEOUT_S)
+                code = proc.returncode
+            except asyncio.TimeoutError:
+                try:
+                    _os.killpg(proc.pid, 9)                     # la commande et tout ce qu'elle a lancé
+                except OSError:
+                    pass
+                out, code = b"", None
+        except Exception as exc:
+            out, code = str(exc).encode(), -1
+        text = out.decode("utf-8", errors="replace").replace("\x00", "")
+        head = (f"💻 Code {code} · {time.monotonic() - t0:.0f} s" if code is not None
+                else f"💻 ⏱ arrêtée au bout de {int(self.SHELL_TIMEOUT_S)} s")
+        if len(text) <= 3500:
+            await self.sender.send(self.chat_id, f"{head}\n<pre>{esc(text.strip() or '(aucune sortie)')}</pre>", None, True)
+        else:
+            await self.sender.document(self.chat_id, text.encode("utf-8"), "sortie.txt", f"{head} · sortie complète en fichier")
 
     BKP_WAIT = "une sauvegarde existe déjà dans le dépôt : rien n'est écrasé"
 

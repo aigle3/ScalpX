@@ -40,6 +40,7 @@ def server_screen(st: sv.Stats | None, auto: dict[str, str], sudo: bool, flash: 
     kb: Keyboard = [
         [("🔃 Actualiser", "d:srv"), ("🧩 " + ("Couper" if webview else "Réactiver") + " WebView2", "d:wvw")],
         [("✅ Démarrage auto", "d:sva")] if bad else [],
+        [("💻 Exécuter une commande", "d:shc")],                  # Bot 4.6.0 : diagnostic sans accès SSH
         [("🔁 Redémarrer le VPS", "d:rbt"), ("♻️ Réinitialiser", "d:rz")],
         [("🧨 Tout désinstaller", "d:uni")],
         [("⬅ Système", "d:sys")],

@@ -1793,3 +1793,24 @@ async def test_cloche_installation_systeme_cachee_tant_que_le_bot_rattrape_ses_m
     ctx.db.meta_set("update_pending", "")                                # bot à jour : vrai retard → 🔔
     await router.check_install()
     assert ctx.db.meta_get("install_pending") == "abcd1234abcd1234" and "installation système" in sender.all_text()
+
+
+async def test_commande_serveur_confirmee_puis_executee(svc):
+    """Bot 4.6.0 : 💻 commande → confirmation → exécutée (sans sudo), sortie renvoyée ; longue sortie → fichier ;
+    un autre bouton annule la saisie ; délai dépassé → arrêtée."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    await router.on_callback("d:shc")
+    await router.on_callback("d:srv")                                   # autre bouton : plus rien d'attendu
+    assert not router.awaiting_cmd
+    await router.on_callback("d:shc")
+    await router.on_text("sudo bash -c 'echo bonjour-scalpx; exit 3'")
+    assert "Exécuter cette commande" in sender.all_text() and "bonjour-scalpx" not in sender.all_text().split("Exécuter")[0]
+    await _confirm(router, dash)
+    assert await _until(lambda: "Code 3" in sender.all_text() and "<pre>bonjour-scalpx</pre>" in sender.all_text())
+    assert "⏳ <pre>bash -c &#x27;echo bonjour-scalpx; exit 3&#x27;</pre>" in sender.all_text() or \
+        "⏳ <pre>bash -c 'echo bonjour-scalpx; exit 3'</pre>" in sender.all_text()      # « sudo » retiré
+    await router._shell_run("python3 -c \"print('x' * 5000)\"")
+    assert any(f == "sortie.txt" and len(d) > 5000 for f, d in sender.docs)
+    router.SHELL_TIMEOUT_S = 0.5
+    await router._shell_run("sleep 5")
+    assert "arrêtée au bout" in sender.all_text()
