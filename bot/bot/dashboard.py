@@ -55,6 +55,7 @@ class Dashboard:
         self._lock = asyncio.Lock()                         # Bot 4.8.6 : une seule publication / mise à jour à la fois
         self._covered_by = 0                                # Bot 4.8.3 : message qui l'a recouvert (effacé ensuite → plus recouvert)
         self.waiting = lambda: ""                           # Bot 4.8.3 : saisie attendue (jeton / mot de passe), fournie par le routeur
+        self.waiting_any = lambda: False                    # Bot 4.8.7 : une saisie quelconque attendue (assistant, objectif…)
         self.bt = None                                      # mt5.backtester.BacktestManager (branché par le routeur)
         self.bt_wiz: tuple[str, dict] = ("login", {})       # configuration du compte du testeur (étape, données)
         self.optim = None                                   # bot.optim.Optimizer (branché par le routeur)
@@ -487,6 +488,22 @@ class Dashboard:
         text, kb = self.render()
         mid = await self.sender.send(self.chat_id, text, kb, True)          # toujours silencieux
         self.ctx.db.meta_set("dash_msg_id", str(mid))
+        # Bot 4.8.7 : tous les tableaux de bord créés sont mémorisés ; les anciens encore présents (orphelins d'une
+        # republication interrompue) sont effacés : jamais deux tableaux de bord dans la conversation.
+        try:
+            ids = [int(x) for x in (self.ctx.db.meta_get("dash_ids") or "").split(",") if x.strip().isdigit()]
+        except ValueError:
+            ids = []
+        for old in [i for i in ids if i != mid]:
+            try:
+                await self.sender.delete(self.chat_id, old)
+            except Exception as exc:                      # trop ancien (> 48 h) : vidé, pour ne pas laisser de vieux boutons
+                log.warning("ancien tableau de bord non supprimé : %s", exc)
+                try:
+                    await self.sender.edit(self.chat_id, old, "⬇️ Tableau de bord plus bas.", None)
+                except Exception:
+                    pass
+        self.ctx.db.meta_set("dash_ids", str(mid))
         self._last_sig, self._last_edit = self._sig(text, kb), time.time()
         self._covered_at = None
         return mid
@@ -526,16 +543,11 @@ class Dashboard:
         if home:
             self.screen = ("dash",)
         self.ctx.db.meta_set("dash_msg_id", "0")
+        if old:                                             # l'ancien est effacé par _create (avec tous les orphelins connus)
+            ids = (self.ctx.db.meta_get("dash_ids") or "").split(",")
+            if str(old) not in ids:
+                self.ctx.db.meta_set("dash_ids", ",".join([i for i in ids if i] + [str(old)]))
         mid = await self._create()
-        if old and old != mid:
-            try:
-                await self.sender.delete(self.chat_id, old)
-            except Exception as exc:                      # trop ancien (> 48 h) : vidé, pour ne pas laisser de vieux boutons
-                log.warning("ancien tableau de bord non supprimé : %s", exc)
-                try:
-                    await self.sender.edit(self.chat_id, old, "⬇️ Tableau de bord plus bas.", None)
-                except Exception:
-                    pass
         return mid
 
     async def refresh(self, force: bool = False, retry_after: float = 0.0) -> str:
@@ -555,7 +567,8 @@ class Dashboard:
         if not force and self._covered_at is not None:
             if now - self._covered_at >= cfg.repost_s:                      # recouvert depuis 5 min : republié en bas
                 # republié en bas en revenant à l'accueil : un rapport (labo, backtest…) laissé ouvert n'est pas renvoyé tout seul
-                await self._bring_down(home=self.screen[0] in ("sst", "wdr", "opt"))
+                # Bot 4.8.7 : jamais de retour à l'accueil pendant une saisie (assistant du terminal de test, jeton…)
+                await self._bring_down(home=self.screen[0] in ("sst", "wdr", "opt") and not self.waiting_any())
                 return "recreated"
             return "skip"                                                   # recouvert : plus d'éditions automatiques
         if not force and now - self._last_edit < cfg.refresh_s:

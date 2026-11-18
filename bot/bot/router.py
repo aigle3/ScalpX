@@ -86,6 +86,21 @@ class Router:
             self._cb_running.setdefault(key, set()).add(t)
             t.add_done_callback(lambda tt, k=key: self._cb_running.get(k, set()).discard(tt))
 
+    @property
+    def awaiting_any(self) -> bool:
+        """Bot 4.8.7 : une saisie au clavier est attendue (assistant, jeton, mot de passe, objectif, preset, commande…)."""
+        return bool(self.awaiting_bt or self.awaiting_token or self.awaiting_goal or self.awaiting_preset
+                    or self.awaiting_import or self.awaiting_broker or self.awaiting_cmd or self.awaiting_bulk)
+
+    def cancel_inputs(self) -> None:
+        """Bot 4.8.7 : 📊 Tableau de bord (ou Accueil) annule toute saisie en cours : le bouton n'est jamais pris pour une réponse."""
+        self.awaiting_bt = self.awaiting_goal = self.awaiting_preset = None
+        self.awaiting_token = self.awaiting_broker = ""
+        self.awaiting_import = self.awaiting_cmd = self.awaiting_bulk = False
+        self._pending_import = self._pending_restore = b""
+        if getattr(self.dash, "bt_wiz", None):
+            self.dash.bt_wiz = ("login", {})
+
     CB_REPEAT_S = 1.5
 
     def _cb_duplicate(self, data: str) -> bool:
@@ -127,6 +142,8 @@ class Router:
             self.awaiting_broker = ""                           # Bot 4.7.0 : autre bouton → ajout de courtier abandonné
         if self.awaiting_cmd and data != "d:shc":
             self.awaiting_cmd = False                           # Bot 4.6.0 : autre bouton → plus de commande attendue
+        if data in ("d:home", "d:close") and self.awaiting_bt:
+            self.cancel_inputs()                                # Bot 4.8.7 : quitter l'assistant l'annule
         if self.awaiting_token and data not in ("d:bkp", "d:key", "d:noop"):
             # Bot 4.2.0 : tout autre bouton annule la saisie attendue (jeton / mot de passe) : un texte tapé plus tard
             # (nom de preset…) ne doit jamais devenir un jeton ou une clé de chiffrement.
@@ -508,8 +525,14 @@ class Router:
         self.dash.flash(await self.dash.params.set_value(inst, idx, value, shown))
         await self.dash.refresh(force=True)
 
+    MENU_TEXT = "📊 Tableau de bord"
+
     async def on_text(self, text: str) -> None:
         """Message texte libre : valeur attendue d'un paramètre, sinon le tableau de bord revient en bas."""
+        if text.strip() == self.MENU_TEXT:                     # Bot 4.8.7 : le bouton du bas n'est jamais une réponse
+            self.cancel_inputs()
+            await self.cmd_start()
+            return
         if self.awaiting_bt:
             await self._bt_text(text)
             return

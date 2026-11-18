@@ -34,6 +34,7 @@ from .wizard import ALIAS, CONFIRM, LOGIN, PASSWORD, SERVER, SERVER_TEXT, Wizard
 log = logging.getLogger(__name__)
 
 MENU_BUTTON = "📊 Tableau de bord"
+INPUT_SCREENS = ("btw", "bkp", "key", "opt")                 # Bot 4.8.7 : écrans du tableau de bord qui attendent une saisie
 
 
 # --------------------------------------------------------------------------- Sender Telegram
@@ -142,6 +143,7 @@ class Services:
                                  total=lambda: len(ctx.db.list()))
         self.router = Router(ctx, self.sender, self.chat_id, self.dash, self.conf, self.notifier)
         self.dash.waiting = lambda: self.router.awaiting_token                  # Bot 4.8.3
+        self.dash.waiting_any = lambda: self.router.awaiting_any                # Bot 4.8.7
         ctx.watchdog.alert = self.router.alert
         self.monitor = Monitor(cfg, ctx.db, ctx.status, EventReader(cfg.paths.common()), self.notifier.emit)
         self.wizard = WizardCore(ctx, self.sender, self.chat_id, self.on_created)
@@ -198,15 +200,17 @@ async def h_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Bot 3.6.3 : le bouton permanent « 📊 Tableau de bord » peut disparaître côté Telegram (autre appareil, historique
     # effacé…). Tout message tapé le remet (au plus une fois toutes les 10 min ; le bouton lui-même ne le renvoie pas).
     # Bot 4.8.3 : envoyé AVANT le traitement, pour que l'écran qui répond reste le dernier message.
-    if m is not None and (m.text or "") != MENU_BUTTON and time.monotonic() - getattr(s, "_menu_at", -1e9) > 600:
+    if m is not None and (m.text or "") != MENU_BUTTON and not s.router.awaiting_any \
+            and time.monotonic() - getattr(s, "_menu_at", -1e9) > 600:
         s._menu_at = time.monotonic()
         try:
             await s.sender.reply_menu(s.chat_id, "📊 Bouton « Tableau de bord » remis en bas de l'écran.")
         except Exception:
             log.warning("bouton du tableau de bord : envoi impossible", exc_info=True)
-    busy = bool(s.router.awaiting_token)
+    busy = s.router.awaiting_any
     await s.router.on_text((m.text or "") if m is not None else "")
-    if busy and not s.dash.is_last:                             # Bot 4.8.3 : réponse à un jeton / mot de passe → visible en bas
+    # Bot 4.8.3 / 4.8.7 : réponse à une saisie (jeton, mot de passe, assistant, objectif…) → l'écran qui répond est EN BAS
+    if busy and not s.dash.is_last and (s.dash.screen[0] in INPUT_SCREENS or s.dash._flash_text()):
         await s.dash.show()
 
 
@@ -288,7 +292,9 @@ async def h_cb(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Bot 4.8.3 : bouton de sauvegarde / jeton touché sur un AUTRE message (proposition, alerte) : l'écran qui s'ouvre
     # est montré en bas, au lieu d'être modifié plus haut dans la conversation.
     sub = q.data.split(":")[1] if q.data.startswith("d:") and ":" in q.data else ""
-    if sub in ("bkp", "bkpw", "bkplain", "kset", "bkt", "bkown", "key") and not s.dash.is_last:
+    # Bot 4.8.7 : toute étape qui attend une saisie dans le tableau de bord (assistant du terminal de test…) aussi
+    if not s.dash.is_last and (sub in ("bkp", "bkpw", "bkplain", "kset", "bkt", "bkown", "key")
+                               or (s.router.awaiting_any and s.dash.screen[0] in INPUT_SCREENS)):
         await s.dash.show()
 
 

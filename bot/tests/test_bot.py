@@ -1919,3 +1919,49 @@ async def test_tableau_de_bord_jamais_publie_en_double(svc):
     await asyncio.gather(dash.bring_down(home=False), dash.refresh(), dash.show(), dash.refresh(force=True))
     alive = [m for m in created if m not in deleted]
     assert len(alive) == 1 and int(ctx.db.meta_get("dash_msg_id")) == alive[0]
+
+
+async def test_assistant_terminal_de_test_jamais_efface_par_le_tableau_de_bord(svc):
+    """Bot 4.8.7 : 🔑 Terminal de test → numéro → serveur → mot de passe : l'assistant reste affiché (republication
+    automatique sans retour à l'accueil) ; 📊 Tableau de bord n'est jamais pris pour une réponse et annule l'assistant."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    dash.waiting_any = lambda: router.awaiting_any
+    await dash.ensure()
+    dash.goto("opt")
+    await router.on_callback("d:btc")
+    assert router.awaiting_bt == "login" and dash.screen[0] == "btw" and router.awaiting_any
+    dash.note_message(10 ** 9)
+    dash._covered_at -= 10 ** 6                                            # recouvert depuis longtemps : republié…
+    await dash.refresh()
+    assert dash.screen[0] == "btw"                                         # … SANS revenir à l'accueil
+    await router.on_text("📊 Tableau de bord")                            # le bouton du bas : pas une réponse
+    assert not router.awaiting_any and dash.screen[0] == "dash"
+    await router.on_callback("d:btc")
+    await router.on_text("12345678")
+    assert dash.screen[0] == "btw" and router.awaiting_bt in ("server_text", None)
+    if router.awaiting_bt is None:
+        await router.on_callback("d:btsv:new")
+    await router.on_text("Demo-Server")
+    assert router.awaiting_bt == "password" and dash.screen[0] == "btw"
+    await router.on_callback("d:home")                                     # Accueil : assistant annulé
+    assert not router.awaiting_any
+
+
+async def test_appui_sur_tableau_de_bord_un_seul_reste_meme_avec_un_orphelin(svc):
+    """Bot 4.8.7 : 📊 Tableau de bord → l'ancien ET tout ancien tableau de bord resté en trop sont effacés : un seul reste."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    await dash.ensure()
+    orphan = await sender.send(dash.chat_id, "vieux tableau de bord", [[("⬅ Accueil", "d:home")]], True)
+    ctx.db.meta_set("dash_ids", f"{ctx.db.meta_get('dash_msg_id')},{orphan}")
+    deleted = []
+    rd = sender.delete
+
+    async def dele(chat, mid):
+        deleted.append(mid)
+        return await rd(chat, mid)
+    sender.delete = dele
+    first = int(ctx.db.meta_get("dash_msg_id"))
+    for _ in range(3):
+        await router.on_text("📊 Tableau de bord")
+    cur = int(ctx.db.meta_get("dash_msg_id"))
+    assert orphan in deleted and first in deleted and cur not in deleted and ctx.db.meta_get("dash_ids") == str(cur)
