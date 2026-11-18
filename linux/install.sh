@@ -17,7 +17,11 @@ BASE="$MT/BASE"
 PFX="$H/.wine"
 DISP=":99"
 # Installeur MT5 : celui de MetaQuotes (il se connecte aux serveurs RoboForex). Autre installeur : MT5_SETUP_URL=…
-SETUP_URLS="${MT5_SETUP_URL:-https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe https://download.terminal.free/cdn/web/metaquotes.ltd/mt5/mt5setup.exe}"
+# Installeur RoboForex d'abord (lien du bouton « Télécharger pour PC » de roboforex.com) : il contient la liste des
+# serveurs RoboForex (Config/servers.dat). Celui de MetaQuotes ne connaît pas « RoboForex-Pro » : les comptes ne se
+# connectent jamais (aucune ligne « Network » dans le journal du terminal).
+ROBO_SETUP="${ROBO_SETUP_URL-https://download.terminal.free/cdn/web/22605/mt5/roboforexltd5setup.exe}"
+SETUP_URLS="${MT5_SETUP_URL:-$ROBO_SETUP https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe https://download.terminal.free/cdn/web/metaquotes.ltd/mt5/mt5setup.exe}"
 PKG="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"          # racine du paquet (dossiers bot/, ea/, linux/)
 AUTO=""; [ "${1:-}" = "--auto" ] && AUTO=1                         # --auto : relancé par le bot (🔧), aucune question
 
@@ -195,8 +199,11 @@ fi
 
 # ---------------------------------------------------------------- 4. BASE MT5
 step "4/7  MetaTrader 5 : dossier BASE ($BASE)"
+# MT5 installés dans Program Files du préfixe (RoboForex en premier)
+mt5_dirs() { ls -d "$PFX/drive_c/Program Files/"*/ 2>/dev/null | while read -r d; do
+                 [ -f "$d/terminal64.exe" ] && [ -f "$d/MetaEditor64.exe" ] && echo "${d%/}"; done | sort -f | awk '/[Rr]obo/{print; next} {o=o $0 "\n"} END{printf "%s", o}'; }
 if [ ! -f "$BASE/terminal64.exe" ]; then
-    src=$(ls -d "$PFX/drive_c/Program Files/"*/ 2>/dev/null | while read -r d; do [ -f "$d/terminal64.exe" ] && echo "${d%/}"; done | head -1 || true)
+    src=$(mt5_dirs | head -1 || true)
     if [ -z "$src" ]; then
         got=""
         for url in $SETUP_URLS; do
@@ -208,7 +215,7 @@ if [ ! -f "$BASE/terminal64.exe" ]; then
         as_u env WINEDEBUG=err+all wine /tmp/mt5setup.exe /auto >>"$LOG" 2>&1 &   # erreurs Wine → journal
         for _ in $(seq 1 120); do
             sleep 5
-            src=$(ls -d "$PFX/drive_c/Program Files/"*/ 2>/dev/null | while read -r d; do [ -f "$d/terminal64.exe" ] && [ -f "$d/MetaEditor64.exe" ] && echo "${d%/}"; done | head -1 || true)
+            src=$(mt5_dirs | head -1 || true)
             [ -n "$src" ] && break
         done
         sleep 20                                            # fin de l'écriture des fichiers
@@ -220,6 +227,44 @@ if [ ! -f "$BASE/terminal64.exe" ]; then
     as_u mkdir -p "$BASE"
     as_u cp -a "$src/." "$BASE/"
     ok "BASE créé"
+fi
+# Serveurs RoboForex dans BASE (Config/servers.dat). BASE venu de l'installeur MetaQuotes (Bot ≤ 4.6) : l'installeur
+# RoboForex est installé à part (C:\scalpx-roboforex), sa liste de serveurs copiée dans BASE, puis ce dossier supprimé.
+# Ni BASE (déjà compilé) ni les comptes ne sont touchés ; seuls les processus de ce dossier à part sont fermés.
+RF_MARK="$BASE/.scalpx_serveurs_roboforex"
+if [ -f "$BASE/terminal64.exe" ] && [ ! -f "$RF_MARK" ] && [ -n "$ROBO_SETUP" ]; then
+    echo "  Serveurs RoboForex pour MT5 (2 à 5 min)…"; tg "🔧 Installation : serveurs RoboForex pour MT5…"
+    sd=""
+    rob=$(mt5_dirs | grep -i robo | head -1 || true)
+    [ -n "$rob" ] && sd=$(find "$rob" -maxdepth 2 -iname servers.dat 2>/dev/null | head -1 || true)
+    if [ -z "$sd" ]; then
+        RFD="$PFX/drive_c/scalpx-roboforex"; t0=$(mktemp); rm -rf "$RFD"
+        if as_u curl -fsSL --connect-timeout 20 --max-time 900 -o /tmp/rf5setup.exe "$ROBO_SETUP"; then
+            as_u env WINEDEBUG=err+all wine /tmp/rf5setup.exe /auto '/path:C:\scalpx-roboforex' >>"$LOG" 2>&1 &
+            for i in $(seq 1 120); do                       # 10 min max
+                sleep 5
+                sd=$(find "$RFD" "$PFX/drive_c/users/$U/AppData/Roaming/MetaQuotes/Terminal" -iname servers.dat -newer "$t0" 2>/dev/null | head -1 || true)
+                [ -n "$sd" ] && break
+                [ $((i % 12)) -eq 0 ] && echo "  … installeur RoboForex en cours ($((i / 12)) min)"
+            done
+            sleep 10
+        else
+            warn "installeur RoboForex non téléchargé ($ROBO_SETUP)"
+        fi
+        pkill -u "$U" -f 'scalpx-roboforex|rf5setup' || true      # SEULEMENT ce MT5 à part (jamais BASE ni les comptes)
+        sleep 3
+        rm -f "$t0"
+    fi
+    if [ -n "$sd" ] && [ -s "$sd" ]; then
+        as_u mkdir -p "$BASE/Config"
+        [ -f "$BASE/Config/servers.dat" ] && [ ! -f "$BASE/Config/servers.dat.metaquotes" ] && cp -a "$BASE/Config/servers.dat" "$BASE/Config/servers.dat.metaquotes"
+        install -o "$U" -g "$U" -m 644 "$sd" "$BASE/Config/servers.dat"
+        touch "$RF_MARK"; chown "$U:$U" "$RF_MARK"
+        ok "serveurs RoboForex ajoutés à BASE"
+    else
+        warn "serveurs RoboForex introuvables : les comptes RoboForex ne pourront pas se connecter (relance 🔧 plus tard)"
+    fi
+    rm -rf "$PFX/drive_c/scalpx-roboforex" /tmp/rf5setup.exe
 fi
 # Premier démarrage de MT5 dans BASE : il compile alors ~130 programmes MetaQuotes (« full recompilation »). On attend la
 # fin (25 min max) : sinon CHAQUE compte créé refait ce travail (minutes à 100 % de CPU, aucun signal de l'EA).

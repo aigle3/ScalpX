@@ -61,6 +61,9 @@ class InstanceCreator:
         if not prepare.is_ready(self.cfg.paths.base, self.cfg.mt5.terminal_exe):
             return ("MT5 se prépare (compilation de départ du dossier BASE, 2 à 10 min) : réessaie quand le bot annonce "
                     "« ✅ MT5 prêt ». Sans ça, chaque compte refait cette compilation à 100 % de CPU.")
+        if server.lower().startswith("roboforex") and not (self.cfg.paths.base / ".scalpx_serveurs_roboforex").exists():
+            return ("Serveurs RoboForex absents du MT5 de BASE (installé depuis l'installeur MetaQuotes) : le compte ne "
+                    "pourrait pas se connecter. 🛠 Système → 🔧 Installation système les ajoute, sans toucher aux comptes.")
         need = max(self.cfg.alerts.min_disk_gb, basemod.folder_size_gb(self.cfg.paths.base) * 1.5)
         free = basemod.free_disk_gb(self.cfg.paths.instances)
         if free < need:
