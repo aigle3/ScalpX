@@ -23,9 +23,13 @@ AUTO=""; [ "${1:-}" = "--auto" ] && AUTO=1                         # --auto : re
 
 # Suivi dans Telegram (si le .env du bot a déjà le token et le chat_id : relance, 🔧) : chaque étape, les erreurs, la fin.
 tg() {
-    local f="/home/${SCALPX_USER:-scalpx}/scalpx/bot/.env" tk ch
-    tk=$(sed -n 's/^TELEGRAM_TOKEN=//p' "$f" 2>/dev/null | head -1 | tr -d '\r"'"'"' ')
-    ch=$(sed -n 's/^ALLOWED_CHAT_IDS=//p' "$f" 2>/dev/null | head -1 | tr -d '\r"'"'"' '); ch="${ch%%,*}"
+    # Jamais d'échec ici (serveur neuf : pas encore de .env ; set -e + pipefail coupaient l'installation sans message).
+    local f="/home/${SCALPX_USER:-scalpx}/scalpx/bot/.env" tk="" ch=""
+    if [ -r "$f" ]; then
+        tk=$(sed -n 's/^TELEGRAM_TOKEN=//p' "$f" 2>/dev/null | head -1 | tr -d '\r"'"'"' ' || true)
+        ch=$(sed -n 's/^ALLOWED_CHAT_IDS=//p' "$f" 2>/dev/null | head -1 | tr -d '\r"'"'"' ' || true); ch="${ch%%,*}"
+    fi
+    [ -n "$tk" ] || tk="${TELEGRAM_TOKEN:-}"; [ -n "$ch" ] || { ch="${ALLOWED_CHAT_IDS:-}"; ch="${ch%%,*}"; }
     [ -n "$tk" ] && [ -n "$ch" ] && curl -s --max-time 15 -o /dev/null "https://api.telegram.org/bot$tk/sendMessage" \
         --data-urlencode "chat_id=$ch" --data-urlencode "text=$1" -d parse_mode=HTML -d disable_notification="${2:-true}" || true
 }
@@ -33,7 +37,13 @@ lg()   { echo "$(date '+%H:%M:%S') $*" >> "${LOG:-/var/log/scalpx-installation.l
 step() { echo; echo -e "\e[36m=== $*\e[0m"; lg "=== $*"; tg "🔧 Installation : $*"; }
 ok()   { echo -e "  \e[32m[OK]\e[0m $*"; lg "[OK] $*"; }
 warn() { echo -e "  \e[33m[!]\e[0m  $*"; lg "[!] $*"; tg "⚠️ Installation : $*"; }
-die()  { echo -e "  \e[31m[ERREUR]\e[0m $*"; lg "[ERREUR] $*"; tg "❌ <b>Installation arrêtée</b> : $*" false; exit 1; }
+die()  { DIED=1; echo -e "  \e[31m[ERREUR]\e[0m $*"; lg "[ERREUR] $*"; tg "❌ <b>Installation arrêtée</b> : $*" false; exit 1; }
+# Filet : toute erreur imprévue s'affiche (ligne et commande) au lieu d'un arrêt muet.
+# Filet : un arrêt imprévu (set -e) s'affiche avec la commande en cause, au lieu d'un arrêt muet.
+DIED=""; CLEAN=""
+on_exit() { local rc=$1 cmd=$2; set +e; [ -n "$CLEAN" ] && rm -rf "$CLEAN"
+            if [ "$rc" -ne 0 ] && [ -z "$DIED" ]; then die "arrêt inattendu (code $rc) sur : ${cmd:0:160}"; fi; }
+trap 'on_exit $? "$BASH_COMMAND"' EXIT
 ask()  { local r=""; [ -n "$AUTO" ] && { echo ""; return; }; printf '  %s ' "$1" >&2
          if [ -t 0 ]; then read -r r || true; else read -r r </dev/tty || true; fi; echo "$r"; }
 as_u() { sudo -u "$U" -H env WINEPREFIX="$PFX" WINEARCH=win64 DISPLAY="$DISP" WINEDEBUG=-all "$@"; }

@@ -18,11 +18,16 @@ LOG=/var/log/scalpx-installation.log
 lg()   { printf '%s\n' "$*" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG" 2>/dev/null || true; }
 say()  { echo -e "\e[36m$*\e[0m"; lg "$*"; }
 note() { echo "$*"; lg "$*"; }
-die()  { echo -e "\e[31m[ERREUR]\e[0m $*"; lg "[ERREUR] $*"; echo "  Journal : $LOG"; exit 1; }
+die()  { DIED=1; echo -e "\e[31m[ERREUR]\e[0m $*"; lg "[ERREUR] $*"; echo "  Journal : $LOG"; exit 1; }
 # Saisie : clavier direct si le script en a un (sudo bash -c "$(curl …)"), sinon /dev/tty (ancienne forme curl | sudo bash).
 ask()  { local r="" secret="${2:-}"; printf '  %s ' "$1" >&2
          if [ -t 0 ]; then read -r r || true; else read -r r </dev/tty || true; fi
          if [ -n "$secret" ]; then lg "  $1 (saisi, non noté)"; else lg "  $1 $r"; fi; echo "$r"; }
+# Filet : un arrêt imprévu (set -e) s'affiche avec la commande en cause, au lieu d'un arrêt muet.
+DIED=""; CLEAN=""
+on_exit() { local rc=$1 cmd=$2; set +e; [ -n "$CLEAN" ] && rm -rf "$CLEAN"
+            if [ "$rc" -ne 0 ] && [ -z "$DIED" ]; then die "arrêt inattendu (code $rc) sur : ${cmd:0:160}"; fi; }
+trap 'on_exit $? "$BASH_COMMAND"' EXIT
 json() { python3 -c "import json,sys; d=json.load(sys.stdin); print(eval(sys.argv[1], {}, {'d': d}))" "$1" 2>/dev/null || true; }
 
 [ "$(id -u)" -eq 0 ] || die "lance avec sudo : sudo bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/aigle3/ScalpX/stable/linux/installer.sh)\""
@@ -61,7 +66,7 @@ done
 [ -n "$CHAT" ] || die "chat_id requis"
 
 D=$(mktemp -d /root/scalpx-paquet.XXXXXX)
-trap 'rm -rf "$D"' EXIT
+CLEAN="$D"                                                  # supprimé à la sortie (on_exit)
 say "=== Téléchargement de ScalpX (version validée)…"
 { curl -fsSL --connect-timeout 15 --max-time 600 "https://codeload.github.com/$REPO/tar.gz/refs/heads/stable" \
   || curl -4 -fsSL --connect-timeout 15 --max-time 600 "https://codeload.github.com/$REPO/tar.gz/refs/heads/stable"; } \
