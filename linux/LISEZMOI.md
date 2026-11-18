@@ -10,7 +10,7 @@ et le bot Telegram central en **service systemd**.
 ## Installation (une seule commande, aucun jeton dedans)
 Sur le serveur neuf, connecté en root (ou avec sudo) :
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aigle3/ScalpX/stable/linux/installer.sh | sudo bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/aigle3/ScalpX/stable/linux/installer.sh)"
 ```
 1. Le script demande le **token du bot Telegram** et ton **chat_id** (les deux seules questions).
 2. Aucun jeton GitHub : le dépôt ScalpX est public (installation et mises à jour sans jeton).

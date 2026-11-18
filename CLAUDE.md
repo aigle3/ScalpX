@@ -15,7 +15,7 @@ la branche `stable` avance et le bot du VPS (qui ne lit QUE `stable`) propose «
 - `ea/version.txt` : version publiée de l'EA.
 - `linux/` : installation sur le VPS Ubuntu (Wine + Xvfb + services systemd) : `install.sh` (LF, pas de CRLF), `LISEZMOI.md`.
   Le VPS est sous Ubuntu uniquement (plus de Windows) : MT5, MetaEditor et le testeur tournent sous Wine.
-  Dépôt PUBLIC : installation en une ligne `curl -fsSL https://raw.githubusercontent.com/aigle3/ScalpX/stable/linux/installer.sh | sudo bash`,
+  Dépôt PUBLIC : installation en une ligne `sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/aigle3/ScalpX/stable/linux/installer.sh)"`,
   mises à jour sans jeton. JAMAIS de secret, de numéro de compte réel ni de donnée personnelle dans le dépôt (code, tests, docs).
   Sauvegardes : dépôt PRIVÉ propre à chaque utilisateur (créé par le bot), chiffrées par son mot de passe.
 - `README.md` : présentation publique (guides, schémas Mermaid) ; à tenir à jour.

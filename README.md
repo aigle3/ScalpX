@@ -84,7 +84,7 @@ flowchart TD
 4. **Sur le VPS**, connecté en root :
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/aigle3/ScalpX/stable/linux/installer.sh | sudo bash
+   sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/aigle3/ScalpX/stable/linux/installer.sh)"
    ```
 
 5. Réponds aux **deux seules questions** (token et chat_id) : le script les vérifie auprès de Telegram.
@@ -267,6 +267,8 @@ Envoie-lui d'abord un message (Telegram interdit à un bot d'écrire le premier)
 
 Tout est noté dans `/var/log/scalpx-installation.log` (jamais de token dedans) : `sudo cat /var/log/scalpx-installation.log`.
 Chaque étape réseau a une limite de temps et réessaie en IPv4 ; si Telegram ou GitHub est injoignable, le script le dit.
+Utilise bien la commande ci-dessus (`sudo bash -c "$(curl …)"`) : l'ancienne forme `curl … | sudo bash` ne reçoit pas
+le clavier sous Ubuntu 26.04 (les questions restent sans réponse).
 </details>
 
 <details>

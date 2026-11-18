@@ -29,22 +29,19 @@ tg() {
     [ -n "$tk" ] && [ -n "$ch" ] && curl -s --max-time 15 -o /dev/null "https://api.telegram.org/bot$tk/sendMessage" \
         --data-urlencode "chat_id=$ch" --data-urlencode "text=$1" -d parse_mode=HTML -d disable_notification="${2:-true}" || true
 }
-step() { echo; echo -e "\e[36m=== $*\e[0m"; tg "🔧 Installation : $*"; }
-ok()   { echo -e "  \e[32m[OK]\e[0m $*"; }
-warn() { echo -e "  \e[33m[!]\e[0m  $*"; tg "⚠️ Installation : $*"; }
-die()  { echo -e "  \e[31m[ERREUR]\e[0m $*"; tg "❌ <b>Installation arrêtée</b> : $*" false; exit 1; }
-ask()  { local r=""; [ -n "$AUTO" ] || read -rp "  $1 " r </dev/tty || true; echo "$r"; }
+lg()   { echo "$(date '+%H:%M:%S') $*" >> "${LOG:-/var/log/scalpx-installation.log}" 2>/dev/null || true; }
+step() { echo; echo -e "\e[36m=== $*\e[0m"; lg "=== $*"; tg "🔧 Installation : $*"; }
+ok()   { echo -e "  \e[32m[OK]\e[0m $*"; lg "[OK] $*"; }
+warn() { echo -e "  \e[33m[!]\e[0m  $*"; lg "[!] $*"; tg "⚠️ Installation : $*"; }
+die()  { echo -e "  \e[31m[ERREUR]\e[0m $*"; lg "[ERREUR] $*"; tg "❌ <b>Installation arrêtée</b> : $*" false; exit 1; }
+ask()  { local r=""; [ -n "$AUTO" ] && { echo ""; return; }; printf '  %s ' "$1" >&2
+         if [ -t 0 ]; then read -r r || true; else read -r r </dev/tty || true; fi; echo "$r"; }
 as_u() { sudo -u "$U" -H env WINEPREFIX="$PFX" WINEARCH=win64 DISPLAY="$DISP" WINEDEBUG=-all "$@"; }
 
 [ "$(id -u)" -eq 0 ] || die "lance ce script avec sudo : sudo bash linux/install.sh"
-# Journal de l'installation (sans aucun token : ils sont saisis au clavier, jamais affichés) : à envoyer en cas de souci.
-LOG=/var/log/scalpx-installation.log
-if [ -z "${SCALPX_LOG:-}" ]; then
-    export SCALPX_LOG="$LOG"
-    touch "$LOG"; chmod 600 "$LOG" 2>/dev/null || true
-    exec > >(tee -a "$LOG") 2>&1
-    echo "=== $(date '+%d/%m/%Y %H:%M:%S') · $(hostname) · $(. /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-Linux}")"
-fi
+# Journal de l'installation (partagé avec installer.sh ; jamais de token dedans), écrit ligne à ligne par step/ok/warn/die.
+LOG="${SCALPX_LOG:-/var/log/scalpx-installation.log}"
+[ -n "${SCALPX_LOG:-}" ] || { touch "$LOG"; chmod 600 "$LOG"; echo "=== $(date '+%d/%m/%Y %H:%M:%S') · install.sh ${1:-}" >> "$LOG"; } 2>/dev/null || true
 [ -f "$PKG/bot/main.py" ] && [ -d "$PKG/ea/MQL5/Experts" ] || die "paquet incomplet : lance le script depuis le dossier ScalpX téléchargé"
 . /etc/os-release
 [ "${ID:-}" = "ubuntu" ] || warn "système non Ubuntu ($PRETTY_NAME) : non testé"
