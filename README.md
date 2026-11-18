@@ -34,7 +34,7 @@ Un seul VPS Ubuntu · un terminal MT5 par compte · un bot Telegram central · z
 | 🖥 **Un seul serveur Ubuntu** | MT5 tourne sous Wine, sans écran (Xvfb) ; tout redémarre seul après un reboot. |
 | 🪶 **Terminaux légers** | Aucun affichage sur les graphiques MT5 (masqués) : tout se lit et se règle dans Telegram. |
 | 💾 **Presets** | Réglages nommés (ex. « Martin ») appliqués à un ou plusieurs comptes, importés / exportés par fichier. |
-| 🧪 **Backtests et optimiseur** | Le testeur MT5 est lancé par le bot ; l'optimiseur propose des réglages, c'est toi qui valides. |
+| 🤖 **Optimiseur nocturne automatique** | Chaque nuit, il teste une catégorie de réglages sur l'historique et applique tout seul la meilleure variante sûre à « Martin » et à tous les comptes ; Telegram affiche ancienne → nouvelle valeur. |
 | ⬆ **Mises à jour en un clic** | Chaque version testée est proposée dans Telegram ; rien ne s'installe sans ton accord. |
 | ☁️ **Sauvegarde privée** | Dans un dépôt **privé de ton compte GitHub**, chiffrée par **ton** mot de passe. |
 | 🔒 **Aucun secret sur le serveur à taper** | Jetons et mots de passe envoyés au bot sont **effacés de la conversation** aussitôt. |
@@ -187,6 +187,26 @@ flowchart LR
 ```
 
 Arrête d'abord les comptes sur l'ancien serveur (règle des deux serveurs ci-dessus).
+
+## 🤖 Optimiseur nocturne
+
+```mermaid
+flowchart LR
+    H["🕘 Heure choisie<br/>(ex. 21 h)"] --> B["🧪 1 backtest de 60 jours<br/>testeur MT5, terminal de test"]
+    B --> V["Variantes jouées en parallèle<br/>(séries virtuelles, 1 cran autour<br/>des réglages actuels)"]
+    V --> C{"Choix sur 30 j<br/>sécurité sur 60 j"}
+    C -->|meilleure variante sûre| A["✅ Appliquée tout de suite<br/>preset ⭐ Martin + tous les comptes"]
+    C -->|rien de mieux| R["Réglages inchangés"]
+```
+
+- **Cycle de 4 nuits** : 🧱 grille et lots → 📐 signal et TP → 🛡️ filtres → 🎯 objectif et créneaux.
+- **Aucune validation à faire** : le changement est appliqué automatiquement, avec le détail dans Telegram et dans
+  📈 Rapports → 🤖 Optimiseur automatique → 📜 Journal.
+- **Garde-fous** : une variante n'est retenue que si elle ne perd jamais le compte (30 et 60 jours) et reste sous 90 % de
+  drawdown ; un créneau n'est retiré qu'au-delà de 80 % de drawdown ; les coupures et le mode continu ne sont jamais touchés.
+- **🔁 Série** : plusieurs optimisations enchaînées pour avancer plus vite ; **♻️ Réinitialiser** : retour au preset de
+  base d'avant les optimisations.
+- Il faut d'abord régler le **terminal de test** une fois (📈 Rapports → 🤖 Optimiseur automatique → 🔑 Terminal de test) ; l'heure se change avec 🕐.
 
 ## ⬆ Mises à jour
 
