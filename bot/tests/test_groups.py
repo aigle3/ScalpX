@@ -183,11 +183,12 @@ def test_terminal_attache_a_un_processeur(tmp_path):
         pytest.skip("un seul processeur")
     exe = tmp_path / "inst" / "terminal64.exe"
     exe.parent.mkdir()
-    shutil.copy(shutil.which("sleep"), exe)
-    p = subprocess.Popen([str(exe), "20"])
+    import sys
+    os.symlink(sys.executable, exe)                         # (« sleep » peut être un binaire multi-outils selon le système)
+    p = subprocess.Popen([str(exe), "-c", "import time; time.sleep(20)"])
     try:
         import time
-        time.sleep(0.3)
+        time.sleep(0.5)
         n = pin_terminals(PsutilProcesses(), {norm_path(exe): 5}, ncpu=2)
         assert n >= 1 and os.sched_getaffinity(p.pid) == {1}
         assert pin_terminals(PsutilProcesses(), {norm_path(exe): 5}, ncpu=2) == 0       # déjà réglé : rien à refaire
