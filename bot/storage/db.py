@@ -205,6 +205,11 @@ class Database:
     def balances(self, iid: str, since: int) -> list[sqlite3.Row]:
         return self._all("SELECT * FROM balances WHERE iid=? AND ts>=? ORDER BY ts", (iid, since))
 
+    def balance_before(self, iid: str, ts: int) -> float | None:
+        """Dernier solde enregistré AVANT ts (None si aucun)."""
+        r = self._all("SELECT balance FROM balances WHERE iid=? AND ts<? ORDER BY ts DESC LIMIT 1", (iid, ts))
+        return r[0]["balance"] if r else None
+
     def add_event(self, iid: str, ts: int, typ: str, prio: int, text: str) -> None:
         self._exec("INSERT INTO events VALUES(?,?,?,?,?)", (iid, ts, typ, prio, text))
 

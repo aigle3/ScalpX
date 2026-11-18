@@ -225,6 +225,14 @@ class Dashboard:
         fl = self._flash_text()
         return f"{fl}\n\n{text}" if fl else text
 
+    def day_gains(self, views, now: float) -> dict[str, float]:
+        """Gain du jour par compte (historique du bot), recalculé au plus toutes les 60 s."""
+        from bot.reports import day_gains
+        c = getattr(self, "_dg_cache", None)
+        if c is None or now - c[0] > 60 or set(c[1]) != {v.inst.id for v in views if v.st}:
+            self._dg_cache = (now, day_gains(self.ctx.db, views, self.ctx.cfg.reports.timezone, now))
+        return self._dg_cache[1]
+
     def _render_home(self, now: float) -> tuple[str, Keyboard]:
         from core.version import bot_version
         from mt5 import base as basemod
@@ -235,6 +243,7 @@ class Dashboard:
             kb: Keyboard = [[("➕ Nouveau compte", "n"), ("📄 Comptes (fichier)", "d:bulk")], [sys_btn]]
             return self._with_flash(render.welcome_empty()), kb
         t = totals(views)
+        t.pl_jour = sum(self.day_gains(views, now).values())
         cur = next((v.st.devise for v in views if v.st and v.st.devise), "")
         vps = self.vps(self.ctx.cfg.paths.data)
         ages = [v.st.age_s(now) for v in views if v.st]
@@ -401,7 +410,8 @@ class Dashboard:
         if v is None:
             return None
         closures = sum(1 for r in self.ctx.db.closures_since(0) if r["iid"] == iid)
-        text = render.account_card(v, self.ctx.db.total_withdrawn(iid), closures, now)
+        text = render.account_card(v, self.ctx.db.total_withdrawn(iid), closures, now,
+                                   self.day_gains(self.ctx.views(), now).get(iid))
         fl = self._flash_text()
         if fl:
             text = f"{fl}\n\n{text}"

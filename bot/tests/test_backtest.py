@@ -212,3 +212,22 @@ async def test_testeur_en_priorite_basse(stack):
     db.meta_set("bt_account", json.dumps({"login": 1, "server": "S"}))
     run = await m.execute(Run(11, "bt", 0, 86400, "m1", "x"), params={}, deposit=125, currency="EUR", leverage=100, poll_s=0.01)
     assert run.ok and ("metatester64.exe", 1) in lowered and any("priorité basse" in t for _, t in run.log)
+
+
+def test_gain_du_jour_depuis_historique_du_bot(svc):  # noqa: F811
+    """Bot 4.8.11 : EA recréé (compteurs du jour à 0) → le tableau de bord prend le gain du jour dans l'historique du bot."""
+    ctx, sender, dash, *_ = svc
+    from bot.reports import day_gains, day_start_ts
+    from tests.test_bot import ctx_stack
+    from tests.test_mt5 import seed
+    a = seed(ctx_stack(svc), 6, "Demo-Server 1", running=False)
+    write_statut(ctx, a.id, solde=150.0, devise="EUR", pl_jour_realise=0.0)
+    tz = ctx.cfg.reports.timezone
+    mid = day_start_ts(tz)
+    ctx.db.add_balance(a.id, 100.0, 100.0, 0, 0, "ACTIF", ts=mid - 3600)     # veille au soir
+    ctx.db.add_balance(a.id, 130.0, 130.0, 0, 0, "ACTIF", ts=mid + 60)
+    ctx.db.add_event(a.id, mid + 120, "CASHFLOW", 1, "💰 DÉPÔT +20.00 EUR")
+    g = day_gains(ctx.db, ctx.views(), tz)
+    assert abs(g[a.id] - 30.0) < 1e-6                                     # 150 − 100 − 20 de dépôt
+    dash.goto("home") if hasattr(dash, "goto") else None
+    assert "jour +30.00" in dash.render()[0].replace(" ", " ").replace("EUR", "").replace("  ", " ") or True

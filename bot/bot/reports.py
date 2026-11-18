@@ -27,6 +27,39 @@ def _flow(text: str) -> float:
         return 0.0
 
 
+def day_start_ts(tz: str, now: float | None = None) -> int:
+    """Minuit (fuseau des rapports) du jour en cours, en secondes Unix."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    try:
+        z = ZoneInfo(tz)
+    except Exception:
+        z = None
+    d = datetime.fromtimestamp(now if now is not None else time.time(), z)
+    return int(d.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+
+
+def day_gains(db, views, tz: str, now: float | None = None) -> dict[str, float]:
+    """Bot 4.8.11 : gain du jour par compte d'après l'historique du BOT (restauré par ☁️), et non plus d'après l'EA
+    (ses compteurs du jour sont perdus quand le terminal est recréé). Dépôts / retraits exclus. Compte sans historique
+    du jour : valeur de l'EA."""
+    since = day_start_ts(tz, now)
+    flows: dict[str, float] = {}
+    for e in db.events_since(since):
+        if e["type"] == "CASHFLOW":
+            flows[e["iid"]] = flows.get(e["iid"], 0.0) + _flow(e["text"])
+    out: dict[str, float] = {}
+    for v in views:
+        if v.st is None:
+            continue
+        start = db.balance_before(v.inst.id, since)
+        if start is None:
+            rows = db.balances(v.inst.id, since)
+            start = rows[0]["balance"] if rows else None
+        out[v.inst.id] = v.st.day_realized() if start is None else v.st.solde - start - flows.get(v.inst.id, 0.0)
+    return out
+
+
 def _pct(delta: float, base: float) -> str:
     return f" ({delta / base * 100:+.1f} %)" if base > 0 else ""
 
@@ -70,14 +103,14 @@ def build_report(ctx: Ctx, since: float, now: float | None = None, title: str = 
         tot_perf += perf
         goals = f"🎯 {d['won']}/{d['launched']}" + (f" · ⌛ {d['missed']}" if d["missed"] else "") + (f" · 🚨 {d['sl']}" if d["sl"] else "")
         lines.append(f"{v.health.icon} {esc(v.inst.label)} : {money(v.st.solde, cur)} · <b>{money(perf, '', True)}</b>"
-                     f"{_pct(perf, start)} · {goals}")
+                     f"{_pct(perf, start + max(d['flows'], 0.0))} · {goals}")
     launched = sum(d["launched"] for d in by.values())
     won = sum(d["won"] for d in by.values())
     missed = sum(d["missed"] for d in by.values())
     sl = sum(d["sl"] for d in by.values())
     wd = db.withdrawals_since(since_i)
     out = [head, "",
-           f"💼 <b>Capital : {money(tot_now, cur)}</b> · <b>{money(tot_perf, cur, True)}</b>{_pct(tot_perf, tot_start)} en 24 h",
+           f"💼 <b>Capital : {money(tot_now, cur)}</b> · <b>{money(tot_perf, cur, True)}</b>{_pct(tot_perf, tot_start + sum(max(d['flows'], 0.0) for d in by.values()))} en 24 h",
            f"🎯 Objectifs : ✅ {won} atteints sur {launched} · ⌛ <b>{missed} manqués</b>" + (f" · 🚨 {sl} stop loss" if sl else "")]
     if wd:
         out.append(f"💸 Retiré : {money(sum(w['amount'] for w in wd), cur)} ({len(wd)} cycle(s) 500 terminé(s))")

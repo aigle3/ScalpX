@@ -399,7 +399,8 @@ def account_line(v: AccountView, label_w: int = 10) -> str:
             f"{bar(st.progress500())} {pct:>3}% c{st.cycle}{flag}{STATE_TAG.get(st.etat, '')}")
 
 
-def account_card(v: AccountView, withdrawn: float, closures: int, now: float | None = None) -> str:
+def account_card(v: AccountView, withdrawn: float, closures: int, now: float | None = None,
+                 day: float | None = None) -> str:
     now = now if now is not None else time.time()
     i, st = v.inst, v.st
     head = f"{v.health.icon} <b>{esc(i.label)}</b> · {i.login}\n<code>{esc(i.server)}</code>"
@@ -413,7 +414,7 @@ def account_card(v: AccountView, withdrawn: float, closures: int, now: float | N
     cur = st.devise
     lines += [
         f"💰 Solde {money(st.solde, cur)} · Equity {money(st.equity, cur)}",
-        f"📊 Flottant EA {money(st.flottant_ea, cur, True)} · Jour {money(st.day_realized(), cur, True)}",
+        f"📊 Flottant EA {money(st.flottant_ea, cur, True)} · Jour {money(st.day_realized() if day is None else day, cur, True)}",
         f"🎯 Vers {st.seuil_arret:.0f} : {bar(st.progress500(), 10)} {st.progress500() * 100:.0f}% "
         f"(solde+flottant {money(st.solde_plus_flottant_ea, cur)})",
         f"📌 {st.positions} position(s) · {st.ordres} ordre(s) · cycle {st.cycle} · "
