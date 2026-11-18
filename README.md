@@ -71,7 +71,7 @@ flowchart TD
     B --> C["3️⃣ Sur le VPS, colle la commande"]
     C --> D{"Le script demande<br/>token + chat_id"}
     D --> E["⚙️ Installation automatique<br/>Wine · Xvfb · MT5 · EA · bot · services"]
-    E --> F["📲 Le bot t'écrit dans Telegram<br/>avancement en direct"]
+    E --> F["📲 Terminal libéré : suivi dans Telegram<br/>(tu peux fermer SSH)"]
     F --> G["✅ Terminé : tout le reste<br/>se fait dans Telegram"]
 ```
 
@@ -88,8 +88,10 @@ flowchart TD
    sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/aigle3/ScalpX/stable/linux/installer.sh)"
    ```
 
-5. Réponds aux **deux seules questions** (token et chat_id) : le script les vérifie auprès de Telegram.
-6. Suis l'avancement **dans Telegram**. À la fin, le paquet téléchargé est supprimé tout seul.
+5. Réponds aux **deux seules questions** (token et chat_id) : le script les vérifie et t'envoie un premier message
+   Telegram.
+6. Le terminal rend la main aussitôt : l'installation continue **en arrière-plan** (15 à 40 min). **Tu peux fermer le
+   terminal** et suivre tout dans Telegram. À la fin, le paquet téléchargé est supprimé tout seul.
 
 </details>
 

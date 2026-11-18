@@ -65,6 +65,19 @@ for _ in 1 2 3; do
 done
 [ -n "$CHAT" ] || die "chat_id requis"
 
+# Le bot peut-il t'écrire ? (sinon : aucun suivi possible dans Telegram une fois le terminal fermé)
+tgsend() { net -o /dev/null --data-urlencode "chat_id=$CHAT" --data-urlencode "text=$1" -d parse_mode=HTML "$API/bot$TOK/sendMessage" 2>/dev/null; }
+for i in 1 2 3; do
+    tgsend "🔧 <b>ScalpX</b> : installation sur <b>$(hostname)</b>, préparation…" && break
+    [ "$i" -eq 3 ] && die "le bot ne peut pas t'écrire : ouvre ton bot dans Telegram, appuie sur Démarrer (/start), vérifie le chat_id ($CHAT), puis relance"
+    note "  Le bot ne peut pas encore t'écrire : ouvre-le dans Telegram et appuie sur Démarrer (/start), puis Entrée ici."
+    ask "Entrée pour réessayer…" >/dev/null
+done
+note "  ✅ Telegram relié : suis l'installation dans la conversation de ton bot."
+if systemctl is-active --quiet scalpx-installation 2>/dev/null; then
+    die "une installation est déjà en cours (suivi dans Telegram ; détail : sudo journalctl -u scalpx-installation -f)"
+fi
+
 D=$(mktemp -d /root/scalpx-paquet.XXXXXX)
 CLEAN="$D"                                                  # supprimé à la sortie (on_exit)
 say "=== Téléchargement de ScalpX (version validée)…"
@@ -73,4 +86,25 @@ say "=== Téléchargement de ScalpX (version validée)…"
   | tar xz -C "$D" --strip-components=1 \
   || die "téléchargement impossible depuis GitHub ($REPO) : connexion Internet du VPS ?"
 [ -f "$D/linux/install.sh" ] || die "paquet incomplet"
-TELEGRAM_TOKEN="$TOK" ALLOWED_CHAT_IDS="$CHAT" bash "$D/linux/install.sh"
+
+# Installation DÉTACHÉE du terminal (service systemd temporaire) : elle continue si tu fermes le terminal ou SSH.
+# Jetons passés par un fichier lisible par root seul, effacé dès sa lecture (jamais en ligne de commande).
+ENVF="$D/.installation.env"
+install -m 600 /dev/null "$ENVF"
+printf 'TELEGRAM_TOKEN=%q\nALLOWED_CHAT_IDS=%q\nSCALPX_LOG=%q\n' "$TOK" "$CHAT" "$LOG" > "$ENVF"
+RUN="set -a; . '$ENVF'; set +a; rm -f '$ENVF'; bash '$D/linux/install.sh'; rc=\$?; cd /; rm -rf '$D'; exit \$rc"
+CLEAN=""                                                    # paquet supprimé par l'installation détachée, à sa fin
+if command -v systemd-run >/dev/null 2>&1; then
+    systemctl reset-failed scalpx-installation >/dev/null 2>&1 || true
+    systemd-run --unit=scalpx-installation --collect --quiet /bin/bash -c "$RUN" \
+        || { CLEAN="$D"; die "lancement de l'installation impossible (systemd-run)"; }
+    DETAIL="sudo journalctl -u scalpx-installation -f"
+else
+    setsid nohup /bin/bash -c "$RUN" >>"$LOG" 2>&1 </dev/null &
+    DETAIL="sudo tail -f $LOG"
+fi
+lg "installation détachée lancée"
+echo
+say "✅ Installation lancée en arrière-plan (15 à 40 min)."
+note "  Tu peux FERMER ce terminal : tout se suit dans Telegram, conversation de ton bot."
+note "  Pour regarder ici quand même : $DETAIL"
