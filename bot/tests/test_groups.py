@@ -172,3 +172,24 @@ async def test_retour_a_un_seul_environnement(tmp_path, monkeypatch):
     assert all(g == 0 for _, g in launched) and running == {"0_S", "1_S", "2_S"}
     assert not (tmp_path / ".wine-g1").exists() and not (tmp_path / ".wine-g2").exists()
     assert groups.leftovers(cfg, db) == ([], []) and any("2 environnement(s)" in r for r in rep)
+
+
+def test_terminal_attache_a_un_processeur(tmp_path):
+    """Bot 4.12.0 : tous les fils d'un terminal sur UN processeur (ici une copie de « sleep » nommée terminal64.exe)."""
+    import shutil
+    import subprocess
+    from mt5.procs import PsutilProcesses, norm_path, pin_terminals
+    if (os.cpu_count() or 1) < 2 or not hasattr(os, "sched_setaffinity"):
+        pytest.skip("un seul processeur")
+    exe = tmp_path / "inst" / "terminal64.exe"
+    exe.parent.mkdir()
+    shutil.copy(shutil.which("sleep"), exe)
+    p = subprocess.Popen([str(exe), "20"])
+    try:
+        import time
+        time.sleep(0.3)
+        n = pin_terminals(PsutilProcesses(), {norm_path(exe): 5}, ncpu=2)
+        assert n >= 1 and os.sched_getaffinity(p.pid) == {1}
+        assert pin_terminals(PsutilProcesses(), {norm_path(exe): 5}, ncpu=2) == 0       # déjà réglé : rien à refaire
+    finally:
+        p.kill()

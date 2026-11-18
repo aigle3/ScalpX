@@ -30,6 +30,7 @@ class Paths(BaseModel):
 
 class MT5(BaseModel):
     terminal_exe: str = "terminal64.exe"
+    pin_cpu: bool = True                   # Bot 4.12.0 : chaque terminal attaché à UN processeur (Wine : bien moins de CPU système)
     ea_name: str = "ScalpX_v5"             # EA dans MQL5\Experts (sans extension)
     ea_file: str = "ScalpX_v5.ex5"
     set_name: str = "scalpx_v5.set"        # dans MQL5\Presets

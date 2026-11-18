@@ -505,6 +505,19 @@ async def j_watchdog(context: ContextTypes.DEFAULT_TYPE) -> None:
     await svc(context).ctx.watchdog.tick()
 
 
+async def j_pin(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Bot 4.12.0 : terminaux répartis 1 processeur chacun (à tour de rôle), relancés ou non par le bot."""
+    from mt5.procs import PsutilProcesses, norm_path, pin_terminals
+    s = svc(context)
+    cfg, mgr = s.ctx.cfg, s.ctx.mgr
+    if not getattr(cfg.mt5, "pin_cpu", False) or not isinstance(mgr.procs, PsutilProcesses):
+        return
+    targets = {norm_path(mgr.exe(i)): k for k, i in enumerate(s.ctx.db.list())}
+    n = await asyncio.get_running_loop().run_in_executor(None, pin_terminals, mgr.procs, targets)
+    if n:
+        log.info("affinité processeur : %d fil(s) d'exécution réglé(s)", n)
+
+
 async def j_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     s = svc(context)
     import time
@@ -779,6 +792,7 @@ def build_application(cfg: Config, ctx_factory) -> Application:
     jq.run_repeating(timed(j_presets), interval=max(60, t.presets_check_s), first=90, job_kwargs=JOB_KW)  # robots conformes au preset ⭐ ?
     jq.run_repeating(timed(j_dash), interval=2, first=5, job_kwargs=JOB_KW)        # refresh() : toutes les refresh_s, republication après repost_s
     jq.run_repeating(timed(j_watchdog), interval=t.watchdog_interval_s, first=20, job_kwargs=JOB_KW)
+    jq.run_repeating(timed(j_pin), interval=60, first=30, job_kwargs=JOB_KW)          # Bot 4.12.0 : 1 processeur par terminal
     jq.run_repeating(timed(j_opt), interval=60, first=120, job_kwargs=JOB_KW)
     jq.run_repeating(timed(j_build), interval=20, first=40, job_kwargs=JOB_KW)
     # Bot 4.2.0 : dépôt public lu sans jeton → 60 appels GitHub par heure au plus : vérification toutes les 5 min

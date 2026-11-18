@@ -205,6 +205,39 @@ class PsutilProcesses:
         return n
 
 
+def pin_terminals(procs: "PsutilProcesses", targets: dict[str, int], ncpu: int | None = None) -> int:
+    """Bot 4.12.0 : chaque terminal (TOUS ses fils d'exécution) attaché à un seul processeur ; wineserver garde tous les
+    processeurs. Sous Wine, un terminal réparti sur plusieurs cœurs passe beaucoup de temps à se synchroniser entre eux
+    (temps « système ») : mesuré sur le VPS (12 terminaux, 4 cœurs) : système 42 % → 29 %, attente CPU 58 % → 38 %.
+    targets : chemin normalisé de terminal64.exe → numéro de processeur. Renvoie le nombre de fils modifiés."""
+    ncpu = ncpu or os.cpu_count() or 1
+    if ncpu < 2 or not hasattr(os, "sched_setaffinity"):
+        return 0
+    every = set(range(ncpu))
+    names = {Path(t).name.lower() for t in targets} or {"terminal64.exe"}
+    changed = 0
+    for p in own_procs("name"):
+        try:
+            name = (p.info.get("name") or "").lower()
+            if name == "wineserver":
+                want = every
+            else:
+                pe = procs._exe_of(p, names)
+                if not pe or norm_path(pe) not in targets:
+                    continue
+                want = {targets[norm_path(pe)] % ncpu}
+            for t in p.threads():
+                try:
+                    if os.sched_getaffinity(t.id) != want:
+                        os.sched_setaffinity(t.id, want)
+                        changed += 1
+                except OSError:
+                    continue
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
+            continue
+    return changed
+
+
 def vps_load(path: Path) -> dict[str, float]:
     """Charge du VPS : CPU %, RAM %, disque % (pour l'en-tête du tableau de bord)."""
     try:
