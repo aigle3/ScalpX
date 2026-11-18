@@ -68,6 +68,22 @@ def explain_stop(reason: int, expected: bool) -> str:
     return f"🔌 EA arrêté : {why}."
 
 
+_NEWS_SENT: dict[str, float] = {}                  # Bot 4.10.1 : annonce news déjà notifiée → heure
+
+
+def _news_once(text: str, now: float) -> bool:
+    """Bot 4.10.1 : « 📰 NEWS DANS … » est envoyé par CHAQUE EA, chacun à son moment (un message par compte, minute après
+    minute) : une seule notification par annonce, pour tous les comptes. True = à notifier."""
+    key = text.split("\n", 1)[1].strip() if "\n" in text else text
+    for k, t in list(_NEWS_SENT.items()):
+        if now - t > 6 * 3600:
+            del _NEWS_SENT[k]
+    if key in _NEWS_SENT:
+        return False
+    _NEWS_SENT[key] = now
+    return True
+
+
 def event_to_notice(ev: Evenement, label: str, common: Path) -> Notice | None:
     """Transforme un événement de l'EA en notification (None = stocké mais non notifié)."""
     if ev.type.startswith("LABO_"):                   # labo des filtres : mesures, jamais notifiées
@@ -84,6 +100,10 @@ def event_to_notice(ev: Evenement, label: str, common: Path) -> Notice | None:
             p = Path(common) / str(f)
             photo = p if p.exists() else None
     text = ev.texte or ev.type
+    if text.startswith("📰 NEWS DANS"):
+        if not _news_once(text, time.time()):
+            return None
+        label = "Tous les comptes"
     return Notice(ev.id, label, ev.type, text, prio, photo, ev.ts or int(time.time()))
 
 

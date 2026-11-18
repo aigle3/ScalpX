@@ -122,3 +122,14 @@ async def test_repartition_initiale_un_par_un_et_retour_si_echec(tmp_path):
     assert launched[:2] == [("0_S", 1), ("1_S", 1)] and launched[-1] == ("2_S", 0)
     assert groups.group_of(Path(insts[2].folder)) == 0 and running == {"0_S", "1_S", "2_S"}
     assert rep[0].startswith("✅") and rep[2].startswith("↩️") and any("1/3" in t for t in said)
+
+
+def test_annonce_news_une_seule_fois_pour_tous_les_comptes():
+    from core import service
+    from core.models import Evenement
+    service._NEWS_SENT.clear()
+    body = "\n━━━━\n🔴 USD · EIA Crude Oil Stocks Change\n🕐 16:30 (heure de France)"
+    a = service.event_to_notice(Evenement(id="1_S", type="NOTIF", texte="📰 NEWS DANS 16 min" + body), "1", Path("."))
+    b = service.event_to_notice(Evenement(id="2_S", type="NOTIF", texte="📰 NEWS DANS 15 min" + body), "2", Path("."))
+    c = service.event_to_notice(Evenement(id="2_S", type="NOTIF", texte="📰 NEWS DANS 15 min\n━━━━\n🔴 USD · NFP"), "2", Path("."))
+    assert a is not None and a.label == "Tous les comptes" and b is None and c is not None
