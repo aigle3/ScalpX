@@ -122,8 +122,15 @@ ok "préfixe prêt (Windows 11)"
 # L'installeur MT5 exige WebView2 (sinon il s'arrête aussitôt sur une erreur invisible : NtRaiseHardError)
 if ! ls "$PFX/drive_c/Program Files (x86)/Microsoft/EdgeWebView/Application"/*/msedgewebview2.exe >/dev/null 2>&1; then
     echo "  Installation de Microsoft WebView2 (requis par l'installeur MT5, 2 à 10 min)…"; tg "🔧 Installation : WebView2 (2 à 10 min)…"
-    as_u curl -fsSL --connect-timeout 20 --max-time 600 -o /tmp/webview2.exe "https://go.microsoft.com/fwlink/p/?LinkId=2124703" || die "téléchargement de WebView2 impossible"
-    as_u timeout 600 wine /tmp/webview2.exe /silent /install >/dev/null 2>&1 || true
+    # 1er choix : installeur COMPLET hors ligne (x64, ~180 Mo) : n'a pas besoin du service de téléchargement de Microsoft,
+    # qui ne démarre pas sous Wine. Secours : le petit lanceur (il télécharge lui-même en arrière-plan).
+    if as_u curl -fsSL --connect-timeout 20 --max-time 900 -o /tmp/webview2.exe "https://go.microsoft.com/fwlink/?linkid=2124701"; then
+        echo "  installeur complet téléchargé ($(du -h /tmp/webview2.exe | cut -f1))"
+    else
+        as_u curl -fsSL --connect-timeout 20 --max-time 600 -o /tmp/webview2.exe "https://go.microsoft.com/fwlink/p/?LinkId=2124703" \
+            || die "téléchargement de WebView2 impossible"
+    fi
+    as_u env WINEDEBUG=err+all timeout 900 wine /tmp/webview2.exe /silent /install >>"$LOG" 2>&1 || true   # erreurs Wine → journal
     # Ce fichier n'est qu'un lanceur : il rend la main tout de suite et le service Microsoft (MicrosoftEdgeUpdate)
     # télécharge puis installe WebView2 en arrière-plan. On attend qu'il ait fini (10 min max) AVANT de l'arrêter.
     WV="$PFX/drive_c/Program Files (x86)/Microsoft/EdgeWebView/Application"
@@ -154,7 +161,7 @@ if [ ! -f "$BASE/terminal64.exe" ]; then
         done
         [ -n "$got" ] || die "installeur MT5 introuvable : relance avec MT5_SETUP_URL=<lien de l'installeur> sudo -E bash linux/install.sh"
         echo "  Installation de MT5 dans Wine (plusieurs minutes)…"
-        as_u wine /tmp/mt5setup.exe /auto >/dev/null 2>&1 &
+        as_u env WINEDEBUG=err+all wine /tmp/mt5setup.exe /auto >>"$LOG" 2>&1 &   # erreurs Wine → journal
         for _ in $(seq 1 120); do
             sleep 5
             src=$(ls -d "$PFX/drive_c/Program Files/"*/ 2>/dev/null | while read -r d; do [ -f "$d/terminal64.exe" ] && [ -f "$d/MetaEditor64.exe" ] && echo "${d%/}"; done | head -1 || true)
