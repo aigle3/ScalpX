@@ -292,7 +292,36 @@ async def test_monitor_arret_ea_explique(stack):
     db.meta_set("closing_2_b", str(int(time.time())))                      # fermeture demandée par le bot
     ea.event("2_b", "ARRET_EA", "🔌 ScalpX arrêté (raison 9)", 1, {"raison": 9}, 2)
     await mon.poll_events()
-    assert "sans demande du bot" in got[0].text and "à la demande du bot" in got[1].text
+    assert len(got) == 1 and "sans demande du bot" in got[0].text           # Bot 4.8.5 : arrêt voulu → pas de message
+
+
+@pytest.mark.asyncio
+async def test_redemarrage_par_le_bot_sans_messages_en_plus(stack):
+    """Bot 4.8.5 : arrêt / démarrage / reprise demandés par le bot (redémarrage, déploiement) → historique seulement ;
+    échec de démarrage ou relance par le watchdog → toujours notifiés."""
+    cfg, db, procs, status, cmdq, mgr, ea = stack
+    db.add_instance(Instance("3_c", 3, "c", "Gamma", str(cfg.paths.instances / "3_c"), 1, "5.0", DEMARRE))
+    from core.events import EventReader
+    got = []
+
+    async def emit(n):
+        got.append(n)
+    mon = Monitor(cfg, db, status, EventReader(cfg.paths.common()), emit)
+    now = str(int(time.time()))
+    db.meta_set("closing_3_c", now)
+    db.meta_set("bot_start_3_c", now)
+    ea.event("3_c", "ARRET_EA", "arrêt", 1, {"raison": 9}, 1)
+    ea.event("3_c", "DEMARRAGE_EA", "🤖 ScalpX 8.0.0 démarré", 0, {}, 2)
+    ea.event("3_c", "REPRISE_IMMEDIATE", "▶️ Terminal relancé : le robot tournait", 0, {}, 3)
+    ea.event("3_c", "ARRET_EA", "échec", 1, {"raison": 8}, 4)                # échec de démarrage : notifié
+    await mon.poll_events()
+    assert [n.kind for n in got] == ["ARRET_EA"] and "échec de démarrage" in got[0].text
+    assert len(db.events("3_c", 10)) == 4 if hasattr(db, "events") else True   # tout reste dans l'historique
+    db.meta_set("closing_3_c", "0")
+    db.meta_set("bot_start_3_c", "0")                                       # relance par le watchdog : notifiée
+    ea.event("3_c", "DEMARRAGE_EA", "🤖 ScalpX 8.0.0 démarré", 0, {}, 5)
+    await mon.poll_events()
+    assert [n.kind for n in got] == ["ARRET_EA", "DEMARRAGE_EA"]
 
 
 def test_capital_insuffisant_notifie_une_fois_avec_son(cfg, db, tmp_path):

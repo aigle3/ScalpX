@@ -62,7 +62,7 @@ class Watchdog:
                 continue
             if self.mgr.is_running(inst):
                 continue
-            self.mgr.launch(inst)
+            self.mgr.launch(inst, by_bot=False)                  # relance par le watchdog : notifiée (Bot 4.8.5)
             launched.append(inst.id)
             await asyncio.sleep(self.cfg.timing.launch_stagger_s)
         return launched
@@ -81,7 +81,7 @@ class Watchdog:
                 if self.can_restart(inst.id, now):
                     self._restarts[inst.id].append(now)
                     n = len(self._restarts[inst.id])
-                    self.mgr.launch(inst)
+                    self.mgr.launch(inst, by_bot=False)                  # relance par le watchdog : notifiée (Bot 4.8.5)
                     await self.alert(inst.id, "RELANCE", f"🔴 Terminal de {inst.label} absent : relancé ({n}/{self.cfg.timing.restarts_per_hour} cette heure).", 2)
                 elif self._flagged.get(inst.id) != "LIMITE":
                     self._flagged[inst.id] = "LIMITE"

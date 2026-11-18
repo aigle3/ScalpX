@@ -177,6 +177,11 @@ class Monitor:
         self.db.add_event(inst.id, ev.ts or int(time.time()), ev.type, ev.prio, ev.texte)
         self._track(inst.id, ev)
         notice = event_to_notice(ev, inst.label, self.cfg.paths.common())
+        if notice is not None and ev.type in self.QUIET_WHEN_BOT and self._bot_initiated(inst.id, ev):
+            # Bot 4.8.5 : arrêt / démarrage / reprise que le bot vient de demander (redémarrage, déploiement, création…) :
+            # gardés dans l'historique, mais pas de message en plus de celui de progression.
+            if ev.type != "ARRET_EA" or int((ev.data or {}).get("raison", -1) if isinstance(ev.data, dict) else -1) == 9:
+                return
         if notice is not None and ev.type == "ARRET_EA":
             reason = ev.data.get("raison", -1) if isinstance(ev.data, dict) else -1
             try:
@@ -187,6 +192,20 @@ class Monitor:
             notice.text = explain_stop(int(reason), abs(when - closing) < 180)
         if notice is not None:
             await self.emit(notice)
+
+    QUIET_WHEN_BOT = ("ARRET_EA", "DEMARRAGE_EA", "REPRISE_IMMEDIATE")
+    QUIET_WINDOW_S = 300
+
+    def _bot_initiated(self, iid: str, ev: Evenement) -> bool:
+        when = ev.ts or int(time.time())
+        for k in (f"closing_{iid}", f"bot_start_{iid}"):
+            try:
+                t = int(self.db.meta_get(k) or 0)
+            except ValueError:
+                t = 0
+            if t and -30 <= when - t <= self.QUIET_WINDOW_S:
+                return True
+        return False
 
     def _labo(self, iid: str, ev: Evenement) -> None:
         d = ev.data if isinstance(ev.data, dict) else {}

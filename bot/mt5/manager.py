@@ -49,9 +49,12 @@ class InstanceManager:
         except OSError as exc:
             log.warning("profil %s : %s", name, exc)
 
-    def launch(self, inst: Instance, ini: Path | None = None) -> int:
+    def launch(self, inst: Instance, ini: Path | None = None, by_bot: bool = True) -> int:
         """Lance le terminal. Création : .ini avec mot de passe ; sinon .ini de relance SANS secret (rouvre le graphique de l'EA).
-        Efface l'ancien statut pour ne pas lire un vieux heartbeat."""
+        Efface l'ancien statut pour ne pas lire un vieux heartbeat. by_bot : lancement voulu (démarrage, redémarrage,
+        déploiement, création) → « EA démarré / reprise » non notifiés (Bot 4.8.5) ; False : relance par le watchdog."""
+        if by_bot:
+            self.db.meta_set(f"bot_start_{inst.id}", str(int(time.time())))
         self.status.remove(inst.id)
         self.ensure_profile(inst)
         if ini is None:
