@@ -24,7 +24,7 @@ TABLES = ("instances", "balances", "events", "cycles", "closures500", "withdrawa
 # réglages du bot lui-même gardés (mises à jour, tableau de bord, compilation, serveurs mémorisés, sauvegarde GitHub)
 KEEP_META = ("installed_commit", "update_pending", "update_offered", "dash_msg_id", "gh_err", "gh_token_exp",
              "gh_exp_alert", "compile_s", "autobuild_stamp", "build_notified", "servers_extra", "preset_conseille_v",
-             "health_ok", "ghb_hash", "ghb_ts", "ghb_err", "install_pending", "install_offered", "keys_asked", "fbk_ts", "fbk_err", "fbk_size", "webview", "backup_never", "backup_offer", "backup_plain")
+             "health_ok", "ghb_hash", "ghb_ts", "ghb_err", "install_pending", "install_offered", "keys_asked", "fbk_ts", "fbk_err", "fbk_size", "webview", "backup_never", "backup_offer", "backup_plain", "bkp_owner", "bkp_conflict_ask")
 
 
 @dataclass

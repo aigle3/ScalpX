@@ -229,3 +229,10 @@ def pytest_pyfunc_call(pyfuncitem):
         asyncio.run(pyfuncitem.obj(**args))
         return True
     return None
+
+
+@pytest.fixture(autouse=True)
+def _depot_de_sauvegarde_vide(monkeypatch):
+    """Bot 4.4.0 : aucun test ne contacte GitHub pour savoir si une sauvegarde existe déjà (dépôt vide par défaut)."""
+    from core import ghbackup
+    monkeypatch.setattr(ghbackup, "existing", lambda cfg, http=None: (set(), ""))

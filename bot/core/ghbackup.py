@@ -142,6 +142,27 @@ def get(cfg: Config, path: str, http=None) -> tuple[bytes, str, int]:
         return b"", f"GitHub injoignable : {exc}", 0
 
 
+BACKUP_FILES = ("sauvegarde.enc", "sauvegarde.tar.gz", "presets.enc", "presets.txt")
+
+
+def existing(cfg: Config, http=None) -> tuple[set[str], str]:
+    """Bot 4.4.0 : ({fichiers de sauvegarde déjà présents}, erreur). Dépôt vide (aucun commit) → ensemble vide."""
+    rp = repo(cfg)
+    if not rp:
+        return set(), "sauvegarde GitHub non activée (🛠 Système → ☁️ Sauvegarde)"
+    call = http or (lambda m, u, b=None: _req(cfg, m, u, b))
+    try:
+        code, cur = call("GET", f"{API}/repos/{rp}/contents/")
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return set(), f"GitHub injoignable : {exc}"
+    if code == 404:
+        return set(), ""
+    if code != 200:
+        return set(), explain(code)
+    names = {str(x.get("name", "")) for x in cur} if isinstance(cur, list) else set()
+    return names & set(BACKUP_FILES), ""
+
+
 def get_first(cfg: Config, paths: tuple[str, ...], http=None) -> tuple[bytes, str]:
     """Premier fichier présent parmi `paths` (version chiffrée d'abord)."""
     last = ""

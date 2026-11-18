@@ -155,6 +155,8 @@ def make_ctx(cfg: Config) -> "Ctx":
             if gone:
                 restored += f" ; {len(gone)} compte(s) sans terminal sur ce serveur archivés (📄 / ➕ pour les recréer)"
         db.meta_set("restore_note", restored)
+        if not restored.startswith("ÉCHEC"):
+            db.meta_set("bkp_owner", "1")                             # Bot 4.4.0 : il peut écrire la sauvegarde
     common = cfg.paths.common()
     common.mkdir(parents=True, exist_ok=True)
     status = StatusReader(common)

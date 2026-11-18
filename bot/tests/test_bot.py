@@ -1751,3 +1751,32 @@ async def test_ancien_preset_et_ancien_ea_avec_reglages_graphiques(svc):
         assert dash.preset_check.diffs == {}
     finally:
         await ea.stop()
+
+
+async def test_serveur_neuf_n_ecrase_jamais_une_sauvegarde_existante(svc, monkeypatch):
+    """Bot 4.4.0 : serveur neuf + dépôt qui contient déjà la sauvegarde d'un autre serveur → rien n'est écrit,
+    ☁️ Restaurer / 🔁 Remplacer proposés ; 🔁 Remplacer (confirmé) écrit ; un dépôt vide est écrit tout de suite."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    from core import envfile, fullbackup, ghbackup
+    monkeypatch.setattr(envfile, "set_key", lambda path, k, v: None)
+    pushed = []
+    monkeypatch.setattr(fullbackup, "push", lambda cfg, data, http=None: pushed.append("complète") or "")
+    monkeypatch.setattr(ghbackup, "push", lambda cfg, text, http=None: pushed.append("presets") or "")
+    remote = {"sauvegarde.enc", "presets.enc"}
+    monkeypatch.setattr(ghbackup, "existing", lambda cfg, http=None: (set(remote), ""))
+    ctx.cfg.backup_token, ctx.cfg.backup_repo = "tok", "moi/scalpx-sauvegarde"
+    dash.store.put("Martin", {"fast": "12"})
+    router.awaiting_token = "BACKUP_PASSWORD"
+    await router.on_text("motdepasse-1")
+    assert pushed == [] and "Une sauvegarde existe déjà" in sender.all_text()
+    assert "rien n'a été écrasé" in dash.render()[0]
+    assert await router.full_backup() == router.BKP_WAIT and pushed == []
+    await router.backup_presets()
+    assert pushed == []
+    await router.on_callback("d:bkown")
+    await _confirm(router, dash)
+    assert await _until(lambda: "complète" in pushed and "presets" in pushed)
+    assert ctx.db.meta_get("bkp_owner") == "1"
+    # autre serveur neuf, dépôt vide : écrit tout de suite
+    ctx.db.meta_set("bkp_owner", ""); ctx.db.meta_set("fbk_ts", ""); pushed.clear(); remote.clear()
+    assert await router.full_backup() == "" and pushed == ["complète"] and ctx.db.meta_get("bkp_owner") == "1"

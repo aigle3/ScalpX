@@ -186,7 +186,11 @@ flowchart LR
     D --> E["✅ Comme avant"]
 ```
 
-Arrête d'abord les comptes sur l'ancien serveur (règle des deux serveurs ci-dessus).
+- **Jeton perdu ?** Normal : GitHub ne le montre qu'une fois. Crée simplement un **nouveau** jeton : le bot retrouve ton
+  dépôt privé existant (même nom) et le reprend.
+- **Rien n'est écrasé** : tant que ce serveur n'a pas restauré, le bot ne touche pas à la sauvegarde existante et propose
+  **☁️ Restaurer** (avec le mot de passe de cette sauvegarde) ou **🔁 Remplacer**.
+- Arrête d'abord les comptes sur l'ancien serveur (règle des deux serveurs ci-dessus).
 
 ## 🤖 Optimiseur nocturne
 

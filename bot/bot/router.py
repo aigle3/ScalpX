@@ -217,6 +217,19 @@ class Router:
             self.dash.flash("☁️ Sauvegarde sans chiffrement (dépôt privé) : 🔒 Chiffrer reste possible ici.")
             self._bg(self._after_plain())
             return ""
+        elif sub == "bkown":                                    # Bot 4.4.0 : remplacer la sauvegarde d'un autre serveur
+            async def own() -> None:
+                self.ctx.db.meta_set("bkp_owner", "1")
+                self.ctx.db.meta_set("ghb_hash", "")
+                self.ctx.db.add_action("", "SAUVEGARDE REMPLACÉE", True, "")
+                err = await self.full_backup()
+                await self.backup_presets()
+                self.dash.goto("bkp")
+                self.dash.flash("✅ Sauvegarde remplacée par ce serveur." if not err else f"❌ {esc(err)}")
+                await self.dash.refresh(force=True)
+            return await self._ask("🔁 <b>Remplacer la sauvegarde existante par ce serveur ?</b>\nPresets, historique et optimiseur "
+                                   "de CE serveur remplacent ceux du dépôt (l'ancienne version reste dans l'historique GitHub).",
+                                   own, ("bkp",), "🔁 Remplacer")
         elif sub == "bkoff":                                    # désactiver : jeton et clé retirés du .env (dépôt gardé)
             return await self._ask("☁️ <b>Désactiver la sauvegarde ?</b>\nLe bot oublie le jeton, le dépôt et la clé ; le dépôt "
                                    "GitHub et ses sauvegardes restent sur ton compte.", self._backup_off, ("bkp",), "🚫 Désactiver")
@@ -1378,12 +1391,41 @@ class Router:
         upd.STOP.set()
 
     # ---- Bot 3.21.0 : ☁️ sauvegarde complète (base + presets) et restauration
+    BKP_WAIT = "une sauvegarde existe déjà dans le dépôt : rien n'est écrasé"
+
+    async def may_write_backup(self) -> bool:
+        """Bot 4.4.0 : ce serveur peut-il écrire la sauvegarde ? Oui s'il en est le « propriétaire » (il a déjà sauvegardé,
+        il vient de restaurer, ou tu as choisi 🔁 Remplacer) ou si le dépôt n'en contient aucune. Sinon (serveur neuf et
+        sauvegarde d'un autre serveur dans le dépôt) : rien n'est écrasé, ☁️ Restaurer / 🔁 Remplacer proposés (1×/jour)."""
+        from core import ghbackup
+        db = self.ctx.db
+        if db.meta_get("bkp_owner") == "1" or db.meta_get("fbk_ts"):
+            return True
+        names, err = await asyncio.to_thread(ghbackup.existing, self.ctx.cfg)
+        if err:
+            return False                                        # incertain : on n'écrit pas (nouvel essai plus tard)
+        if not names:
+            db.meta_set("bkp_owner", "1")
+            return True
+        today = time.strftime("%Y-%m-%d")
+        if db.meta_get("bkp_conflict_ask") != today:
+            db.meta_set("bkp_conflict_ask", today)
+            await self.sender.send(
+                self.chat_id, f"☁️ <b>Une sauvegarde existe déjà</b> dans <b>{esc(ghbackup.repo(self.ctx.cfg))}</b> "
+                "(serveur précédent). Je ne l'écrase pas.\n• <b>☁️ Restaurer</b> : la récupérer sur ce serveur (son mot de "
+                "passe sera demandé) ;\n• <b>🔁 Remplacer</b> : la remplacer par ce serveur (l'ancienne reste dans "
+                "l'historique du dépôt GitHub).", [[("☁️ Restaurer", "d:frs")], [("🔁 Remplacer", "d:bkown"), ("✖️ Plus tard", "d:close")]],
+                False)
+        return False
+
     async def full_backup(self, quiet: bool = False) -> str:
         from core import fullbackup, ghbackup
         from core.version import bot_version
         cfg, db = self.ctx.cfg, self.ctx.db
         if not await self.backup_ready():
             return db.meta_get("ghb_err") or "sauvegarde GitHub non activée : 🛠 Système → ☁️ Sauvegarde"
+        if not await self.may_write_backup():
+            return self.BKP_WAIT
         try:
             data = await asyncio.to_thread(fullbackup.build, db, cfg.paths.data, bot_version())
             err = await asyncio.to_thread(fullbackup.push, cfg, data)
@@ -1576,14 +1618,18 @@ class Router:
         await self.dash.refresh(force=True)
         err = await self.full_backup()
         await self.backup_presets()
-        self.dash.flash("✅ Sauvegarde chiffrée envoyée. <b>Note ce mot de passe</b> : sans lui, impossible de restaurer sur un "
-                        "nouveau serveur." if not err else f"❌ {esc(err)}")
+        if err == self.BKP_WAIT:
+            self.dash.flash("✅ Chiffrement prêt. Une sauvegarde d'un serveur précédent existe déjà : rien n'a été écrasé. "
+                            "☁️ Restaurer la récupère (avec SON mot de passe).", 600)
+        else:
+            self.dash.flash("✅ Sauvegarde chiffrée envoyée. <b>Note ce mot de passe</b> : sans lui, impossible de restaurer sur "
+                            "un nouveau serveur." if not err else f"❌ {esc(err)}")
         await self.dash.refresh(force=True)
 
     async def backup_presets(self) -> None:
         """Toutes les 5 min : presets changés → réécrits sur GitHub (chiffrés si activé ; une alerte par problème)."""
         from core import ghbackup
-        if not await self.backup_ready():
+        if not await self.backup_ready() or not await self.may_write_backup():
             return
         store = self.dash.store
         names = store.names()
