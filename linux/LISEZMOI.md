@@ -44,6 +44,7 @@ Ensuite tout se fait dans Telegram :
 ```bash
 sudo systemctl status scalpx-bot          # état du bot
 sudo journalctl -u scalpx-bot -f          # journal en direct
+sudo cat /var/log/scalpx-installation.log  # journal de l'installation (aucun token dedans)
 sudo systemctl restart scalpx-bot         # redémarrer le bot (les terminaux MT5 continuent de tourner)
 sudo -u scalpx bash -c 'cd ~/scalpx/bot && .venv/bin/python main.py --check'   # contrôle de l'installation
 ```

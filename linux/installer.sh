@@ -13,11 +13,19 @@ API="https://api.telegram.org"
 export SCALPX_REPO="$REPO"
 
 say()  { echo -e "\e[36m$*\e[0m"; }
-die()  { echo -e "\e[31m[ERREUR]\e[0m $*"; exit 1; }
+die()  { echo -e "\e[31m[ERREUR]\e[0m $*"; echo "  Journal : /var/log/scalpx-installation.log"; exit 1; }
 ask()  { local r=""; read -rp "  $1 " r </dev/tty || true; echo "$r"; }
 json() { python3 -c "import json,sys; d=json.load(sys.stdin); print(eval(sys.argv[1], {}, {'d': d}))" "$1" 2>/dev/null || true; }
 
 [ "$(id -u)" -eq 0 ] || die "lance avec sudo : curl -fsSL …/installer.sh | sudo bash"
+# Journal de l'installation (sans aucun token : ils sont saisis au clavier, jamais affichés) : à envoyer en cas de souci.
+LOG=/var/log/scalpx-installation.log
+if [ -z "${SCALPX_LOG:-}" ]; then
+    export SCALPX_LOG="$LOG"
+    install -m 600 /dev/null "$LOG" 2>/dev/null || true
+    exec > >(tee -a "$LOG") 2>&1
+    echo "=== $(date '+%d/%m/%Y %H:%M:%S') · $(hostname) · $(. /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-Linux}")"
+fi
 command -v curl >/dev/null && command -v python3 >/dev/null || { apt-get update -qq && apt-get install -y -qq curl python3 >/dev/null; }
 
 # Appels réseau toujours limités dans le temps ; 2e essai forcé en IPv4 (IPv6 du serveur souvent mal configurée).

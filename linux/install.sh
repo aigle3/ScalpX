@@ -37,6 +37,14 @@ ask()  { local r=""; [ -n "$AUTO" ] || read -rp "  $1 " r </dev/tty || true; ech
 as_u() { sudo -u "$U" -H env WINEPREFIX="$PFX" WINEARCH=win64 DISPLAY="$DISP" WINEDEBUG=-all "$@"; }
 
 [ "$(id -u)" -eq 0 ] || die "lance ce script avec sudo : sudo bash linux/install.sh"
+# Journal de l'installation (sans aucun token : ils sont saisis au clavier, jamais affichés) : à envoyer en cas de souci.
+LOG=/var/log/scalpx-installation.log
+if [ -z "${SCALPX_LOG:-}" ]; then
+    export SCALPX_LOG="$LOG"
+    touch "$LOG"; chmod 600 "$LOG" 2>/dev/null || true
+    exec > >(tee -a "$LOG") 2>&1
+    echo "=== $(date '+%d/%m/%Y %H:%M:%S') · $(hostname) · $(. /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-Linux}")"
+fi
 [ -f "$PKG/bot/main.py" ] && [ -d "$PKG/ea/MQL5/Experts" ] || die "paquet incomplet : lance le script depuis le dossier ScalpX téléchargé"
 . /etc/os-release
 [ "${ID:-}" = "ubuntu" ] || warn "système non Ubuntu ($PRETTY_NAME) : non testé"

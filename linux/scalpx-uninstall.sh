@@ -41,7 +41,7 @@ PKGDIR=$(cat /etc/scalpx/paquet 2>/dev/null)
 if [ -n "$PKGDIR" ] && [ -f "$PKGDIR/linux/install.sh" ] && [ -f "$PKGDIR/bot/main.py" ]; then
     rm -rf "$PKGDIR"                                      # ex. ~/scalpx-paquet (jamais un autre dossier)
 fi
-rm -f /etc/sudoers.d/scalpx /usr/local/sbin/scalpx-root-update /var/log/scalpx-root-update.log /tmp/mt5setup.exe /tmp/webview2.exe
+rm -f /etc/sudoers.d/scalpx /usr/local/sbin/scalpx-root-update /var/log/scalpx-root-update.log /var/log/scalpx-installation.log /tmp/mt5setup.exe /tmp/webview2.exe
 rm -rf /etc/scalpx /root/scalpx-paquet.*
 step "6/6 🗑 suppression de Wine et de l'écran virtuel (paquets installés pour ScalpX)…"
 export DEBIAN_FRONTEND=noninteractive

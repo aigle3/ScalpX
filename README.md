@@ -263,6 +263,13 @@ Envoie-lui d'abord un message (Telegram interdit à un bot d'écrire le premier)
 </details>
 
 <details>
+<summary><b>L'installation s'arrête ou bloque</b></summary>
+
+Tout est noté dans `/var/log/scalpx-installation.log` (jamais de token dedans) : `sudo cat /var/log/scalpx-installation.log`.
+Chaque étape réseau a une limite de temps et réessaie en IPv4 ; si Telegram ou GitHub est injoignable, le script le dit.
+</details>
+
+<details>
 <summary><b>Les terminaux s'arrêtent-ils pendant une mise à jour du bot ?</b></summary>
 
 Non : le bot redémarre seul, les terminaux MT5 continuent de trader.
