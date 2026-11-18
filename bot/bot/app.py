@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import collections
 import io
 import logging
 import os
@@ -173,8 +174,25 @@ def svc(context: ContextTypes.DEFAULT_TYPE) -> Services:
 
 
 # --------------------------------------------------------------------------- handlers
+SEEN_UPDATES: "collections.deque[int]" = collections.deque(maxlen=500)   # Bot 4.8.10 : derniers update_id traités
+
+
+def seen_before(update_id) -> bool:
+    """Bot 4.8.10 : Telegram peut renvoyer le MÊME événement (connexion qui hoquette pendant la réception) : traité une seule
+    fois. C'était la cause des doubles de la journée (bouton, message, tableau de bord en 2 exemplaires)."""
+    if not isinstance(update_id, int):
+        return False
+    if update_id in SEEN_UPDATES:
+        return True
+    SEEN_UPDATES.append(update_id)
+    return False
+
+
 async def h_guard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Ne répond qu'aux chat_id autorisés ; tout le reste est ignoré et journalisé."""
+    """Ne répond qu'aux chat_id autorisés ; tout le reste est ignoré et journalisé. Un événement reçu deux fois est ignoré."""
+    if seen_before(getattr(update, "update_id", None)):
+        log.warning("événement Telegram %s reçu deux fois : ignoré", getattr(update, "update_id", "?"))
+        raise ApplicationHandlerStop
     chat = update.effective_chat
     allowed = context.application.bot_data["allowed"]
     msg = getattr(update, "message", None)

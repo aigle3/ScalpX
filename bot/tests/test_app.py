@@ -115,3 +115,13 @@ def test_tous_les_prefixes_de_boutons_sont_captes():
 def test_le_handler_des_boutons_utilise_cb_pattern():
     import inspect
     assert "CallbackQueryHandler(h_cb, pattern=CB_PATTERN)" in inspect.getsource(botapp.build_application)
+
+
+def test_evenement_telegram_recu_deux_fois_traite_une_seule_fois():
+    """Bot 4.8.10 : même update_id renvoyé par Telegram → ignoré (cause des boutons / messages en double)."""
+    botapp.SEEN_UPDATES.clear()
+    assert not botapp.seen_before(1001) and botapp.seen_before(1001)
+    assert not botapp.seen_before(1002) and not botapp.seen_before(None)
+    for i in range(600):
+        botapp.seen_before(5000 + i)
+    assert not botapp.seen_before(1001)                                 # mémoire bornée (500 derniers)
