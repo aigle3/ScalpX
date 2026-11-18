@@ -18,6 +18,31 @@ _NUM = re.compile(r"-?\d+(?:[.,]\d+)?")
 BY_KEY = {p[0]: p for p in cat.PARAMS}
 
 
+def sniff_file(blob: bytes) -> str:
+    """Bot 4.8.2 : nature d'un fichier envoyé au bot sans bouton préalable : 'presets' (export, presets.json, sauvegarde
+    complète, chiffré ou non), 'comptes' (lignes numéro:mot de passe:serveur) ou ''."""
+    import re as _re
+    from . import crypt
+    if not blob:
+        return ""
+    if crypt.is_encrypted(blob) or blob[:2] == b"\x1f\x8b":
+        return "presets"
+    for enc in ("utf-8-sig", "utf-16"):
+        try:
+            text = blob.decode(enc)
+            break
+        except UnicodeDecodeError:
+            text = ""
+    if not text:
+        return ""
+    if "[preset=" in text or '"presets"' in text:
+        return "presets"
+    lines = [l.strip() for l in text.splitlines() if l.strip() and not l.strip().startswith("#")]
+    if lines and sum(bool(_re.match(r"^\d{4,}\s*[:;,]\s*\S+\s*[:;,]\s*\S+", l)) for l in lines) >= max(1, len(lines) // 2):
+        return "comptes"
+    return ""
+
+
 def valid_value(key: str, v) -> bool:
     """Bot 4.3.0 : valeur brute lisible par l'EA pour cette clé (preset importé, restauré ou ancien) ?
     Clé inconnue (réglage retiré de l'EA), texte, 1/0 attendu, choix hors liste → False. Aucune valeur n'est modifiée :

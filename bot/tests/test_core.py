@@ -548,3 +548,16 @@ def test_import_tolerant_reglages_retires_inconnus_ou_illisibles(tmp_path):
         f.write_text(bad, encoding="utf-8")
         st = ps.PresetStore(f)                                                # jamais d'exception
         assert all(ps.valid_value(k, v) for p in st.presets.values() for k, v in p.items())
+
+
+def test_fichier_reconnu_sans_bouton():
+    """Bot 4.8.2 : un fichier envoyé directement est reconnu (presets / sauvegarde / comptes)."""
+    import gzip, json
+    from core import crypt, presets as ps
+    assert ps.sniff_file(b"# ScalpX presets\n[preset=Martin]\nfast=12\n") == "presets"
+    assert ps.sniff_file("[preset=Martin]\nfast=12\n".encode("utf-16")) == "presets"
+    assert ps.sniff_file(json.dumps({"presets": {"Martin": {}}}).encode()) == "presets"
+    assert ps.sniff_file(gzip.compress(b"tar")) == "presets"
+    assert ps.sniff_file(crypt.encrypt(b"x", crypt.new_key("motdepasse-1"))) == "presets"
+    assert ps.sniff_file(b"52030694:Mdp!123:RoboForex-Pro\n52030697;autre;RoboForex-Pro\n") == "comptes"
+    assert ps.sniff_file(b"bonjour") == "" and ps.sniff_file(b"") == "" and ps.sniff_file(b"\xff\xd8\xff\xe0jpeg") == ""

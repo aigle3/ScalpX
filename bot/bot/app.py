@@ -217,8 +217,33 @@ async def h_doc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception:
             log.warning("fichier de comptes : suppression du message impossible")
     if not s.router.awaiting_import and not bulk:
-        await s.sender.send(s.chat_id, "📎 Fichier ignoré. Pour importer des presets : 💾 Presets → 📥 Importer ; pour "
-                            "ajouter des comptes : 📄 Comptes (fichier). Puis renvoie-le.", [[("✖ Fermer", "d:close")]], True)
+        # Bot 4.8.2 : fichier envoyé sans bouton → reconnu tout seul (avant : « ignoré », même juste après un import réussi)
+        data = b""
+        if (m.document.file_size or 0) <= 20 * 2**20:
+            try:
+                data = bytes(await (await m.document.get_file()).download_as_bytearray())
+            except Exception as exc:
+                log.warning("fichier reçu illisible : %s", exc)
+        from core import presets as ps
+        kind = ps.sniff_file(data)
+        if kind == "presets":
+            try:
+                await s.sender.delete(update.effective_chat.id, m.message_id)
+            except Exception:
+                pass
+            await s.router.preset_import_file(data)
+            return
+        if kind == "comptes":                                   # mots de passe : effacé, jamais traité sans le bouton
+            try:
+                await s.sender.delete(update.effective_chat.id, m.message_id)
+            except Exception:
+                log.warning("fichier de comptes : suppression du message impossible")
+            await s.sender.send(s.chat_id, "🔒 Fichier de comptes reçu et <b>effacé</b> (mots de passe). Pour créer ces comptes : "
+                                "👥 Comptes → 📄 Ajouter des comptes (fichier), puis renvoie-le.", [[("📄 Comptes (fichier)", "d:bulk"),
+                                                                                                  ("✖ Fermer", "d:close")]], True)
+            return
+        await s.sender.send(s.chat_id, "📎 Fichier non reconnu : ni presets / sauvegarde ScalpX, ni liste de comptes "
+                            "(numéro:mot de passe:serveur).", [[("✖ Fermer", "d:close")]], True)
         return
     s.router.awaiting_import = False
     s.router.awaiting_bulk = False
