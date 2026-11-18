@@ -4,7 +4,8 @@ After=network.target
 
 [Service]
 User=scalpx
-ExecStart=/usr/bin/Xvfb :99 -screen 0 1280x800x24 -nolisten tcp -ac
+# Bot 4.11.0 : écran plus petit et 16 bits de couleur (avant 1280x800x24) : moins de pixels à redessiner à chaque tick
+ExecStart=/usr/bin/Xvfb :99 -screen 0 1024x600x16 -nolisten tcp -ac
 Restart=always
 RestartSec=3
 
