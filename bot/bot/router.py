@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import os
 import logging
 import re
@@ -38,6 +39,8 @@ def _clock() -> float:
     """Horloge de la confirmation à 10 s (Bot 3.18.0), remplaçable dans les tests sans toucher à asyncio."""
     return time.monotonic()
 
+
+_CB_KEY: contextvars.ContextVar[str] = contextvars.ContextVar("scalpx_cb", default="")   # Bot 4.8.4 : bouton en cours
 
 class Router:
     awaiting: tuple[str, int] | None = None
@@ -78,6 +81,21 @@ class Router:
         t = asyncio.get_event_loop().create_task(self._guard(coro))
         self._tasks.add(t)
         t.add_done_callback(self._tasks.discard)
+        key = _CB_KEY.get()
+        if key and hasattr(self, "_cb_running"):                                             # Bot 4.8.4 : action lancée par un bouton → en cours tant qu'elle tourne
+            self._cb_running.setdefault(key, set()).add(t)
+            t.add_done_callback(lambda tt, k=key: self._cb_running.get(k, set()).discard(tt))
+
+    CB_REPEAT_S = 1.5
+
+    def _cb_duplicate(self, data: str) -> bool:
+        """Bot 4.8.4 : même bouton retouché pendant que son action tourne, ou dans les 1,5 s : ignoré (sinon messages en double,
+        ex. « Tout est à jour » deux fois, deux demandes de confirmation)."""
+        if data.startswith("d:noop@"):
+            return False
+        if any(not t.done() for t in self._cb_running.get(data, ())):
+            return True
+        return time.monotonic() - self._cb_last.get(data, -1e9) < self.CB_REPEAT_S
 
     async def _guard(self, coro) -> None:
         try:
@@ -87,7 +105,22 @@ class Router:
 
     # ------------------------------------------------------------------ callbacks
     async def on_callback(self, data: str, message_id: int = 0) -> str:
-        """Traite un callback_data. Renvoie un court texte pour query.answer()."""
+        """Traite un callback_data (un appui en double est ignoré). Renvoie un court texte pour query.answer()."""
+        if not hasattr(self, "_cb_running"):
+            self._cb_running, self._cb_last = {}, {}
+        key = f"{data}@{message_id}"                         # même bouton SUR LE MÊME message (✖ Fermer sur 2 messages : permis)
+        if self._cb_duplicate(key):
+            log.info("bouton %s retouché pendant son action : ignoré", data)
+            return "⏳ Déjà en cours…"
+        self._cb_last[key] = time.monotonic()
+        tok = _CB_KEY.set(key)
+        try:
+            return await self._on_callback(data, message_id)
+        finally:
+            _CB_KEY.reset(tok)
+            self._cb_last[key] = time.monotonic()            # compté depuis la FIN (appuis traités l'un après l'autre)
+
+    async def _on_callback(self, data: str, message_id: int = 0) -> str:
         parts = data.split(":")
         head = parts[0]
         if self.awaiting_broker and data not in ("d:brkadd",):

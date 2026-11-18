@@ -248,3 +248,12 @@ def _base_prete(monkeypatch, request):
     if "courtier" not in request.node.name:                 # Bot 4.7.0 : tous les courtiers connus (sauf tests dédiés)
         from mt5 import brokers
         monkeypatch.setattr(brokers, "has", lambda base, server: True)
+
+
+@pytest.fixture(autouse=True)
+def _appuis_repetes_permis(monkeypatch, request):
+    """Bot 4.8.4 : les tests enchaînent volontairement les mêmes boutons (le filtre des doubles appuis a son test dédié)."""
+    if "double_appui" in request.node.name:
+        return
+    from bot.router import Router
+    monkeypatch.setattr(Router, "CB_REPEAT_S", 0.0)

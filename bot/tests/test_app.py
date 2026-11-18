@@ -107,7 +107,7 @@ def test_tous_les_prefixes_de_boutons_sont_captes():
     import inspect
     import re
     from bot.router import Router
-    src = inspect.getsource(Router.on_callback)
+    src = inspect.getsource(Router._on_callback)          # Bot 4.8.4 : on_callback filtre les doubles appuis
     heads = set(re.findall(r'head == "(\w+)"', src)) | {h for g in re.findall(r'head in \(([^)]*)\)', src) for h in re.findall(r'"(\w+)"', g)}
     assert heads and all(re.match(botapp.CB_PATTERN, h + ":x") for h in heads), heads
 

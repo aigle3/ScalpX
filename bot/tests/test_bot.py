@@ -1856,3 +1856,38 @@ async def test_ecran_sauvegarde_en_etapes_et_toujours_en_bas(svc, monkeypatch):
     text, _ = dash.render()
     assert dash.screen[0] == "bkp" and dash.is_last and int(ctx.db.meta_get("dash_msg_id", "0")) != before
     assert "✅ <b>1. Jeton GitHub</b>" in text and "✅ <b>2. Dépôt privé</b>" in text and "J'attends ton mot de passe" in text
+
+
+async def test_double_appui_sur_un_bouton_ne_double_jamais_l_action(svc, monkeypatch):
+    """Bot 4.8.4 : ⬆ Mises à jour touché deux fois → une seule vérification (un seul « Tout est à jour ») ; demande de
+    confirmation touchée deux fois → un seul message ; de nouveau permis une fois l'action finie et 1,5 s passées."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    calls = []
+
+    async def slow():
+        calls.append(1)
+        await asyncio.sleep(0.3)
+    monkeypatch.setattr(router, "check_updates_now", slow)
+    await router.on_callback("d:upd")
+    assert await router.on_callback("d:upd") == "⏳ Déjà en cours…"
+    await asyncio.sleep(0.5)
+    assert calls == [1]
+    asks = []
+    orig = router._ask
+
+    async def ask(*a, **k):
+        asks.append(a[0][:30])
+        return await orig(*a, **k)
+    monkeypatch.setattr(router, "_ask", ask)
+    await router.on_callback("d:rbt")
+    await router.on_callback("d:rbt")
+    assert len(asks) == 1
+    router._cb_last["d:upd@0"] -= 2                                    # 1,5 s plus tard : à nouveau permis
+    await router.on_callback("d:upd")
+    await asyncio.sleep(0.4)
+    assert calls == [1, 1]
+    closed = []
+    monkeypatch.setattr(router.sender, "delete", lambda chat, mid: closed.append(mid) or asyncio.sleep(0))
+    await router.on_callback("d:close", 101)                           # ✖ Fermer sur deux messages différents : les deux
+    await router.on_callback("d:close", 102)
+    assert closed == [101, 102]
