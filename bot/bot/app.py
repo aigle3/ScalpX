@@ -207,7 +207,8 @@ async def h_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await s.sender.reply_menu(s.chat_id, "📊 Bouton « Tableau de bord » remis en bas de l'écran.")
         except Exception:
             log.warning("bouton du tableau de bord : envoi impossible", exc_info=True)
-    busy = s.router.awaiting_any
+    # Bot 4.8.8 : 💻 commande et 🏦 courtier ont leur propre message : le tableau de bord n'est jamais ramené pour eux
+    busy = s.router.awaiting_any and not (s.router.awaiting_cmd or s.router.awaiting_broker)
     await s.router.on_text((m.text or "") if m is not None else "")
     # Bot 4.8.3 / 4.8.7 : réponse à une saisie (jeton, mot de passe, assistant, objectif…) → l'écran qui répond est EN BAS
     if busy and not s.dash.is_last and (s.dash.screen[0] in INPUT_SCREENS or s.dash._flash_text()):

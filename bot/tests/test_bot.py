@@ -1796,25 +1796,31 @@ async def test_cloche_installation_systeme_cachee_tant_que_le_bot_rattrape_ses_m
 
 
 async def test_commande_serveur_confirmee_puis_executee(svc):
-    """Bot 4.6.0 : 💻 commande → confirmation → exécutée (sans sudo), sortie renvoyée ; longue sortie → fichier ;
-    un autre bouton annule la saisie ; délai dépassé → arrêtée."""
+    """Bot 4.6.0 / 4.8.8 : 💻 → UN message à part (invite → confirmation → résultat), sans « sudo » ; le tableau de bord
+    n'est JAMAIS republié ni modifié pendant tout le parcours ; un autre bouton annule ; ▶️ deux fois = une exécution."""
     ctx, sender, dash, router, notifier, ea, conf = svc
+    await dash.ensure()
+    dmid = ctx.db.meta_get("dash_msg_id")
     await router.on_callback("d:shc")
     await router.on_callback("d:srv")                                   # autre bouton : plus rien d'attendu
     assert not router.awaiting_cmd
     await router.on_callback("d:shc")
+    pmid = router._shell_msg
+    assert pmid and "Envoie la commande" in sender.all_text()
+    edits_before = [e for e in getattr(sender, "edits", []) if e[0] == int(dmid)] if hasattr(sender, "edits") else []
     await router.on_text("sudo bash -c 'echo bonjour-scalpx; exit 3'")
-    assert "Exécuter cette commande" in sender.all_text() and "bonjour-scalpx" not in sender.all_text().split("Exécuter")[0]
-    await _confirm(router, dash)
+    assert "Exécuter cette commande" in sender.all_text()
+    tok = next(iter(router._shell_pending))
+    await router.on_callback(f"d:shx:{tok}", pmid)
+    assert await router.on_callback(f"d:shx:{tok}", pmid + 1) in ("Déjà lancée ou expirée", "⏳ Déjà en cours…")
     assert await _until(lambda: "Code 3" in sender.all_text() and "<pre>bonjour-scalpx</pre>" in sender.all_text())
-    assert "⏳ <pre>bash -c &#x27;echo bonjour-scalpx; exit 3&#x27;</pre>" in sender.all_text() or \
-        "⏳ <pre>bash -c 'echo bonjour-scalpx; exit 3'</pre>" in sender.all_text()      # « sudo » retiré
+    assert sender.all_text().count("bonjour-scalpx</pre>") >= 1 and "sudo bash" not in sender.all_text().split("Exécuter cette")[-1]
+    assert ctx.db.meta_get("dash_msg_id") == dmid                        # tableau de bord jamais republié
     await router._shell_run("python3 -c \"print('x' * 5000)\"")
     assert any(f == "sortie.txt" and len(d) > 5000 for f, d in sender.docs)
     router.SHELL_TIMEOUT_S = 0.5
     await router._shell_run("sleep 5")
     assert "arrêtée au bout" in sender.all_text()
-
 
 async def test_ajout_d_un_courtier_depuis_telegram(svc, monkeypatch):
     """Bot 4.7.0 : 🏦 Courtiers → ➕ → nom de serveur → lien de l'installeur → liste de serveurs ajoutée."""

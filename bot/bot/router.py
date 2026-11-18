@@ -60,6 +60,8 @@ class Router:
         self.awaiting_import = False                        # Bot 3.16.0 : fichier / texte de presets attendu (📥 Importer)
         self.awaiting_broker = ""                           # Bot 4.7.0 : "" | "name" | "url:<serveur>"
         self.awaiting_cmd = False                           # Bot 4.6.0 : 💻 commande attendue (message texte)
+        self._shell_msg = 0                                 # Bot 4.8.8 : message de l'invite 💻 (devient confirmation puis résultat)
+        self._shell_pending: dict[str, str] = {}            # jeton de confirmation → commande
         self._pending_import = self._pending_restore = b""   # Bot 4.2.0 : fichier chiffré en attente de son mot de passe
         self.awaiting_token = ""                            # Bot 3.18.0 : clé de .env attendue (message texte), ex. BACKUP_TOKEN
         self.awaiting_bulk = False                          # Bot 3.20.0 : fichier de comptes attendu (📄)
@@ -140,7 +142,7 @@ class Router:
         head = parts[0]
         if self.awaiting_broker and data not in ("d:brkadd",):
             self.awaiting_broker = ""                           # Bot 4.7.0 : autre bouton → ajout de courtier abandonné
-        if self.awaiting_cmd and data != "d:shc":
+        if self.awaiting_cmd and not data.startswith(("d:shc", "d:shn")):
             self.awaiting_cmd = False                           # Bot 4.6.0 : autre bouton → plus de commande attendue
         if data in ("d:home", "d:close") and self.awaiting_bt:
             self.cancel_inputs()                                # Bot 4.8.7 : quitter l'assistant l'annule
@@ -277,11 +279,24 @@ class Router:
             await self.sender.send(self.chat_id, "🏦 <b>Ajouter un courtier</b> — 1/2 : envoie le <b>nom d'un serveur</b> de ce "
                                    "courtier, tel qu'il s'écrit dans MT5 (ex. <code>Exness-MT5Real8</code>).", None, False)
         elif sub == "shc":                                      # Bot 4.6.0 : 💻 exécuter une commande sur le serveur
+            # Bot 4.8.8 : tout se passe dans UN message à part (invite → confirmation → résultat), jamais dans le tableau
+            # de bord : il ne peut plus le recouvrir ni l'effacer.
             self.awaiting_cmd = True
-            self.dash.goto("srv")
-            self.dash.flash("💻 Envoie la <b>commande</b> à exécuter sur le serveur (utilisateur <code>scalpx</code>, sans droits "
-                            "administrateur ; « sudo » en tête est retiré). Tu confirmes avant l'exécution ; arrêt au bout de "
-                            "2 min ; la sortie revient ici.", 300)
+            self._shell_msg = await self.sender.send(
+                self.chat_id, "💻 <b>Envoie la commande</b> à exécuter sur le serveur (utilisateur <code>scalpx</code>, sans "
+                "droits administrateur ; « sudo » en tête est retiré). Tu confirmes avant l'exécution ; arrêt au bout de 2 min ; "
+                "le résultat s'affiche dans CE message.", [[("✖ Annuler", "d:shn")]], True)
+        elif sub == "shn":                                      # Bot 4.8.8 : commande annulée
+            self.awaiting_cmd = False
+            tok = p[2] if len(p) > 2 else ""
+            self._shell_pending.pop(tok, None)
+            await self.sender.delete(self.chat_id, message_id)
+        elif sub == "shx":                                      # Bot 4.8.8 : ▶️ exécuter (une seule fois par confirmation)
+            tok = p[2] if len(p) > 2 else ""
+            got = self._shell_pending.pop(tok, None)
+            if got is None:
+                return "Déjà lancée ou expirée"
+            self._bg(self._shell_run(got, message_id))
         elif sub == "bkown":                                    # Bot 4.4.0 : remplacer la sauvegarde d'un autre serveur
             async def own() -> None:
                 self.ctx.db.meta_set("bkp_owner", "1")
@@ -592,6 +607,9 @@ class Router:
                 return
             self._bg(self._prm_apply(inst, idx, pu.fmt_num(prm, num)))
             return
+        if text.strip():                                        # Bot 4.8.8 : rien n'était attendu → dit clairement
+            self.dash.flash("💬 Message reçu, mais rien n'attendait de saisie (étape annulée par un autre bouton ou par un "
+                            "redémarrage du bot). Pour une commande : 🛠 Système → 🖥 Serveur → 💻, puis colle-la.", 120)
         await self.cmd_start()
 
     async def _acc_cb(self, p: list[str]) -> str:
@@ -1535,27 +1553,39 @@ class Router:
 
     SHELL_TIMEOUT_S = 120.0
 
+    async def _shell_say(self, text: str, kb, mid: int = 0) -> int:
+        """Bot 4.8.8 : écrit dans le message 💻 (édité en place), sinon un nouveau message en bas."""
+        from .ui import EditResult
+        if mid:
+            try:
+                if await self.sender.edit(self.chat_id, mid, text, kb) in (EditResult.OK, EditResult.SAME):
+                    return mid
+            except Exception:
+                pass
+        return await self.sender.send(self.chat_id, text, kb, True)
+
     async def _shell_ask(self, text: str) -> None:
-        """Bot 4.6.0 : 💻 commande reçue → confirmation (la commande affichée telle qu'elle partira)."""
+        """Bot 4.6.0 / 4.8.8 : 💻 commande reçue → confirmation dans le message de l'invite (pas dans le tableau de bord)."""
         import re as _re
+        import secrets as _secrets
         cmd = text.strip()
         cmd = _re.sub(r"^sudo\s+(-\S+\s+)*", "", cmd)              # le bot n'a pas les droits administrateur
+        mid, self._shell_msg = self._shell_msg, 0
         if not cmd or len(cmd) > 2000:
-            self.dash.goto("srv")
-            self.dash.flash("❌ Commande vide ou trop longue (2000 caractères au plus).")
-            await self.dash.refresh(force=True)
+            await self._shell_say("❌ Commande vide ou trop longue (2000 caractères au plus) : 🖥 Serveur → 💻 pour recommencer.",
+                                  [[("✖ Fermer", "d:close")]], mid)
             return
+        tok = _secrets.token_hex(4)
+        self._shell_pending = {tok: cmd}                    # une seule confirmation en attente
+        await self._shell_say(f"💻 <b>Exécuter cette commande ?</b>\n<pre>{esc(cmd)}</pre>Utilisateur <code>scalpx</code>, arrêt au "
+                              f"bout de {int(self.SHELL_TIMEOUT_S // 60)} min.",
+                              [[("▶️ Exécuter", f"d:shx:{tok}"), ("✖ Annuler", f"d:shn:{tok}")]], mid)
 
-        async def run() -> None:
-            await self._shell_run(cmd)
-        await self._ask(f"💻 <b>Exécuter cette commande ?</b>\n<pre>{esc(cmd)}</pre>Utilisateur <code>scalpx</code>, arrêt au bout "
-                        f"de {int(self.SHELL_TIMEOUT_S // 60)} min.", run, ("srv",), "▶️ Exécuter")
-
-    async def _shell_run(self, cmd: str) -> None:
+    async def _shell_run(self, cmd: str, mid: int = 0) -> None:
         import os as _os
         t0 = time.monotonic()
         self.ctx.db.add_action("", "COMMANDE", True, cmd[:200])
-        await self.sender.send(self.chat_id, f"⏳ <pre>{esc(cmd[:300])}</pre>", None, True)
+        mid = await self._shell_say(f"⏳ <b>En cours…</b>\n<pre>{esc(cmd[:300])}</pre>", None, mid)
         try:
             proc = await asyncio.create_subprocess_shell(
                 cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
@@ -1574,10 +1604,13 @@ class Router:
         text = out.decode("utf-8", errors="replace").replace("\x00", "")
         head = (f"💻 Code {code} · {time.monotonic() - t0:.0f} s" if code is not None
                 else f"💻 ⏱ arrêtée au bout de {int(self.SHELL_TIMEOUT_S)} s")
+        close = [[("✖ Fermer", "d:close")]]
         if len(text) <= 3500:
-            await self.sender.send(self.chat_id, f"{head}\n<pre>{esc(text.strip() or '(aucune sortie)')}</pre>", None, True)
+            await self._shell_say(f"{head}\n<pre>{esc(cmd[:200])}</pre>\n<pre>{esc(text.strip() or '(aucune sortie)')}</pre>"[:4090],
+                                  close, mid)
         else:
-            await self.sender.document(self.chat_id, text.encode("utf-8"), "sortie.txt", f"{head} · sortie complète en fichier")
+            await self._shell_say(f"{head} · sortie complète dans le fichier ci-dessous.\n<pre>{esc(cmd[:200])}</pre>", close, mid)
+            await self.sender.document(self.chat_id, text.encode("utf-8"), "sortie.txt", head)
 
     BKP_WAIT = "une sauvegarde existe déjà dans le dépôt : rien n'est écrasé"
 
