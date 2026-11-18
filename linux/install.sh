@@ -107,17 +107,28 @@ ok "Xvfb actif"
 
 # ---------------------------------------------------------------- 3. préfixe Wine
 step "3/7  Préfixe Wine ($PFX)"
+# Préfixe en état de marche ? (« could not load kernel32.dll » = préfixe à moitié créé, ex. installation interrompue)
+pfx_ok() { as_u timeout 120 wine cmd /c ver >>"$LOG" 2>&1; }
+if [ -f "$PFX/system.reg" ] && ! pfx_ok; then
+    if [ -d "$MT/instances" ] && ls "$MT/instances" 2>/dev/null | grep -q .; then
+        die "préfixe Wine ($PFX) hors service alors que des comptes existent : contacte le support avant de le recréer"
+    fi
+    warn "préfixe Wine cassé (installation interrompue ?) : recréé"
+    as_u wineserver -k 2>/dev/null || true; pkill -u "$U" -f 'wine|\.exe' 2>/dev/null || true; sleep 2
+    rm -rf "$PFX"
+fi
 if [ ! -f "$PFX/system.reg" ]; then
     echo "  Création du préfixe Wine (1 à 3 min)…"
     # Pas de fenêtre « installer Wine Mono / Gecko » : sur l'écran virtuel personne ne la voit et wineboot attendait
     # sans fin (MT5 n'en a pas besoin). Attentes toujours bornées.
-    as_u env WINEDLLOVERRIDES="mscoree=;mshtml=" timeout 300 wineboot -i >/dev/null 2>&1 || warn "wineboot : délai dépassé, on continue"
+    as_u env WINEDLLOVERRIDES="mscoree=;mshtml=" timeout 300 wineboot -i >>"$LOG" 2>&1 || warn "wineboot : délai dépassé, on continue"
     as_u timeout 60 wineserver -w || as_u wineserver -k || true
 fi
 # comme le script Linux officiel de MetaQuotes. Pas de « wineserver -w » ici : à une relance, les terminaux MT5 tournent
 # et il attendrait leur fermeture sans fin (blocage à l'étape 3).
 as_u env WINEDLLOVERRIDES="mscoree=;mshtml=" timeout 120 winecfg -v=win11 >/dev/null 2>&1 || true
-[ -f "$PFX/system.reg" ] || die "préfixe Wine non créé"
+[ -f "$PFX/system.reg" ] || die "préfixe Wine non créé (détail : $LOG)"
+pfx_ok || die "Wine ne démarre pas dans le préfixe neuf ($(wine --version 2>/dev/null)) : détail dans $LOG"
 ok "préfixe prêt (Windows 11)"
 # L'installeur MT5 exige WebView2 (sinon il s'arrête aussitôt sur une erreur invisible : NtRaiseHardError)
 if ! ls "$PFX/drive_c/Program Files (x86)/Microsoft/EdgeWebView/Application"/*/msedgewebview2.exe >/dev/null 2>&1; then
