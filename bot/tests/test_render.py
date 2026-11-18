@@ -43,7 +43,7 @@ def test_autorise_filtres_et_news():
 def test_news_bloque_et_positions():
     txt = block(view(1, trading_autorise=False, raison_blocage="News : USD NFP (14:30)", news_bloque=True,
                      news_raison="USD NFP (14:30)", positions=3, flottant_ea=-4.5),
-                view(2, positions=0))
+                view(2, positions=0, trading_autorise=False, raison_blocage="News : USD NFP (14:30)"))
     assert txt.startswith("🟢 <b>En train de trader</b>")
     assert "⛔ Nouvelles séries <b>bloquées</b> : News : USD NFP (14:30)" in txt
     assert "<b>NEWS EN COURS</b> : USD NFP (14:30)" in txt

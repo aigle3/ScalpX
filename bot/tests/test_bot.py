@@ -584,7 +584,11 @@ async def test_panneau_sans_commande_menu_boutons_et_retour_en_bas(svc):
         assert want in labels
     assert "/" not in "".join(labels)
     dash.goto("dash")
-    await router.cmd_start()                                                       # n'importe quel message : panneau EN BAS
+    n0 = len(sender.sent)
+    await router.cmd_start()                                   # Bot 4.9.1 : déjà en bas → accueil édité sur place
+    assert int(ctx.db.meta_get("dash_msg_id")) == mid and len(sender.sent) == n0 and mid not in sender.deleted
+    dash.note_message(mid + 50)                                # recouvert par un autre message
+    await router.cmd_start()                                   # n'importe quel message : panneau EN BAS
     new = int(ctx.db.meta_get("dash_msg_id"))
     assert new != mid and mid in sender.deleted            # ancien supprimé
     n = len(sender.sent)
@@ -687,8 +691,9 @@ async def test_parametres_ea_par_boutons(svc):
         assert dash.params.cached(inst.id)["lot"].startswith("0.05") and router.awaiting is None
         # texte libre hors saisie : le tableau de bord revient en bas
         mid = int(ctx.db.meta_get("dash_msg_id") or 0)
-        await router.on_text("coucou")
-        assert int(ctx.db.meta_get("dash_msg_id")) != mid
+        n0 = len(sender.sent)
+        await router.on_text("coucou")                         # Bot 4.9.1 : déjà en bas → accueil sur place, pas de 2e message
+        assert int(ctx.db.meta_get("dash_msg_id")) == mid and len(sender.sent) == n0 and dash.screen[0] == "dash"
     finally:
         await ea.stop()
 
@@ -1971,7 +1976,8 @@ async def test_appui_sur_tableau_de_bord_un_seul_reste_meme_avec_un_orphelin(svc
     for _ in range(3):
         await router.on_text("📊 Tableau de bord")
     cur = int(ctx.db.meta_get("dash_msg_id"))
-    assert orphan in deleted and first in deleted and cur not in deleted and ctx.db.meta_get("dash_ids") == str(cur)
+    assert orphan in deleted and cur not in deleted and ctx.db.meta_get("dash_ids") == str(cur)
+    assert cur == first                                        # Bot 4.9.1 : déjà en bas → édité sur place
 
 
 async def test_texte_recu_en_double_juste_apres_une_saisie_ignore(svc):
@@ -1987,3 +1993,20 @@ async def test_texte_recu_en_double_juste_apres_une_saisie_ignore(svc):
     assert ctx.db.meta_get("dash_msg_id") == dmid and "rien n'attendait" not in sender.all_text() + dash.render()[0]
     await router.on_text("autre chose")
     assert "rien n'attendait" in dash.render()[0]
+
+
+def test_accueil_stable_entre_deux_comptes():
+    """Bot 4.9.1 : un compte bloqué parmi d'autres → la ligne d'entrée ne clignote plus d'un compte à l'autre."""
+    import time as _t
+    from types import SimpleNamespace as NS
+    from core.models import Statut
+    from bot import render
+    now = _t.time()
+    a = Statut(id="1_A", login=1, ts=int(now), objectif_actif=True, ea_demarre=True, trading_autorise=True, signal="achat", filtres=[])
+    b = Statut(id="2_A", login=2, ts=int(now) + 5, objectif_actif=True, ea_demarre=True, trading_autorise=False,
+               raison_blocage="Robot en pause", filtres=[])
+    views = [NS(st=a), NS(st=b)]
+    t1 = render.trading_block(views, now)
+    b.ts, a.ts = int(now), int(now) + 5
+    assert render.trading_block(views, now) == t1
+    assert any("Entrée au prochain signal (achat)" in l for l in t1) and any("1 compte(s) bloqué(s)" in l for l in t1)

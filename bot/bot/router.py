@@ -2129,8 +2129,10 @@ class Router:
 
     # ------------------------------------------------------------------ actions du tableau de bord
     async def cmd_start(self) -> None:
-        """Tout message reçu (bouton « 📊 Tableau de bord », texte libre) : le tableau de bord revient en bas de la conversation."""
-        await self.dash.bring_down()
+        """Tout message reçu (bouton « 📊 Tableau de bord », texte libre) : le tableau de bord revient en bas de la conversation.
+        Bot 4.9.1 : déjà en bas (le message reçu vient d'être effacé) → simplement remis à l'accueil SUR PLACE, sans nouveau
+        message (avant : un 2e tableau de bord apparaissait puis le premier s'effaçait)."""
+        await self.dash.home_or_down()
 
     async def cmd_ping(self) -> None:
         views = self.ctx.views()

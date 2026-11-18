@@ -82,9 +82,15 @@ def news_item(n) -> str:
 
 
 def trading_ref(views: list[AccountView], now: float):
-    """Statut de référence pour l'état du trading (tous les robots ont les mêmes réglages) : le plus récent."""
+    """Statut de référence pour l'état du trading (tous les robots ont les mêmes réglages).
+    Bot 4.9.1 : TOUJOURS le même compte (le premier par numéro parmi ceux qui répondent), plus « le plus récent » :
+    sinon l'accueil changeait de compte à chaque mise à jour et les lignes clignotaient."""
     fresh = [v.st for v in views if v.st is not None and v.st.age_s(now) < 120]
-    return max(fresh, key=lambda s: s.ts) if fresh else None
+    return min(fresh, key=lambda s: (str(s.id), s.login)) if fresh else None
+
+
+def _blocked(st) -> bool:
+    return st.trading_autorise is False or (st.trading_autorise is None and bool(st.raison_blocage))
 
 
 def next_launch(st) -> str:
@@ -138,7 +144,7 @@ def trading_block(views: list[AccountView], now: float) -> list[str]:
     flot = sum(s.flottant_ea for s in sts)
     # titre : un compte en objectif l'emporte ; « arrêt à 500 » seulement si tous les comptes y sont (sinon ligne 🏁 dédiée)
     pick = ([s for s in sts if s.objectif_actif] or [s for s in sts if s.etat != "ARRET_500"] or sts)
-    head, stopped = _head(max(pick, key=lambda s: s.ts), npos)
+    head, stopped = _head(min(pick, key=lambda s: (str(s.id), s.login)), npos)      # Bot 4.9.1 : compte stable
     lines = [head]
     if npos:
         lines.append(f"📌 {npos} position(s)" + (f" sur {nacc} comptes" if nacc > 1 else "") + f" · flottant {money(flot, st.devise, True)}")
@@ -148,12 +154,19 @@ def trading_block(views: list[AccountView], now: float) -> list[str]:
     if cut:                                                  # EA 7.0.0 : coupure passée pendant une série
         lines.append(f"⛔ Coupure {esc(cut)} : la série en cours finit au TP, puis l'objectif est annulé")
     if not stopped:
-        blocked = st.trading_autorise is False or (st.trading_autorise is None and bool(st.raison_blocage))
-        if blocked:
-            lines.append(f"⛔ Nouvelles séries <b>bloquées</b> : {esc(st.raison_blocage or '?')}")
+        # Bot 4.9.1 : décidé sur TOUS les comptes concernés (avant : un seul compte, différent à chaque mise à jour)
+        group = [s for s in pick if s.etat != "ARRET_500"] or pick
+        blk = sorted((s for s in group if _blocked(s)), key=lambda s: (str(s.id), s.login))
+        free = [s for s in group if not _blocked(s)]
+        if blk and not free:
+            lines.append(f"⛔ Nouvelles séries <b>bloquées</b> : {esc(blk[0].raison_blocage or '?')}")
         else:
-            sig = {"achat": " (achat)", "vente": " (vente)"}.get(st.signal, "")
+            sigs = [s.signal for s in free if s.signal in ("achat", "vente")]
+            top = max(("achat", "vente"), key=sigs.count) if sigs else ""
+            sig = {"achat": " (achat)", "vente": " (vente)"}.get(top, "")
             lines.append(f"✅ Entrée au prochain signal{sig}")
+            if blk:
+                lines.append(f"   ⛔ {len(blk)} compte(s) bloqué(s) : {esc(blk[0].raison_blocage or '?')}")
     if st.filtres is None:
         lines.append("🛡 Filtres : détail après la mise à jour de l'EA (5.5.0)")
         return lines

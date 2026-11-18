@@ -561,7 +561,10 @@ async def j_update(context: ContextTypes.DEFAULT_TYPE) -> None:
             return
     # Bot 3.6.2 : la comparaison paquet ↔ installation relit tous les fichiers (bloquait la boucle du bot 3 à 14 s sur un
     # VPS chargé) : refaite seulement si le commit, l'installation ou le preset ⭐ changent, ou toutes les 15 min.
-    key = (s.ctx.db.meta_get("installed_commit") or "", res.sha if cfg.update.github else "", s.dash.store.active,
+    # Bot 4.9.1 : clé = commit du paquet RÉELLEMENT téléchargé (avant : commit vu sur GitHub, déjà connu pendant les 2 min
+    # d'attente → le paquet arrivé ensuite gardait le plan « rien à installer » en cache jusqu'à 15 min : pas de 🔔)
+    key = (s.ctx.db.meta_get("installed_commit") or "", gh.local_sha(Path(cfg.update.source)) if cfg.update.github else "",
+           s.dash.store.active,
            s.ctx.db.meta_get("update_offered") or "")
     cache = getattr(s, "_plan_cache", None)
     if cache is not None and cache[0] == key and time.monotonic() - cache[1] < 900:

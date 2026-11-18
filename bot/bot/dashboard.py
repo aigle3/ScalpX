@@ -538,6 +538,29 @@ class Dashboard:
             else:
                 await self._bring_down(home=False)
 
+    async def home_or_down(self) -> None:
+        """Bot 4.9.1 : accueil. Dernier message → édité sur place ; recouvert → ancien effacé PUIS nouveau envoyé
+        (jamais deux tableaux de bord visibles en même temps)."""
+        async with self._lock:
+            mid = int(self.ctx.db.meta_get("dash_msg_id", "0") or 0)
+            if mid and self.is_last:
+                self.screen = ("dash",)
+                ids = [int(x) for x in (self.ctx.db.meta_get("dash_ids") or "").split(",") if x.strip().isdigit()]
+                for old in [i for i in ids if i != mid]:            # anciens tableaux de bord restés en trop
+                    try:
+                        await self.sender.delete(self.chat_id, old)
+                    except Exception:
+                        pass
+                self.ctx.db.meta_set("dash_ids", str(mid))
+                await self._refresh(force=True)
+                return
+            if mid:
+                try:
+                    await self.sender.delete(self.chat_id, mid)
+                except Exception:
+                    pass
+            await self._bring_down(home=True)
+
     @property
     def is_last(self) -> bool:
         return self._covered_at is None
