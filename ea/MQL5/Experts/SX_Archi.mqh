@@ -834,6 +834,12 @@ void RepriseApresRetrait(double bal)
 {
    g_cycle++;
    CapitalFlag(false);
+   // [ARCHI] 8.3.2 : le retrait VAUT reprise. Avant, un « Pause » / « Tout fermer » antérieur (mémorisé, même après relance)
+   // faisait repasser le compte en PAUSE juste après le retrait (« Arrêt manuel détecté ») : REPRISE manuelle obligatoire.
+   g_stoppedManually = false;
+   GlobalVariableDel(GVN("stopped"));
+   g_pauseUntil = 0;
+   GlobalVariableDel(GVN("pzuntil"));
    SetState(ST_ACTIF, false);
    EvTyped("REPRISE_RETRAIT", 2,
            "🟢 REPRISE APRÈS RETRAIT\n━━━━━━━━━━━━━━━━━━\n💰 Solde : " + NumS(bal) + " " + Cur() + " | cycle " + IntegerToString(g_cycle) +

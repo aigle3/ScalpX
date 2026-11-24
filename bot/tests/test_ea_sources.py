@@ -77,3 +77,10 @@ def test_tp_courtier_sans_fermeture_en_double():
     m = _src("ScalpX_v5.mq5")
     assert "TRADE_RETCODE_POSITION_CLOSED || rc == TRADE_RETCODE_FROZEN" in m
     assert "ulong    g_tpWaitMs" in _src("SX_Core.mqh")
+
+
+def test_retrait_vaut_reprise_meme_apres_une_pause():
+    a = _src("SX_Archi.mqh")
+    f = a[a.index("void RepriseApresRetrait(double bal)"):a.index("void RepriseRetraitTimer()")]
+    assert f.index("g_stoppedManually = false;") < f.index("SetState(ST_ACTIF, false);")
+    assert 'GlobalVariableDel(GVN("stopped"));' in f and "g_pauseUntil = 0;" in f
