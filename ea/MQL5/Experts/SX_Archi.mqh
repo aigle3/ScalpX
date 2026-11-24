@@ -1424,7 +1424,7 @@ void TickFallback()
    }
    if(!f_marketOpen || g_closing || g_maint) return;
    RefreshState();
-   if(st_posCount + st_pendCount == 0 && !g_goalActive) return;
+   if(st_posCount + st_pendCount == 0 && !g_goalActive) return;   // rien à gérer
    if(!g_tickFb) { g_tickFb = true; Log("Aucun tick depuis 10 s : TP, objectif et seuil 500 gérés par le timer"); }
    GoalTick();
    if(g_closing) return;
@@ -1437,6 +1437,12 @@ void TickFallback()
    {
       ManageTP();
       if(CheckTPExit()) return;
+   }
+   else if(st_pendCount > 0)                     // 8.1.2 : ordres de grille sans position = orphelins (24/11 : remplis la nuit)
+   {
+      static ulong lastCancel = 0;
+      if(now - lastCancel > 1000) { lastCancel = now; CancelPendingFast(); }
+      return;
    }
    static ulong lastClean = 0;
    if(g_goalDone && !g_goalActive && (st_posCount + st_pendCount) > 0 && now >= g_cooldownUntilMs && now - lastClean > 5000)

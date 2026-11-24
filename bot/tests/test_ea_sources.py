@@ -36,3 +36,9 @@ def test_sources_crlf():
     for f in ("SX_Archi.mqh", "SX_Smart.mqh", "SX_Core.mqh", "ScalpX_v5.mq5"):
         b = (EXP / f).read_bytes()
         assert b.count(b"\n") == b.count(b"\r\n"), f
+
+
+def test_filet_supprime_les_ordres_orphelins():
+    a = _src("SX_Archi.mqh")
+    fb = a[a.index("void TickFallback()"):a.index("void ArchiTimer()")]
+    assert "else if(st_pendCount > 0)" in fb and "CancelPendingFast();" in fb
