@@ -318,8 +318,11 @@ class Dashboard:
         text = render.withdraw_text(views, hist, db.total_withdrawn(), sum(r["amount"] for r in db.withdrawals_since(int(now) - 30 * 86400)),
                                     self.withdraw_since(), cur, now, labels)
         kb: Keyboard = [[(f"🏁 {v.inst.label[:24]}", f"a:{short(v.inst.id)}")] for v in render.due_withdrawals(views)[:6]]
-        if any(v.health.code == "PARK" for v in views):                     # Bot 4.15.0
+        parked = [v for v in views if db.meta_get("park:" + v.inst.id) == "1"]   # Bot 4.15.0
+        if any(not v.running for v in parked):
             kb.append([("✅ J'ai retiré : relancer maintenant", "d:wdrchk")])
+        elif parked:                                                        # Bot 4.15.1 : bouton remplacé pendant la vérification
+            kb.append([("⏳ Vérification du retrait en cours…", "d:wdr")])
         kb.append([("🔃 Actualiser", "d:wdr"), ("⬅ Accueil", "d:home")])
         return self._with_flash(text), kb
 

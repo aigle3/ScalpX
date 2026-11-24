@@ -2029,3 +2029,19 @@ async def test_invite_comptes_fichier_a_part(svc):
     p2 = router._bulk_prompt
     await router.on_callback("d:bkstop")
     assert p2 in sender.deleted and not router.awaiting_bulk
+
+
+async def test_retraits_bouton_pendant_la_verification(svc):
+    """Bot 4.15.1 : compte garé à 500 : bouton « J'ai retiré » ; terminal relancé pour vérifier : « vérification en cours »."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    ctx.db.add_instance(Instance("1_a", 1, "a", "A", "x", 1, "5.0", "ARRETE"))
+    inst = ctx.db.list()[0]
+    ctx.db.meta_set("park:" + inst.id, "1")
+    running = {"v": False}
+    ctx.mgr.is_running = lambda i: running["v"]
+    _, kb = dash._render_withdrawals(time.time())
+    assert ("✅ J'ai retiré : relancer maintenant", "d:wdrchk") in [b for row in kb for b in row]
+    running["v"] = True
+    _, kb = dash._render_withdrawals(time.time())
+    flat = [b for row in kb for b in row]
+    assert ("⏳ Vérification du retrait en cours…", "d:wdr") in flat and not any(c == "d:wdrchk" for _, c in flat)
