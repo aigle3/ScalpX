@@ -37,6 +37,9 @@ def snapshot(cfg: Config, db: Database, status: StatusReader, is_running, folder
         st = status.read(inst.id)
         running = bool(is_running(inst))
         h = diagnose(inst, st, running, cfg, now, folder_ok(inst))
+        if not running and db.meta_get("park:" + inst.id) == "1":          # Bot 4.15.0 : garé à 500, pas une anomalie
+            h = Health("🅿️", "PARK",
+                       ["🅿️ 500 atteint : terminal arrêté (CPU libéré), relancé tout seul après le retrait"])
         ver = (st.version if st and st.version else inst.ea_version)
         outdated = bool(base_version and ver and ver != base_version)
         out.append(AccountView(inst, st, h, running, outdated))

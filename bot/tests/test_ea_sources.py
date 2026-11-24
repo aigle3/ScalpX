@@ -84,3 +84,9 @@ def test_retrait_vaut_reprise_meme_apres_une_pause():
     f = a[a.index("void RepriseApresRetrait(double bal)"):a.index("void RepriseRetraitTimer()")]
     assert f.index("g_stoppedManually = false;") < f.index("SetState(ST_ACTIF, false);")
     assert 'GlobalVariableDel(GVN("stopped"));' in f and "g_pauseUntil = 0;" in f
+
+
+def test_annulation_de_grille_jamais_renvoyee_trop_tot():
+    t = _src("SX_Trade.mqh")
+    assert "bool CancelPending(ulong t)" in t and "ORDER_STATE_REQUEST_CANCEL" in t
+    assert t.count("if(CancelPending(t)) continue;") == 2 and t.count("CancelMark(t);") == 2

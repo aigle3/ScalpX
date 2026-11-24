@@ -236,6 +236,15 @@ class Router:
             r = await self._bm_cb(sub, p)
             if r is not None:
                 return r
+        elif sub == "wdrchk":                               # Bot 4.15.0 : terminaux garés à 500 relancés pour vérifier le retrait
+            n = 0
+            for i in self.ctx.db.list():
+                if self.ctx.db.meta_get("park:" + i.id) == "1" and not self.ctx.mgr.is_running(i):
+                    self.ctx.db.meta_set("parkchk:" + i.id, "0")
+                    n += 1
+            self.dash.goto("wdr")
+            self.dash.flash(f"✅ {n} terminal(aux) relancé(s) dans les secondes qui viennent : je te confirme le retrait "
+                            "(ou le regare s'il est toujours à 500)." if n else "ℹ️ Aucun terminal garé à relancer.", 20)
         elif sub in ("lst", "act", "rpt", "logs", "gterm", "wdr"):
             self.dash.goto(sub)
             self.dash.silent = self.notifier.silent_mode

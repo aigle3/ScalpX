@@ -19,7 +19,7 @@ class Health:
 
     @property
     def alert(self) -> bool:
-        return self.code not in ("OK", "MAINT", "CLOTURE500", "ARRETE", "CREATION", "ARCHIVE")
+        return self.code not in ("OK", "MAINT", "CLOTURE500", "ARRETE", "CREATION", "ARCHIVE", "PARK")   # PARK : Bot 4.15.0
 
 
 def low_capital(st: Statut) -> bool:

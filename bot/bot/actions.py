@@ -74,6 +74,7 @@ def journal(ctx: Ctx, inst: Instance, text: str, ok: bool, result: str = "") -> 
 
 
 async def action_start(ctx: Ctx, inst: Instance) -> str:
+    ctx.db.meta_set("park:" + inst.id, "")                  # Bot 4.15.0 : une décision manuelle remplace le garage à 500
     if not ctx.mgr.folder_ok(inst):
         journal(ctx, inst, "TERMINAL lancer", False, "dossier introuvable")
         return "❌ Dossier de l'instance introuvable."
@@ -86,6 +87,7 @@ async def action_start(ctx: Ctx, inst: Instance) -> str:
 
 
 async def action_stop(ctx: Ctx, inst: Instance, force: bool = False) -> str:
+    ctx.db.meta_set("park:" + inst.id, "")                  # Bot 4.15.0 : arrêt manuel = pas de relance automatique
     r = await ctx.mgr.stop(inst, force=force)
     if r != "deja_arrete":
         journal(ctx, inst, "TERMINAL arrêter" + (" (forcé)" if force else ""), r != "attente_cloture", r)

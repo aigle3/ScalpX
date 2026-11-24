@@ -858,3 +858,104 @@ def test_journal_joint_a_l_alerte(tmp_path):
     assert "— EA —" in t and "Réglages <8>" in t and "Réglages <2>" not in t      # 6 dernières lignes, texte brut
     assert "— Terminal —" in t and "deal sell" in t and "ignoré" not in t
     assert journal_tail(str(tmp_path / "absent")) == ""
+
+
+class _P:
+    """Statut minimal pour le garage à 500."""
+    def __init__(self, etat="ARRET_500", solde=500.36, positions=0, ordres=0, ts=None):
+        self.etat, self.solde, self.positions, self.ordres = etat, solde, positions, ordres
+        self.phase_cloture500, self.seuil500_actif, self.seuil_arret, self.seuil_reprise = False, True, 500.0, 200.0
+        self.devise, self.ts = "EUR", int(ts if ts is not None else time.time())
+
+    def age_s(self, now=None):
+        return (now if now is not None else time.time()) - self.ts
+
+
+@pytest.mark.asyncio
+async def test_garage_a_500_puis_relance_apres_retrait(stack, monkeypatch):
+    """Bot 4.15.0 : 500 atteint et tout fermé → terminal arrêté (CPU) ; vérification périodique ; retrait → relancé, confirmé."""
+    from storage.db import ARRETE
+    cfg, db, procs, status, cmdq, mgr, ea = stack
+    inst = seed(stack)
+    al = Alerts()
+    wd = Watchdog(cfg, db, mgr, status, al)
+    sts = {}
+    monkeypatch.setattr(wd.status, "read", lambda iid: sts.get(iid))
+    run = {inst.id: True}
+    monkeypatch.setattr(mgr, "is_running", lambda i: run.get(i.id, False))
+    stops, starts = [], []
+
+    async def stop(i, force=False, set_desired=ARRETE):
+        stops.append(i.id); run[i.id] = False; db.set_desired(i.id, set_desired); return "propre"
+
+    def start(i, set_desired=True):
+        starts.append(i.id); run[i.id] = True; db.set_desired(i.id, DEMARRE); return True
+    monkeypatch.setattr(mgr, "stop", stop)
+    monkeypatch.setattr(mgr, "start", start)
+    t0 = time.time()
+    sts[inst.id] = _P(positions=1, ts=t0)                         # position encore ouverte : rien
+    await wd.park_tick(t0)
+    await wd.park_tick(t0 + 500)
+    assert not stops
+    sts[inst.id] = _P(ts=t0 + 500)                                 # tout fermé : délai de stabilité
+    await wd.park_tick(t0 + 500)
+    sts[inst.id] = _P(ts=t0 + 560)
+    await wd.park_tick(t0 + 560)
+    assert not stops
+    sts[inst.id] = _P(ts=t0 + 630)
+    await wd.park_tick(t0 + 630)                                   # 130 s : garé
+    assert stops == [inst.id] and wd.parked(inst.id) and [k for _, k, _, _ in al.items] == ["PARK"]
+    await wd.park_tick(t0 + 1000)                                  # avant l'heure : pas de vérification
+    assert not starts
+    await wd.park_tick(t0 + 630 + 3600)                            # vérification horaire : relancé
+    assert starts == [inst.id]
+    await wd.park_tick(t0 + 4240)                                  # ancien statut (ts avant la relance) : ignoré
+    sts[inst.id] = _P(ts=t0 + 4250)
+    await wd.park_tick(t0 + 4250)
+    sts[inst.id] = _P(ts=t0 + 4290)
+    await wd.park_tick(t0 + 4290)                                  # toujours à 500 : regaré, sans nouveau message
+    assert stops == [inst.id, inst.id] and wd.parked(inst.id) and len(al.items) == 1
+    assert wd.check_parked_now() == 1                              # bouton « J'ai retiré »
+    await wd.park_tick(t0 + 4300)
+    assert len(starts) == 2
+    sts[inst.id] = _P(etat="ACTIF", solde=200.0, ts=t0 + 4320)     # l'EA a constaté le retrait
+    await wd.park_tick(t0 + 4320)
+    assert not wd.parked(inst.id) and al.items[-1][1] == "UNPARK" and len(stops) == 2
+
+
+@pytest.mark.asyncio
+async def test_garage_trop_retire_et_desactivable(stack, monkeypatch):
+    from storage.db import ARRETE
+    cfg, db, procs, status, cmdq, mgr, ea = stack
+    inst = seed(stack)
+    al = Alerts()
+    wd = Watchdog(cfg, db, mgr, status, al)
+    sts = {}
+    monkeypatch.setattr(wd.status, "read", lambda iid: sts.get(iid))
+    run = {inst.id: False}
+    monkeypatch.setattr(mgr, "is_running", lambda i: run.get(i.id, False))
+    stops = []
+
+    async def stop(i, force=False, set_desired=ARRETE):
+        stops.append(i.id); run[i.id] = False; db.set_desired(i.id, set_desired); return "propre"
+
+    def start(i, set_desired=True):
+        run[i.id] = True; db.set_desired(i.id, DEMARRE); return True
+    monkeypatch.setattr(mgr, "stop", stop)
+    monkeypatch.setattr(mgr, "start", start)
+    db.set_desired(inst.id, ARRETE)
+    db.meta_set("park:" + inst.id, "1")
+    t0 = time.time()
+    await wd.park_tick(t0)                                         # garé depuis longtemps : vérification
+    assert run[inst.id]
+    sts[inst.id] = _P(solde=150.0, ts=t0 + 28)                     # tout retiré : sous le minimum
+    await wd.park_tick(t0 + 30)
+    assert not stops
+    sts[inst.id] = _P(solde=150.0, ts=t0 + 79)
+    await wd.park_tick(t0 + 80)                                    # 1 min après la relance : regaré, signalé une fois
+    assert stops == [inst.id] and wd.parked(inst.id) and "sous le minimum" in al.items[-1][2]
+    cfg.timing.park_at_500 = False
+    wd2 = Watchdog(cfg, db, mgr, status, Alerts())
+    run[inst.id] = False
+    await wd2.park_tick(t0 + 99999)
+    assert not run[inst.id]

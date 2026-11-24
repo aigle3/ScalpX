@@ -45,7 +45,7 @@ def welcome_empty() -> str:
 
 
 SEP = "━━━━━━━━━━━━━━━━━━"
-ICON_ORDER = (("🟢", "actif"), ("🟠", "alerte"), ("🔴", "arrêté"), ("⚙️", "maint."), ("🔒", "clôture"), ("⚪", "à l'arrêt"))
+ICON_ORDER = (("🟢", "actif"), ("🟠", "alerte"), ("🔴", "arrêté"), ("⚙️", "maint."), ("🔒", "clôture"), ("⚪", "à l'arrêt"), ("🅿️", "garé à 500"))
 
 
 def home_line(v: AccountView, label_w: int = 10) -> str:

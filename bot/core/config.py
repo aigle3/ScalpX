@@ -58,6 +58,9 @@ class Timing(BaseModel):
     deploy_retry_min: int = 15
     restarts_per_hour: int = 3
     muet_restart_s: int = 300              # terminal lancé mais EA muet (aucun heartbeat) depuis ce délai : relance forcée (0 = jamais)
+    park_at_500: bool = True               # Bot 4.15.0 : compte à 500 (ARRET_500, rien d'ouvert, solde ≥ seuil) → terminal arrêté
+    park_delay_s: int = 120                # … après ce délai de stabilité (notifications parties)
+    park_probe_s: int = 3600               # terminal « garé » relancé pour vérifier le retrait toutes les … s (bouton : tout de suite)
     sans_prix_restart_s: int = 300         # Bot 4.14.0 : EA vivant mais AUCUN prix reçu depuis ce délai alors que d'autres comptes
                                            # en reçoivent → relance forcée du terminal, puis confirmation au retour des prix (0 = jamais)
     watchdog_interval_s: int = 15

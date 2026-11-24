@@ -10,7 +10,7 @@ from typing import Awaitable, Callable
 from core.config import Config
 from core.health import diagnose
 from core.status import StatusReader
-from storage.db import DEMARRE, MAINTENANCE, Database
+from storage.db import ARRETE, DEMARRE, MAINTENANCE, Database
 from .manager import InstanceManager
 
 log = logging.getLogger(__name__)
@@ -55,6 +55,8 @@ class Watchdog:
         self._muet_limit: set[str] = set()               # comptes dont la limite de relances a déjà été signalée (cas « muet »)
         self._np_grace: dict[str, float] = {}            # Bot 4.14.0 : relancé pour « sans prix » : pas de nouveau jugement avant
         self._np_flag: dict[str, str] = {}               # « RELANCE » (attend le retour des prix) ou « LIMITE » (signalée)
+        self._flat_since: dict[str, float] = {}           # Bot 4.15.0 : compte à 500 sans rien d'ouvert depuis…
+        self._probe: dict[str, float] = {}                # compte garé relancé pour vérifier le retrait : heure de relance
         self._live_since: dict[tuple, float] = {}        # Bot 4.14.1 : (symbole, serveur) → depuis quand ce flux reçoit des prix
 
     def _tick_age(self, st, now: float) -> float | None:
@@ -161,9 +163,104 @@ class Watchdog:
             await asyncio.sleep(self.cfg.timing.launch_stagger_s)
         return launched
 
+    # ---- Bot 4.15.0 : terminal « garé » à 500 (CPU libéré), relancé après le retrait -------------------------------------
+    def parked(self, iid: str) -> bool:
+        return self.db.meta_get("park:" + iid) == "1"
+
+    def unpark(self, iid: str) -> None:
+        self.db.meta_set("park:" + iid, "")
+        self._probe.pop(iid, None)
+        self._flat_since.pop(iid, None)
+
+    def check_parked_now(self) -> int:
+        """Bouton « J'ai retiré » : les terminaux garés sont relancés au prochain passage. Renvoie leur nombre."""
+        n = 0
+        for inst in self.db.list():
+            if self.parked(inst.id) and not self.mgr.is_running(inst):
+                self.db.meta_set("parkchk:" + inst.id, "0")
+                n += 1
+        return n
+
+    async def park_tick(self, now: float | None = None) -> None:
+        """500 atteint, positions et ordres fermés, solde ≥ seuil, stable depuis park_delay_s → arrêt propre du terminal.
+        Garé : relancé toutes les park_probe_s (ou sur bouton) ; l'EA reprend seul si le solde est entre le seuil de reprise
+        (inclus) et 500 → le compte reste lancé (confirmé). Toujours à 500 → regaré sans message. Sous le seuil de reprise →
+        regaré, signalé une fois."""
+        t = self.cfg.timing
+        now = now if now is not None else time.time()
+        if not getattr(t, "park_at_500", False):
+            return
+        for inst in self.db.list():
+            parked = self.parked(inst.id)
+            running = self.mgr.is_running(inst)
+            if parked and not running:
+                if inst.desired_state != ARRETE:
+                    continue                             # maintenance, création… : on ne touche à rien
+                try:
+                    last = float(self.db.meta_get("parkchk:" + inst.id, "0") or 0)
+                except ValueError:
+                    last = 0.0
+                if now - last >= t.park_probe_s:
+                    self.db.meta_set("parkchk:" + inst.id, str(int(now)))
+                    self._probe[inst.id] = now
+                    self._flat_since.pop(inst.id, None)
+                    self.mgr.start(inst)                 # vérification du retrait
+                continue
+            if inst.desired_state != DEMARRE or not running:
+                self._flat_since.pop(inst.id, None)
+                continue
+            st = self.status.read(inst.id)
+            if st is None or st.age_s(now) > t.heartbeat_stale_s:
+                continue
+            probe = self._probe.get(inst.id)
+            if probe is not None and st.ts < probe:      # statut de l'ancien terminal : attendre le nouvel EA
+                continue
+            flat = st.positions == 0 and st.ordres == 0 and not st.phase_cloture500
+            if st.etat == "ARRET_500" and flat and st.seuil500_actif and st.solde + 0.005 >= st.seuil_arret:
+                since = self._flat_since.setdefault(inst.id, now)
+                if now - since < (30 if probe is not None else t.park_delay_s):
+                    continue
+                r = await self.mgr.stop(inst, force=False)
+                if r == "attente_cloture":
+                    continue
+                self.db.meta_set("park:" + inst.id, "1")
+                self.db.meta_set("parkchk:" + inst.id, str(int(now)))
+                self._flat_since.pop(inst.id, None)
+                if probe is None and not parked:
+                    await self.alert(inst.id, "PARK", f"🅿️ {inst.label} : {st.seuil_arret:.0f} atteints, tout est fermé "
+                                                      f"(solde {st.solde:.2f} {st.devise}) → terminal arrêté pour libérer le CPU. "
+                                                      f"Après ton retrait, il est relancé tout seul (vérification toutes les "
+                                                      f"{max(1, t.park_probe_s // 60)} min, ou tout de suite avec « ✅ J'ai retiré » "
+                                                      f"dans 💸 Retraits).", 1)
+                self._probe.pop(inst.id, None)
+                continue
+            self._flat_since.pop(inst.id, None)
+            if not parked:
+                continue
+            if st.etat in ("ACTIF", "PAUSE"):            # l'EA a constaté le retrait et repris
+                self.unpark(inst.id)
+                await self.alert(inst.id, "UNPARK", f"▶️ {inst.label} : retrait constaté (solde {st.solde:.2f} {st.devise}) → "
+                                                    f"terminal relancé, le trading reprend.", 1)
+            elif st.etat == "ARRET_500" and flat and st.solde + 0.005 < st.seuil_reprise and probe is not None \
+                    and now - probe > 60:
+                await self.mgr.stop(inst, force=False)   # trop retiré : rien à trader, regaré
+                if self.db.meta_get("parklow:" + inst.id) != "1":
+                    self.db.meta_set("parklow:" + inst.id, "1")
+                    await self.alert(inst.id, "PARK", f"🅿️ {inst.label} : solde {st.solde:.2f} {st.devise} sous le minimum "
+                                                      f"({st.seuil_reprise:.0f}) → terminal de nouveau arrêté. Dépose pour "
+                                                      f"atteindre {st.seuil_reprise:.0f}, il repartira tout seul.", 1)
+                self._probe.pop(inst.id, None)
+                continue
+            if st.etat != "ARRET_500" or st.solde + 0.005 >= st.seuil_reprise:
+                self.db.meta_set("parklow:" + inst.id, "")
+
     async def tick(self) -> None:
         """Un passage : processus disparus, dossiers manquants, terminaux muets, anomalies."""
         now = time.time()
+        try:
+            await self.park_tick(now)                    # Bot 4.15.0
+        except Exception:
+            log.exception("terminaux garés à 500")
         insts = self.db.list(states=(DEMARRE,))
         sts = {i.id: self.status.read(i.id) for i in insts}
         ages = {k: self._tick_age(s, now) for k, s in sts.items()}              # flux de prix des comptes (référence)

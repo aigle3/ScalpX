@@ -152,6 +152,31 @@ bool TPExecuting()
 }
 // [ARCHI] fin
 
+// [ARCHI] début 8.3.3 : surveillance du 24/11 (60 refus « failed cancel order [Invalid request] » en 1 h) : après un TP,
+// l'annulation des MÊMES ordres de grille était renvoyée avant la réponse du serveur (300-700 ms, VPS chargé).
+// Une annulation déjà envoyée (ou en cours côté terminal) n'est pas renvoyée pendant 3 s ; ensuite seulement, si l'ordre
+// existe toujours, nouvel essai.
+ulong g_cxTicket[32];
+ulong g_cxAt[32];
+int   g_cxPos = 0;
+
+bool CancelPending(ulong t)
+{
+   if((ENUM_ORDER_STATE)OrderGetInteger(ORDER_STATE) == ORDER_STATE_REQUEST_CANCEL) return true;
+   ulong now = GetTickCount64();
+   for(int k = 0; k < 32; k++)
+      if(g_cxTicket[k] == t && now - g_cxAt[k] < 3000) return true;
+   return false;
+}
+
+void CancelMark(ulong t)
+{
+   g_cxTicket[g_cxPos] = t;
+   g_cxAt[g_cxPos] = GetTickCount64();
+   g_cxPos = (g_cxPos + 1) % 32;
+}
+// [ARCHI] fin
+
 void RefreshState()
 {
    st_posCount = 0; st_posLots = 0; st_floating = 0; st_posType = -1;
@@ -637,11 +662,12 @@ int CancelPendingFast()
       ulong t = OrderGetTicket(j);
       if(t == 0) continue;
       if(!IsGridOrder()) continue;                   // [ARCHI] 8.3.1
+      if(CancelPending(t)) continue;                 // [ARCHI] 8.3.3 : annulation déjà en route
       MqlTradeRequest rq; MqlTradeResult rs;
       ZeroMemory(rq); ZeroMemory(rs);
       rq.action = TRADE_ACTION_REMOVE;
       rq.order  = t;
-      if(OrderSendAsync(rq, rs)) n++;
+      if(OrderSendAsync(rq, rs)) { n++; CancelMark(t); }
    }
    return n;
 }
@@ -676,12 +702,14 @@ int CloseAllFast(string reason)
          ulong t = OrderGetTicket(j);
          if(t == 0) continue;
          if(!IsGridOrder()) continue;                // [ARCHI] 8.3.1 : jamais l'ordre d'exécution du TP créé par le serveur
+         if(CancelPending(t)) continue;              // [ARCHI] 8.3.3 : annulation déjà en route (ex. TP juste avant)
          MqlTradeRequest rq; MqlTradeResult rs;
          ZeroMemory(rq); ZeroMemory(rs);
          rq.action = TRADE_ACTION_REMOVE;
          rq.order  = t;
          bool sentOk = async ? OrderSendAsync(rq, rs) : OrderSend(rq, rs);
-         if(!sentOk) Dbg("Suppression d'ordre non envoyée");
+         if(sentOk) CancelMark(t);
+         else Dbg("Suppression d'ordre non envoyée");
       }
 
       // 2) positions

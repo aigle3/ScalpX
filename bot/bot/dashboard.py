@@ -318,6 +318,8 @@ class Dashboard:
         text = render.withdraw_text(views, hist, db.total_withdrawn(), sum(r["amount"] for r in db.withdrawals_since(int(now) - 30 * 86400)),
                                     self.withdraw_since(), cur, now, labels)
         kb: Keyboard = [[(f"🏁 {v.inst.label[:24]}", f"a:{short(v.inst.id)}")] for v in render.due_withdrawals(views)[:6]]
+        if any(v.health.code == "PARK" for v in views):                     # Bot 4.15.0
+            kb.append([("✅ J'ai retiré : relancer maintenant", "d:wdrchk")])
         kb.append([("🔃 Actualiser", "d:wdr"), ("⬅ Accueil", "d:home")])
         return self._with_flash(text), kb
 
