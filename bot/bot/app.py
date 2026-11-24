@@ -518,12 +518,14 @@ async def j_watchdog(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def j_pin(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Bot 4.12.0 : terminaux répartis 1 processeur chacun (à tour de rôle), relancés ou non par le bot."""
-    from mt5.procs import PsutilProcesses, norm_path, pin_terminals
+    from mt5.procs import PsutilProcesses, norm_path, pin_plan, pin_terminals
     s = svc(context)
     cfg, mgr = s.ctx.cfg, s.ctx.mgr
     if not getattr(cfg.mt5, "pin_cpu", False) or not isinstance(mgr.procs, PsutilProcesses):
         return
-    targets = {norm_path(mgr.exe(i)): k for k, i in enumerate(s.ctx.db.list())}
+    running = [i for i in s.ctx.db.list() if mgr.is_running(i)]            # Bot 4.14.5 : terminaux en marche seulement
+    plan = pin_plan(running)
+    targets = {norm_path(mgr.exe(i)): plan[i.id] for i in running}
     n = await asyncio.get_running_loop().run_in_executor(None, pin_terminals, mgr.procs, targets)
     if n:
         log.info("affinité processeur : %d fil(s) d'exécution réglé(s)", n)

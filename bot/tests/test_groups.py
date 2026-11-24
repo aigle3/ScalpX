@@ -194,3 +194,17 @@ def test_terminal_attache_a_un_processeur(tmp_path):
         assert pin_terminals(PsutilProcesses(), {norm_path(exe): 5}, ncpu=2) == 0       # déjà réglé : rien à refaire
     finally:
         p.kill()
+
+
+def test_repartition_processeurs_equilibree_et_stable():
+    """Bot 4.14.5 : 12 terminaux en marche sur 4 cœurs → 3 par cœur ; l'ordre ne dépend que des numéros de compte."""
+    from types import SimpleNamespace as NS
+    from collections import Counter
+    from mt5.procs import pin_plan
+    insts = [NS(id=f"{n}_X", login=n) for n in (52040335, 37344723, 52030694, 52030697, 52030842, 52031042, 52033030,
+                                                 52034237, 52034926, 52036631, 52037679, 52039799)]
+    plan = pin_plan(insts, ncpu=4)
+    assert sorted(Counter(plan.values()).values()) == [3, 3, 3, 3]
+    assert pin_plan(list(reversed(insts)), ncpu=4) == plan                         # ordre de la base sans effet
+    p11 = pin_plan(insts[:-1], ncpu=4)                                               # 11 terminaux : le cœur 0 en a le moins
+    assert Counter(p11.values())[0] == 2 and max(Counter(p11.values()).values()) == 3

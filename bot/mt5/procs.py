@@ -205,6 +205,16 @@ class PsutilProcesses:
         return n
 
 
+def pin_plan(running: list, ncpu: int | None = None) -> dict[str, int]:
+    """Bot 4.14.5 : répartition ÉQUILIBRÉE et STABLE des terminaux EN MARCHE (avant : rang parmi TOUS les comptes, arrêtés
+    compris → jusqu'à 4 terminaux sur un cœur et 2 sur un autre, et tout décalé à chaque ajout / suppression de compte).
+    running : instances lancées (attribut login) ; renvoie id → processeur. Tri par numéro de compte ; le cœur 0 (bot,
+    écran virtuel, système) est servi en dernier quand la division ne tombe pas juste."""
+    ncpu = ncpu or os.cpu_count() or 1
+    order = sorted(running, key=lambda i: (int(getattr(i, "login", 0) or 0), str(getattr(i, "id", ""))))
+    return {i.id: (k + 1) % ncpu for k, i in enumerate(order)}
+
+
 def pin_terminals(procs: "PsutilProcesses", targets: dict[str, int], ncpu: int | None = None) -> int:
     """Bot 4.12.0 : chaque terminal (TOUS ses fils d'exécution) attaché à un seul processeur ; wineserver garde tous les
     processeurs. Sous Wine, un terminal réparti sur plusieurs cœurs passe beaucoup de temps à se synchroniser entre eux
