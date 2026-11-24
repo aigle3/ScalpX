@@ -26,20 +26,28 @@ class Watchdog:
         self._muet_limit: set[str] = set()               # comptes dont la limite de relances a déjà été signalée (cas « muet »)
         self._np_grace: dict[str, float] = {}            # Bot 4.14.0 : relancé pour « sans prix » : pas de nouveau jugement avant
         self._np_flag: dict[str, str] = {}               # « RELANCE » (attend le retour des prix) ou « LIMITE » (signalée)
+        self._live_since: dict[tuple, float] = {}        # Bot 4.14.1 : (symbole, serveur) → depuis quand ce flux reçoit des prix
 
-    @staticmethod
-    def _tick_age(st) -> float | None:
-        """Secondes depuis le dernier prix reçu par l'EA (EA ≥ 8.1.1) ; None si inconnu."""
-        age = getattr(st, "tick_age_s", None) if st is not None else None
-        return float(age) if isinstance(age, (int, float)) and not isinstance(age, bool) and age >= 0 else None
+    def _tick_age(self, st, now: float) -> float | None:
+        """Secondes depuis le dernier prix reçu par l'EA (EA ≥ 8.1.1), à l'instant `now` ; None si inconnu.
+        Bot 4.14.1 : un statut ancien (terminal planté, EA arrêté) ne compte PAS : sa valeur figée ferait croire à des prix."""
+        if st is None:
+            return None
+        age = getattr(st, "tick_age_s", None)
+        if not isinstance(age, (int, float)) or isinstance(age, bool) or age < 0:
+            return None
+        hb = st.age_s(now) if hasattr(st, "age_s") else 0.0
+        if hb > self.cfg.timing.heartbeat_stale_s:
+            return None
+        return float(age) + max(0.0, hb)
 
-    async def _no_price(self, inst, st, others_ok: bool, now: float) -> bool:
+    async def _no_price(self, inst, st, others_ok: bool, now: float, live_since: float | None = None) -> bool:
         """Bot 4.14.0 : EA vivant et connecté mais plus aucun prix (24/11 : OnTick plus jamais appelé après une relance,
         aucun trade possible, positions sans TP). Si d'AUTRES comptes reçoivent des prix (marché ouvert, flux OK), le
         terminal est relancé (même limite par heure que les autres relances), puis le retour des prix est confirmé.
         True = terminal relancé à ce passage."""
         limit = self.cfg.timing.sans_prix_restart_s
-        age = self._tick_age(st)
+        age = self._tick_age(st, now)
         if limit <= 0 or age is None or now < self._np_grace.get(inst.id, 0):
             return False
         if age < 60:
@@ -49,6 +57,12 @@ class Watchdog:
             return False
         if age <= limit or not others_ok or not getattr(st, "connecte", False):
             return False
+        # Bot 4.14.1 : réouverture (lundi, fin de la coupure quotidienne) : les comptes ne reçoivent pas leur 1er prix à la même
+        # seconde. On ne juge qu'une fois le marché vivant depuis `limit` (sinon relances inutiles des retardataires).
+        if live_since is None or now - live_since < limit:
+            return False
+        if self._np_flag.get(inst.id) == "LIMITE":       # Bot 4.14.1 : limite atteinte : plus de relance tant que les prix ne
+            return False                                 # sont pas revenus (pas de nouvelle salve l'heure suivante)
         if self.can_restart(inst.id, now):
             self._restarts[inst.id].append(now)
             n = len(self._restarts[inst.id])
@@ -112,7 +126,14 @@ class Watchdog:
         """Un passage : processus disparus, dossiers manquants, terminaux muets, anomalies."""
         now = time.time()
         insts = self.db.list(states=(DEMARRE,))
-        ages = {i.id: self._tick_age(self.status.read(i.id)) for i in insts}     # flux de prix des comptes (référence)
+        sts = {i.id: self.status.read(i.id) for i in insts}
+        ages = {k: self._tick_age(s, now) for k, s in sts.items()}              # flux de prix des comptes (référence)
+        sym = {k: (getattr(s, "symbole", "") or "", getattr(s, "serveur", "") or "") for k, s in sts.items() if s is not None}
+        live = {sym[k] for k, a in ages.items() if a is not None and a < 60 and k in sym}
+        for g in live:
+            self._live_since.setdefault(g, now)
+        for g in [g for g in self._live_since if g not in live]:
+            del self._live_since[g]                      # week-end / coupure : ce flux ne reçoit plus rien, personne n'est jugé
         for inst in insts:
             if not self.mgr.folder_ok(inst):
                 if self._flagged.get(inst.id) != "DOSSIER":
@@ -144,8 +165,10 @@ class Watchdog:
                 continue
             self._muet_since.pop(inst.id, None)
             self._muet_limit.discard(inst.id)
-            others_ok = any(a is not None and a < 60 for k, a in ages.items() if k != inst.id)
-            if await self._no_price(inst, st, others_ok, now):
+            # Bot 4.14.1 : référence = comptes du MÊME symbole chez le MÊME serveur (mêmes horaires de cotation)
+            others_ok = any(a is not None and a < 60 for k, a in ages.items()
+                            if k != inst.id and k in sym and sym[k] == sym.get(inst.id))
+            if await self._no_price(inst, st, others_ok, now, self._live_since.get(sym.get(inst.id))):
                 continue
             if h.code == "DOUBLON" and self._flagged.get(inst.id) != "DOUBLON":
                 self._flagged[inst.id] = "DOUBLON"

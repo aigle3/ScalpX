@@ -723,8 +723,15 @@ async def test_file_glissante_place_liberee_des_ea_charge():
 
 
 class _St:
-    def __init__(self, age, connecte=True):
-        self.tick_age_s, self.connecte = age, connecte
+    def __init__(self, age, connecte=True, hb=0, at=None):
+        self.tick_age_s, self.connecte, self.ts = age, connecte, int(at if at is not None else time.time()) - hb
+        self.symbole, self.serveur = "XAUUSD", "Demo-Server 1"
+
+    def age_s(self, now=None):
+        return (now if now is not None else time.time()) - self.ts
+
+
+LIVE = time.time() - 3600                                              # flux vivant depuis 1 h
 
 
 @pytest.mark.asyncio
@@ -734,33 +741,90 @@ async def test_watchdog_sans_prix_relance_puis_confirme(stack):
     al = Alerts()
     wd = Watchdog(cfg, db, mgr, status, al)
     now = time.time()
-    assert not await wd._no_price(inst, _St(600), False, now)          # personne ne reçoit de prix (marché fermé) : rien
-    assert not await wd._no_price(inst, _St(200), True, now)           # sous 5 min : rien
-    assert not await wd._no_price(inst, _St(600, False), True, now)    # déconnecté : autre problème
-    assert not await wd._no_price(inst, _St(None), True, now)          # ancien EA (pas de tick_age_s)
+    assert not await wd._no_price(inst, _St(600, at=now), False, now, LIVE)    # aucun autre compte du même flux n'a de prix : rien
+    assert not await wd._no_price(inst, _St(200, at=now), True, now, LIVE)     # sous 5 min : rien
+    assert not await wd._no_price(inst, _St(600, False, at=now), True, now, LIVE)   # déconnecté : autre problème
+    assert not await wd._no_price(inst, _St(None, at=now), True, now, LIVE)    # ancien EA (pas de tick_age_s)
+    assert not await wd._no_price(inst, _St(600, hb=120, at=now), True, now, LIVE)  # statut ancien (EA arrêté / planté) : ignoré
     assert procs.kills == 0
-    assert await wd._no_price(inst, _St(3243), True, now)              # cas du 24/11 : relance forcée
+    assert await wd._no_price(inst, _St(3243, at=now), True, now, LIVE)        # cas du 24/11 : relance forcée
     assert procs.kills == 1 and mgr.is_running(inst)
     assert [k for _, k, _, _ in al.items] == ["SANS_PRIX"]
-    assert not await wd._no_price(inst, _St(3243), True, now + 10)     # délai de grâce après la relance
-    assert not await wd._no_price(inst, _St(3), True, now + 400)       # prix revenus : confirmation
+    assert not await wd._no_price(inst, _St(3243, at=now + 10), True, now + 10, LIVE)    # délai de grâce après la relance
+    assert not await wd._no_price(inst, _St(3, at=now + 400), True, now + 400, LIVE)      # prix revenus : confirmation
     assert [k for _, k, _, _ in al.items] == ["SANS_PRIX", "RETABLI"]
-    assert not await wd._no_price(inst, _St(3), True, now + 420)       # confirmée une seule fois
+    assert not await wd._no_price(inst, _St(3, at=now + 420), True, now + 420, LIVE)      # confirmée une seule fois
     assert len(al.items) == 2
 
 
 @pytest.mark.asyncio
-async def test_watchdog_sans_prix_limite_et_desactivable(stack):
+async def test_watchdog_sans_prix_limite_collante_et_desactivable(stack):
     cfg, db, procs, status, cmdq, mgr, ea = stack
     inst = seed(stack)
     al = Alerts()
     wd = Watchdog(cfg, db, mgr, status, al)
     now = time.time()
     for k in range(3):
-        assert await wd._no_price(inst, _St(900), True, now + k * 400)
-    assert not await wd._no_price(inst, _St(900), True, now + 1300)    # 4e en moins d'1 h : refusée, signalée
-    assert not await wd._no_price(inst, _St(900), True, now + 1700)
+        assert await wd._no_price(inst, _St(900, at=now + k * 400), True, now + k * 400, LIVE)
+    assert not await wd._no_price(inst, _St(900, at=now + 1300), True, now + 1300, LIVE)   # 4e en moins d'1 h : refusée, signalée
+    assert not await wd._no_price(inst, _St(900, at=now + 1700), True, now + 1700, LIVE)
+    assert not await wd._no_price(inst, _St(900, at=now + 9000), True, now + 9000, LIVE)   # heures suivantes : toujours pas de relance
     assert procs.kills == 3 and [k for _, k, _, _ in al.items].count("LIMITE") == 1
+    assert not await wd._no_price(inst, _St(2, at=now + 9100), True, now + 9100, LIVE)     # prix revenus : limite levée, confirmé
+    assert al.items[-1][1] == "RETABLI"
     cfg.timing.sans_prix_restart_s = 0
     wd2 = Watchdog(cfg, db, mgr, status, Alerts())
-    assert not await wd2._no_price(inst, _St(9999), True, now)
+    assert not await wd2._no_price(inst, _St(9999, at=now), True, now, LIVE)
+
+
+@pytest.mark.asyncio
+async def test_watchdog_sans_prix_pas_de_relance_a_la_reouverture(stack):
+    cfg, db, procs, status, cmdq, mgr, ea = stack
+    inst = seed(stack)
+    wd = Watchdog(cfg, db, mgr, status, Alerts())
+    now = time.time()
+    assert not await wd._no_price(inst, _St(172800, at=now), False, now, None)       # week-end : aucun prix sur ce flux
+    assert not await wd._no_price(inst, _St(172800, at=now), True, now, now - 20)    # lundi : 1ers prix ailleurs il y a 20 s : PAS relancé
+    assert procs.kills == 0
+    assert await wd._no_price(inst, _St(172800, at=now + 400), True, now + 400, now - 20)  # flux vivant depuis 7 min, toujours rien : relancé
+    await wd.tick()                                                    # passage réel sans aucun statut : aucun flux vivant
+    assert wd._live_since == {}
+
+
+@pytest.mark.asyncio
+async def test_watchdog_sans_prix_passages_reels(stack, monkeypatch):
+    """tick() complet : référence = même symbole / même serveur, statuts anciens ignorés, flux vivant depuis 5 min exigé."""
+    import mt5.watchdog as wmod
+    from core.health import Health
+    cfg, db, procs, status, cmdq, mgr, ea = stack
+    a, b = seed(stack, 1), seed(stack, 2)
+    monkeypatch.setattr(wmod, "diagnose", lambda *x, **k: Health("ok", "OK", []))
+    wd = Watchdog(cfg, db, mgr, status, Alerts())
+    t0 = time.time()
+    sts = {}
+    monkeypatch.setattr(wd.status, "read", lambda iid: sts.get(iid))
+    clock = [t0]
+    monkeypatch.setattr(wmod.time, "time", lambda: clock[0])
+
+    def run(at, sa, sb):
+        clock[0] = at
+        sts[a.id], sts[b.id] = sa, sb
+        return wd.tick()
+
+    # le compte A reçoit des prix mais SON statut est ancien (terminal planté) : ne prouve rien → B jamais relancé
+    for k in range(5):
+        await run(t0 + k * 200, _St(2, hb=120, at=t0 + k * 200), _St(5000, at=t0 + k * 200))
+    assert procs.kills == 0
+    # A sur un autre symbole : pas une référence pour B
+    for k in range(5):
+        at = t0 + 2000 + k * 200
+        sa = _St(2, at=at); sa.symbole = "EURUSD"
+        await run(at, sa, _St(5000, at=at))
+    assert procs.kills == 0
+    # A reçoit des prix sur le même flux : B relancé seulement après 5 min de flux vivant
+    t1 = t0 + 5000
+    await run(t1, _St(2, at=t1), _St(5000, at=t1))
+    await run(t1 + 200, _St(2, at=t1 + 200), _St(5000, at=t1 + 200))
+    assert procs.kills == 0
+    await run(t1 + 320, _St(2, at=t1 + 320), _St(5000, at=t1 + 320))
+    assert procs.kills == 1
