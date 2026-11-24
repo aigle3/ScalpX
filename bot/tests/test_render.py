@@ -219,3 +219,14 @@ def test_mode_continu_affiche_en_haut_de_l_accueil():
     assert "Mode créneaux" in mode_line([v(False)], 0)
     assert "1 compte(s) en continu" in mode_line([v(True), v(False)], 0)
     assert mode_line([], 0) == ""
+
+
+def test_compte_en_objectif_sans_position_explique():
+    """Bot 4.14.3 : d'autres comptes tradent, un compte en objectif n'a rien : la raison est affichée compte par compte."""
+    txt = block(view(1, positions=1, signal="achat"), view(2, positions=0, tick_age_s=3243),
+                view(3, positions=0, trading_autorise=False, raison_blocage="Spread trop large (51 > 50 pts)"),
+                view(4, positions=0, tick_age_s=2), view(5, positions=0, etat="ARRET_500", objectif_actif=False))
+    assert "⏳ 2 sans position : 📡 aucun prix reçu depuis 54 min" in txt
+    assert "⏳ 3 sans position : Spread trop large (51 &gt; 50 pts)" in txt or "⏳ 3 sans position : Spread trop large (51 > 50 pts)" in txt
+    assert "⏳ 4 sans position : entrée manquée" in txt and "⏳ 5" not in txt
+    assert "⏳" not in block(view(1, positions=0), view(2, positions=0))     # personne ne trade : rien de plus

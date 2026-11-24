@@ -150,6 +150,19 @@ def trading_block(views: list[AccountView], now: float) -> list[str]:
         lines.append(f"📌 {npos} position(s)" + (f" sur {nacc} comptes" if nacc > 1 else "") + f" · flottant {money(flot, st.devise, True)}")
     else:
         lines.append("📌 Aucune position")
+    # Bot 4.14.3 : un compte en objectif SANS position alors que d'autres tradent : dit pourquoi, compte par compte
+    if npos:
+        idle = [(v.inst.login, v.st) for v in views if v.st is not None and v.st.age_s(now) < 120
+                and v.st.objectif_actif and v.st.etat == "ACTIF" and v.st.positions == 0]
+        for login, s in sorted(idle, key=lambda x: x[0]):
+            age = getattr(s, "tick_age_s", None)
+            if isinstance(age, (int, float)) and not isinstance(age, bool) and age >= 60:
+                why = f"📡 aucun prix reçu depuis {int(age // 60)} min (relance automatique du terminal à 5 min)"
+            elif s.raison_blocage:
+                why = esc(s.raison_blocage)
+            else:
+                why = "entrée manquée au dernier signal (spread, filtre…), attend le suivant"
+            lines.append(f"   ⏳ {login} sans position : {why}")
     cut = next((s.coupure_en_cours for s in sts if s.coupure_en_cours), "")
     if cut:                                                  # EA 7.0.0 : coupure passée pendant une série
         lines.append(f"⛔ Coupure {esc(cut)} : la série en cours finit au TP, puis l'objectif est annulé")
