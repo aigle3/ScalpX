@@ -16,7 +16,7 @@
 //|   (8.0.0 : aucun affichage sur le graphique, tout par Telegram)  |
 //+------------------------------------------------------------------+
 #property copyright   "ScalpX"
-#property version     "8.02"
+#property version     "8.03"
 #property description "ScalpX v6.1.0 — EMA 10/20 + grille ATR + TP commun + filtres multi-timeframe, pilotage par bot central (fichiers)"
 
 // [SEUIL500] début : TEST UNIQUEMENT (test B-3 de la checklist). Décommenter pour simuler un glissement de 2.0 (devise du compte)
@@ -171,6 +171,7 @@ int OnInit()
 {
    BtPreInit();                       // [ARCHI] 7.2.0 : backtest du bot ? (horloge simulée, identifiant bt_<id>)
    Log("Initialisation ScalpX " + SX_VERSION + " sur " + _Symbol);
+   g_onTickMs = GetTickCount64();     // [ARCHI] 8.3.0 : silence d'OnTick compté dès le démarrage
    g_lastTickMs = GetTickCount64();   // [ARCHI] 8.1.1 : départ du chrono « aucun tick » (avant : jamais d'alerte si aucun tick depuis le démarrage)
    InitParams();
    if(UseSavedParams && !g_btManual)  // [ARCHI] 7.12.0 : testeur lancé à la main : uniquement les paramètres du test (.set)
@@ -255,6 +256,39 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
+   g_onTickMs = GetTickCount64();        // [ARCHI] 8.3.0 : dernier appel réel d'OnTick par MT5 (diagnostic)
+   ProcessTick();
+}
+
+// [ARCHI] début 8.3.0 : prix traités même si MT5 n'appelle plus OnTick (diagnostic du 24/11, compte en panne : le terminal
+// reçoit les cotations — Market Watch et historique à jour — mais l'événement OnTick ne vient plus, ni après relance, ni après
+// recréation du compte). OnTimer (250 ms) lit la dernière cotation ; si elle est NOUVELLE (time_msc jamais traité), il exécute
+// exactement la même boucle que OnTick, entrées comprises. Quand OnTick marche, chaque cotation est déjà traitée : rien en double.
+void TimerTick()
+{
+   if(g_bt || MQLInfoInteger(MQL_TESTER)) return;
+   MqlTick q;
+   if(!SymbolInfoTick(_Symbol, q) || q.time_msc <= 0 || q.time_msc == g_lastQuoteMsc) return;
+   ulong now = GetTickCount64();
+   if(now - g_onTickMs < 10000) return;   // OnTick appelé il y a moins de 10 s : vivant, il traitera cette cotation lui-même
+   if(!g_timerTicks)
+   {
+      g_timerTicks = true;
+      Log("MT5 n'appelle plus OnTick alors que les prix arrivent : prix traités par le minuteur (entrées et sorties)");
+   }
+   ProcessTick();
+}
+// [ARCHI] fin
+
+void ProcessTick()
+{
+   MqlTick pq;                                                // [ARCHI] 8.3.0 : cotation traitée (évite un double passage)
+   if(SymbolInfoTick(_Symbol, pq)) g_lastQuoteMsc = pq.time_msc;
+   if(g_timerTicks && g_onTickMs > 0 && GetTickCount64() - g_onTickMs < 1500)
+   {
+      g_timerTicks = false;
+      Log("OnTick appelé de nouveau par MT5 : fonctionnement normal");
+   }
    g_lastTickMs = GetTickCount64();
    if(g_bt) BtTick();                 // [ARCHI] 7.2.0 : backtest du bot : une fois par seconde simulée
    if(g_closing) return;
@@ -363,6 +397,7 @@ void OnTimer()
    }
 
    // [ARCHI] début
+   TimerTick();                          // 8.3.0 : nouvelle cotation sans OnTick → même traitement que OnTick
    ArchiTimer();                         // commandes (2 s), statut (5 s), créneaux, événements
    // [ARCHI] fin
 }

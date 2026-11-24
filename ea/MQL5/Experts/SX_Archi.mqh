@@ -952,6 +952,8 @@ void StatutWrite()
    j += ",\"ordres\":" + IntegerToString(st_pendCount);
    j += ",\"tick_age_s\":" + IntegerToString(g_lastTickMs > 0 ? (long)((GetTickCount64() - g_lastTickMs) / 1000) : -1);   // [ARCHI] 8.1.1
    j += ",\"sans_tick\":" + BoolS(g_tickFb);
+   j += ",\"ontick_age_s\":" + IntegerToString(g_onTickMs > 0 ? (long)((GetTickCount64() - g_onTickMs) / 1000) : -1);   // [ARCHI] 8.3.0
+   j += ",\"prix_par_minuteur\":" + BoolS(g_timerTicks);
    j += ",\"pl_jour\":" + NumS(dayPl);
    j += ",\"pl_jour_realise\":" + NumS(g_dayStartBal > 0 ? bal - g_dayStartBal : 0.0);   // trades fermés du jour, sans le latent
    j += ",\"etat\":\"" + StateName(g_state) + "\"";

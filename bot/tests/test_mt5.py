@@ -731,12 +731,24 @@ class _St:
         return (now if now is not None else time.time()) - self.ts
 
 
+def _fake_restart(monkeypatch, mgr):
+    """Relances « sans prix » enregistrées (valeur de force) sans attendre un vrai terminal."""
+    calls = []
+
+    async def fake(inst, force=False):
+        calls.append(force)
+        return "relance"
+    monkeypatch.setattr(mgr, "restart", fake)
+    return calls
+
+
 LIVE = time.time() - 3600                                              # flux vivant depuis 1 h
 
 
 @pytest.mark.asyncio
-async def test_watchdog_sans_prix_relance_puis_confirme(stack):
+async def test_watchdog_sans_prix_relance_puis_confirme(stack, monkeypatch):
     cfg, db, procs, status, cmdq, mgr, ea = stack
+    rs = _fake_restart(monkeypatch, mgr)
     inst = seed(stack)
     al = Alerts()
     wd = Watchdog(cfg, db, mgr, status, al)
@@ -746,9 +758,9 @@ async def test_watchdog_sans_prix_relance_puis_confirme(stack):
     assert not await wd._no_price(inst, _St(600, False, at=now), True, now, LIVE)   # déconnecté : autre problème
     assert not await wd._no_price(inst, _St(None, at=now), True, now, LIVE)    # ancien EA (pas de tick_age_s)
     assert not await wd._no_price(inst, _St(600, hb=120, at=now), True, now, LIVE)  # statut ancien (EA arrêté / planté) : ignoré
-    assert procs.kills == 0
+    assert len(rs) == 0
     assert await wd._no_price(inst, _St(3243, at=now), True, now, LIVE)        # cas du 24/11 : relance forcée
-    assert procs.kills == 1 and mgr.is_running(inst)
+    assert len(rs) == 1 and rs[-1] is False
     assert [k for _, k, _, _ in al.items] == ["SANS_PRIX"]
     assert not await wd._no_price(inst, _St(3243, at=now + 10), True, now + 10, LIVE)    # délai de grâce après la relance
     assert not await wd._no_price(inst, _St(3, at=now + 400), True, now + 400, LIVE)      # prix revenus : confirmation
@@ -758,8 +770,9 @@ async def test_watchdog_sans_prix_relance_puis_confirme(stack):
 
 
 @pytest.mark.asyncio
-async def test_watchdog_sans_prix_limite_collante_et_desactivable(stack):
+async def test_watchdog_sans_prix_limite_collante_et_desactivable(stack, monkeypatch):
     cfg, db, procs, status, cmdq, mgr, ea = stack
+    rs = _fake_restart(monkeypatch, mgr)
     inst = seed(stack)
     al = Alerts()
     wd = Watchdog(cfg, db, mgr, status, al)
@@ -769,7 +782,7 @@ async def test_watchdog_sans_prix_limite_collante_et_desactivable(stack):
     assert not await wd._no_price(inst, _St(900, at=now + 1300), True, now + 1300, LIVE)   # 4e en moins d'1 h : refusée, signalée
     assert not await wd._no_price(inst, _St(900, at=now + 1700), True, now + 1700, LIVE)
     assert not await wd._no_price(inst, _St(900, at=now + 9000), True, now + 9000, LIVE)   # heures suivantes : toujours pas de relance
-    assert procs.kills == 3 and [k for _, k, _, _ in al.items].count("LIMITE") == 1
+    assert len(rs) == 3 and [k for _, k, _, _ in al.items].count("LIMITE") == 1
     assert not await wd._no_price(inst, _St(2, at=now + 9100), True, now + 9100, LIVE)     # prix revenus : limite levée, confirmé
     assert al.items[-1][1] == "RETABLI"
     cfg.timing.sans_prix_restart_s = 0
@@ -778,14 +791,15 @@ async def test_watchdog_sans_prix_limite_collante_et_desactivable(stack):
 
 
 @pytest.mark.asyncio
-async def test_watchdog_sans_prix_pas_de_relance_a_la_reouverture(stack):
+async def test_watchdog_sans_prix_pas_de_relance_a_la_reouverture(stack, monkeypatch):
     cfg, db, procs, status, cmdq, mgr, ea = stack
+    rs = _fake_restart(monkeypatch, mgr)
     inst = seed(stack)
     wd = Watchdog(cfg, db, mgr, status, Alerts())
     now = time.time()
     assert not await wd._no_price(inst, _St(172800, at=now), False, now, None)       # week-end : aucun prix sur ce flux
     assert not await wd._no_price(inst, _St(172800, at=now), True, now, now - 20)    # lundi : 1ers prix ailleurs il y a 20 s : PAS relancé
-    assert procs.kills == 0
+    assert len(rs) == 0
     assert await wd._no_price(inst, _St(172800, at=now + 400), True, now + 400, now - 20)  # flux vivant depuis 7 min, toujours rien : relancé
     await wd.tick()                                                    # passage réel sans aucun statut : aucun flux vivant
     assert wd._live_since == {}
@@ -797,6 +811,7 @@ async def test_watchdog_sans_prix_passages_reels(stack, monkeypatch):
     import mt5.watchdog as wmod
     from core.health import Health
     cfg, db, procs, status, cmdq, mgr, ea = stack
+    rs = _fake_restart(monkeypatch, mgr)
     a, b = seed(stack, 1), seed(stack, 2)
     monkeypatch.setattr(wmod, "diagnose", lambda *x, **k: Health("ok", "OK", []))
     wd = Watchdog(cfg, db, mgr, status, Alerts())
@@ -814,20 +829,20 @@ async def test_watchdog_sans_prix_passages_reels(stack, monkeypatch):
     # le compte A reçoit des prix mais SON statut est ancien (terminal planté) : ne prouve rien → B jamais relancé
     for k in range(5):
         await run(t0 + k * 200, _St(2, hb=120, at=t0 + k * 200), _St(5000, at=t0 + k * 200))
-    assert procs.kills == 0
+    assert len(rs) == 0
     # A sur un autre symbole : pas une référence pour B
     for k in range(5):
         at = t0 + 2000 + k * 200
         sa = _St(2, at=at); sa.symbole = "EURUSD"
         await run(at, sa, _St(5000, at=at))
-    assert procs.kills == 0
+    assert len(rs) == 0
     # A reçoit des prix sur le même flux : B relancé seulement après 5 min de flux vivant
     t1 = t0 + 5000
     await run(t1, _St(2, at=t1), _St(5000, at=t1))
     await run(t1 + 200, _St(2, at=t1 + 200), _St(5000, at=t1 + 200))
-    assert procs.kills == 0
+    assert len(rs) == 0
     await run(t1 + 320, _St(2, at=t1 + 320), _St(5000, at=t1 + 320))
-    assert procs.kills == 1
+    assert len(rs) == 1
 
 
 def test_journal_joint_a_l_alerte(tmp_path):
@@ -840,6 +855,6 @@ def test_journal_joint_a_l_alerte(tmp_path):
     (tmp_path / "logs" / "20261124.log").write_bytes("CE 0 09:40 Trades: deal sell".encode("utf-16-le"))
     (tmp_path / "logs" / "metaeditor.log").write_text("ignoré")
     t = journal_tail(str(tmp_path))
-    assert "<b>EA</b>" in t and "Réglages &lt;8&gt;" in t and "Réglages &lt;2&gt;" not in t      # 6 dernières lignes
-    assert "<b>Terminal</b>" in t and "deal sell" in t and "ignoré" not in t
+    assert "— EA —" in t and "Réglages <8>" in t and "Réglages <2>" not in t      # 6 dernières lignes, texte brut
+    assert "— Terminal —" in t and "deal sell" in t and "ignoré" not in t
     assert journal_tail(str(tmp_path / "absent")) == ""

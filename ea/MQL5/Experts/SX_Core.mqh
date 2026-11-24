@@ -3,7 +3,7 @@
 //| Noyau : variables globales, registre de paramètres (tous les     |
 //| réglages sont modifiables à chaud), persistance, presets.        |
 //+------------------------------------------------------------------+
-#define SX_VERSION   "8.2.1"
+#define SX_VERSION   "8.3.0"
 #define SX_PREFIX    "SX4_"
 #define SX_MAXQ      40
 
@@ -190,6 +190,9 @@ datetime g_pauseUntil = 0;            // pause programmée (heure du fuseau)
 bool     g_newsBlock = false;         // fenêtre de news : nouvelles séries bloquées
 string   g_newsWhy = "";
 ulong    g_lastTickMs = 0;
+long     g_lastQuoteMsc = 0;          // [ARCHI] 8.3.0 : dernière cotation traitée (time_msc)
+ulong    g_onTickMs = 0;              // [ARCHI] 8.3.0 : dernier appel réel d'OnTick par MT5
+bool     g_timerTicks = false;        // [ARCHI] 8.3.0 : prix traités par le minuteur (OnTick muet)
 ulong    g_finishRetryMs = 0;         // anti-boucle après une fin d'objectif non confirmée
 int      g_finishFails = 0;
 string   g_blockReason = "";             // pourquoi le robot n'ouvre pas de nouvelle série

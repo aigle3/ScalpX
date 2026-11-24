@@ -18,9 +18,8 @@ Alert = Callable[[str, str, str, int], Awaitable[None]]      # (iid, kind, texte
 
 
 def journal_tail(folder: str, lines: int = 6, width: int = 160) -> str:
-    """Bot 4.14.4 : dernières lignes du jour du journal de l'EA et du terminal (UTF-16 ou UTF-8), pour joindre le diagnostic
+    """Bot 4.14.4 (texte brut en 4.14.6 : les alertes sont échappées) : dernières lignes du jour du journal de l'EA et du terminal (UTF-16 ou UTF-8), pour joindre le diagnostic
     à l'alerte sans commande à taper. Vide si introuvable."""
-    import html
     from pathlib import Path
     out: list[str] = []
     for title, subs in (("EA", ("MQL5/logs", "MQL5/Logs")), ("Terminal", ("logs", "Logs"))):
@@ -43,7 +42,7 @@ def journal_tail(folder: str, lines: int = 6, width: int = 160) -> str:
             txt = raw.decode("utf-8", "replace")
         tail = [ln.strip()[:width] for ln in txt.splitlines() if ln.strip()][-lines:]
         if tail:
-            out.append(f"<b>{title}</b>\n<pre>{html.escape(chr(10).join(tail))}</pre>")
+            out.append(f"— {title} —\n" + chr(10).join(tail))
     return "\n".join(out)
 
 
@@ -96,7 +95,9 @@ class Watchdog:
         if self.can_restart(inst.id, now):
             self._restarts[inst.id].append(now)
             n = len(self._restarts[inst.id])
-            await self.mgr.restart(inst, force=True)
+            # Bot 4.14.6 : arrêt PROPRE (FERMER_TERMINAL, arrêt forcé seulement après 10 s) : l'EA répond encore ; le diagnostic
+            # du 24/11 soupçonne les arrêts forcés à répétition d'un terminal relancé seul dans le Wine partagé
+            await self.mgr.restart(inst, force=False)
             self._np_grace[inst.id] = now + limit         # laisse au nouvel EA le temps de recevoir ses premiers prix
             self._np_flag[inst.id] = "RELANCE"
             await self.alert(inst.id, "SANS_PRIX", f"📡 {inst.label} : aucun prix reçu depuis {int(age // 60)} min alors que les "
@@ -116,7 +117,7 @@ class Watchdog:
             t = journal_tail(inst.folder)
         except Exception:
             return ""
-        return ("\n\n🩺 <b>Journal avant relance</b> (à me transmettre tel quel)\n" + t) if t else ""
+        return ("\n\n🩺 Journal avant relance (à me transmettre tel quel)\n" + t) if t else ""   # texte brut : l'alerte est échappée
 
     async def _unfreeze(self, inst, muet_for: float, now: float) -> None:
         """Terminal vivant mais EA muet depuis `muet_restart_s` : arrêt forcé puis relance (même limite de relances par heure

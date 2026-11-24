@@ -50,3 +50,17 @@ def test_market_watch_plus_reduite_et_reabonnement():
     assert "TrimMarketWatchTick();" not in timer
     fb = a[a.index("void TickFallback()"):a.index("void ArchiTimer()")]
     assert "ChartSetSymbolPeriod(0, _Symbol, _Period);" in fb and "SymbolSelect(_Symbol, true);" in fb
+
+
+def test_prix_traites_par_le_minuteur_si_ontick_muet():
+    m = _src("ScalpX_v5.mq5")
+    ontick = m[m.index("void OnTick()"):m.index("void TimerTick()")]
+    assert "ProcessTick();" in ontick and "g_onTickMs = GetTickCount64();" in ontick
+    timer = m[m.index("void OnTimer()"):]
+    assert timer.index("TimerTick();") < timer.index("ArchiTimer();")
+    tt = m[m.index("void TimerTick()"):m.index("void ProcessTick()")]
+    assert "q.time_msc == g_lastQuoteMsc" in tt and "MQL_TESTER" in tt and "ProcessTick();" in tt
+    pt = m[m.index("void ProcessTick()"):]
+    assert pt.index("g_lastQuoteMsc = pq.time_msc") < pt.index("RefreshState();")
+    core = _src("SX_Core.mqh")                       # globales déclarées avant SX_Archi (statut)
+    assert "ulong    g_onTickMs" in core and "bool     g_timerTicks" in core
