@@ -171,6 +171,7 @@ int OnInit()
 {
    BtPreInit();                       // [ARCHI] 7.2.0 : backtest du bot ? (horloge simulée, identifiant bt_<id>)
    Log("Initialisation ScalpX " + SX_VERSION + " sur " + _Symbol);
+   g_lastTickMs = GetTickCount64();   // [ARCHI] 8.1.1 : départ du chrono « aucun tick » (avant : jamais d'alerte si aucun tick depuis le démarrage)
    InitParams();
    if(UseSavedParams && !g_btManual)  // [ARCHI] 7.12.0 : testeur lancé à la main : uniquement les paramètres du test (.set)
    {

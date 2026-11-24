@@ -29,6 +29,7 @@ bool     g_archiOn      = false;       // false dans le Strategy Tester
 int      g_state        = ST_ACTIF;    // état persisté
 int      g_cycle        = 0;           // compteur de cycles (persisté)
 bool     g_phase500     = false;       // phase CLÔTURE 500 (mémoire seulement)
+bool     g_tickFb       = false;       // [ARCHI] 8.1.1 : aucun tick reçu, sorties gérées par le timer
 bool     g_maint        = false;       // verrou MAINTENANCE (mémoire seulement)
 bool     g_capSent      = false;       // CAPITAL_INSUFFISANT déjà émis
 long     g_evSeq        = 0;
@@ -824,6 +825,7 @@ void Close500Sequence()
            "↩️ CLÔTURE TERMINÉE SOUS " + NumS(PDbl(P_SEUIL_ARRET)) + "\n━━━━━━━━━━━━━━━━━━\n💰 Solde final : " + NumS(bal) + " " + Cur() +
            "\n📉 Il manque : " + NumS(PDbl(P_SEUIL_ARRET) - bal) + " " + Cur() + "\n▶️ Le trading reprend jusqu'à atteindre " + NumS(PDbl(P_SEUIL_ARRET)) + ".",
            "{\"solde\":" + NumS(bal) + ",\"manque\":" + NumS(PDbl(P_SEUIL_ARRET) - bal) + "}");
+   if(g_state == ST_PAUSE) return;                         // [ARCHI] 8.1.1 : robot en pause : il ne reprend pas tout seul
    ContinueTo500(bal);
 }
 
@@ -864,7 +866,7 @@ void Seuil500Tick()
       return;
    }
 
-   if(g_state == ST_ACTIF)
+   if(g_state == ST_ACTIF || g_state == ST_PAUSE)          // [ARCHI] 8.1.1 : le seuil 500 est contrôlé aussi en PAUSE
    {
       if(st_posCount > 0)
       {
@@ -948,6 +950,8 @@ void StatutWrite()
    j += ",\"flottant_ea\":" + NumS(st_floating);
    j += ",\"positions\":" + IntegerToString(st_posCount);
    j += ",\"ordres\":" + IntegerToString(st_pendCount);
+   j += ",\"tick_age_s\":" + IntegerToString(g_lastTickMs > 0 ? (long)((GetTickCount64() - g_lastTickMs) / 1000) : -1);   // [ARCHI] 8.1.1
+   j += ",\"sans_tick\":" + BoolS(g_tickFb);
    j += ",\"pl_jour\":" + NumS(dayPl);
    j += ",\"pl_jour_realise\":" + NumS(g_dayStartBal > 0 ? bal - g_dayStartBal : 0.0);   // trades fermés du jour, sans le latent
    j += ",\"etat\":\"" + StateName(g_state) + "\"";
@@ -1023,7 +1027,7 @@ bool CmdPause(string &msg, const string arg = "")
    ActPause();
    RefreshState();
    int c = CancelPendingFast();                             // plus aucun remplissage de la grille pendant la pause
-   if(!wasPause) SetState(ST_PAUSE, true, until > 0 ? "Pause programmée" : "Commande PAUSE");
+   if(!wasPause && g_state != ST_ARRET) SetState(ST_PAUSE, true, until > 0 ? "Pause programmée" : "Commande PAUSE");   // [ARCHI] 8.1.1 : un compte à 500 reste 🏁 (retrait attendu)
    g_pauseUntil = until;
    if(until > 0) GlobalVariableSet(GVN("pzuntil"), (double)until);
    else GlobalVariableDel(GVN("pzuntil"));
@@ -1126,7 +1130,7 @@ bool CmdExecute(string cmd, string &args[], string &msg)
       msg = ActCloseAll();
       g_stoppedManually = true;
       GlobalVariableSet(GVN("stopped"), 1);
-      SetState(ST_PAUSE, true, "Commande FERMER_TOUT");
+      if(g_state != ST_ARRET) SetState(ST_PAUSE, true, "Commande FERMER_TOUT");   // [ARCHI] 8.1.1 : un compte à 500 reste 🏁
       return OkFromText(msg);
    }
    if(cmd == "ANNULER_OBJECTIF")
@@ -1407,6 +1411,42 @@ void ArchiDeinit(const int reason)
    GlobalVariablesFlush();
 }
 
+// [ARCHI] début 8.1.1 : filet de sécurité. Le 24/11, après une relance du terminal, l'EA ne recevait plus aucun tick
+// (OnTick jamais appelé, timer et commandes normaux) : 8 positions sans TP, objectif et seuil 500 jamais contrôlés.
+// Sans tick depuis 10 s (marché ouvert), la gestion des SORTIES est faite ici, une fois par seconde (aucune nouvelle entrée).
+void TickFallback()
+{
+   ulong now = GetTickCount64();
+   if(g_lastTickMs > 0 && now - g_lastTickMs < 10000)
+   {
+      if(g_tickFb) { g_tickFb = false; Log("Ticks reçus de nouveau : gestion normale"); }
+      return;
+   }
+   if(!f_marketOpen || g_closing || g_maint) return;
+   RefreshState();
+   if(st_posCount + st_pendCount == 0 && !g_goalActive) return;
+   if(!g_tickFb) { g_tickFb = true; Log("Aucun tick depuis 10 s : TP, objectif et seuil 500 gérés par le timer"); }
+   GoalTick();
+   if(g_closing) return;
+   Seuil500Tick();
+   if(g_closing) return;
+   RiskTick();
+   if(g_closing) return;
+   RefreshState();
+   if(st_posCount > 0)
+   {
+      ManageTP();
+      if(CheckTPExit()) return;
+   }
+   static ulong lastClean = 0;
+   if(g_goalDone && !g_goalActive && (st_posCount + st_pendCount) > 0 && now >= g_cooldownUntilMs && now - lastClean > 5000)
+   {
+      lastClean = now;
+      CloseAllFast("nettoyage après objectif");
+   }
+}
+// [ARCHI] fin
+
 // Appelé à chaque OnTimer (250 ms) : planifie lui-même ses tâches
 void ArchiTimer()
 {
@@ -1434,6 +1474,7 @@ void ArchiTimer()
       SlotEntryTick();                   // [ARCHI] 6.6.0 : fenêtre d'entrée après le créneau
       CutTick();                         // [ARCHI] 7.0.0 : coupure de l'objectif
       RepriseRetraitTimer();             // [ARCHI] 7.8.5 : reprise après retrait détectée aussi sans tick (marché fermé le week-end)
+      TickFallback();                    // [ARCHI] 8.1.1 : plus de tick reçu → TP, objectif et seuil 500 gérés par le timer
       TrimMarketWatchTick();             // [ARCHI] 7.11.1 : Market Watch réduit, 60 s après le démarrage, par petits lots
       //--- cohérence avec le panneau / l'ancien code : arrêt manuel <-> PAUSE
       if(g_state == ST_ACTIF && g_stoppedManually) SetState(ST_PAUSE, true, "Arrêt manuel détecté");

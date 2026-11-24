@@ -168,13 +168,14 @@ void WatchdogTick()
    }
 
    //--- ticks absents alors que le marché est ouvert
-   if(conn && f_marketOpen && g_lastTickMs > 0 && g_enabled)
+   if(conn && f_marketOpen && g_lastTickMs > 0 && (g_enabled || st_posCount > 0))   // [ARCHI] 8.1.1 : aussi en pause avec des positions
    {
       ulong gap = now - g_lastTickMs;
       if(gap > 180000 && !g_wdTickSent)
       {
          g_wdTickSent = true;
-         TgQueueP("⚠️ AUCUN TICK DEPUIS " + FmtDur((double)gap / 1000.0) + "\n━━━━━━━━━━━━━━━━━━\nLe marché est censé être ouvert : flux de prix gelé ou symbole sans cotation ?", 1);
+         TgQueueP("⚠️ AUCUN TICK DEPUIS " + FmtDur((double)gap / 1000.0) + "\n━━━━━━━━━━━━━━━━━━\nLe marché est censé être ouvert : flux de prix gelé ou symbole sans cotation ?" +
+                  "\n🛟 TP, objectif et seuil 500 gérés par le filet de sécurité (1 fois/s).\n👉 Si ça dure, redémarre le terminal de ce compte.", 2);
       }
       if(gap < 20000 && g_wdTickSent) { g_wdTickSent = false; TgQueueP("✅ Les ticks reprennent.", 0); }
    }
