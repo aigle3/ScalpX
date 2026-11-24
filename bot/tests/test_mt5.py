@@ -828,3 +828,18 @@ async def test_watchdog_sans_prix_passages_reels(stack, monkeypatch):
     assert procs.kills == 0
     await run(t1 + 320, _St(2, at=t1 + 320), _St(5000, at=t1 + 320))
     assert procs.kills == 1
+
+
+def test_journal_joint_a_l_alerte(tmp_path):
+    """Bot 4.14.4 : fin des journaux du jour (EA en UTF-16 avec accents, terminal) jointe à l'alerte, HTML échappé."""
+    from mt5.watchdog import journal_tail
+    (tmp_path / "MQL5" / "logs").mkdir(parents=True)
+    (tmp_path / "logs").mkdir()
+    ea_lines = "\r\n".join(f"RK 0 12:0{i}:00 ScalpX_v5 (XAUUSD,M5) Réglages <{i}>" for i in range(9))
+    (tmp_path / "MQL5" / "logs" / "20261124.log").write_bytes(b"\xff\xfe" + ea_lines.encode("utf-16-le"))
+    (tmp_path / "logs" / "20261124.log").write_bytes("CE 0 09:40 Trades: deal sell".encode("utf-16-le"))
+    (tmp_path / "logs" / "metaeditor.log").write_text("ignoré")
+    t = journal_tail(str(tmp_path))
+    assert "<b>EA</b>" in t and "Réglages &lt;8&gt;" in t and "Réglages &lt;2&gt;" not in t      # 6 dernières lignes
+    assert "<b>Terminal</b>" in t and "deal sell" in t and "ignoré" not in t
+    assert journal_tail(str(tmp_path / "absent")) == ""

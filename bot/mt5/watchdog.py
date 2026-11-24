@@ -17,6 +17,36 @@ log = logging.getLogger(__name__)
 Alert = Callable[[str, str, str, int], Awaitable[None]]      # (iid, kind, texte, priorité)
 
 
+def journal_tail(folder: str, lines: int = 6, width: int = 160) -> str:
+    """Bot 4.14.4 : dernières lignes du jour du journal de l'EA et du terminal (UTF-16 ou UTF-8), pour joindre le diagnostic
+    à l'alerte sans commande à taper. Vide si introuvable."""
+    import html
+    from pathlib import Path
+    out: list[str] = []
+    for title, subs in (("EA", ("MQL5/logs", "MQL5/Logs")), ("Terminal", ("logs", "Logs"))):
+        files: set = set()
+        for s in subs:
+            d = Path(folder) / s
+            if d.is_dir():
+                files |= {f for f in d.glob("*.log") if f.name[:8].isdigit()}
+        if not files:
+            continue
+        f = max(files, key=lambda x: x.stat().st_mtime)
+        try:
+            raw = f.read_bytes()[-200_000:]
+        except OSError:
+            continue
+        if raw.count(0) > len(raw) // 4:                 # journal MT5 en UTF-16 LE (BOM) : décodé tel quel (accents gardés)
+            raw = raw[len(raw) % 2:]
+            txt = raw.decode("utf-16-le", "replace").lstrip("\ufeff")
+        else:
+            txt = raw.decode("utf-8", "replace")
+        tail = [ln.strip()[:width] for ln in txt.splitlines() if ln.strip()][-lines:]
+        if tail:
+            out.append(f"<b>{title}</b>\n<pre>{html.escape(chr(10).join(tail))}</pre>")
+    return "\n".join(out)
+
+
 class Watchdog:
     def __init__(self, cfg: Config, db: Database, mgr: InstanceManager, status: StatusReader, alert: Alert) -> None:
         self.cfg, self.db, self.mgr, self.status, self.alert = cfg, db, mgr, status, alert
@@ -72,13 +102,21 @@ class Watchdog:
             await self.alert(inst.id, "SANS_PRIX", f"📡 {inst.label} : aucun prix reçu depuis {int(age // 60)} min alors que les "
                                                    f"autres comptes en reçoivent → terminal relancé automatiquement "
                                                    f"({n}/{self.cfg.timing.restarts_per_hour} cette heure). Je confirme ici dès que "
-                                                   f"les prix reviennent.", 2)
+                                                   f"les prix reviennent." + self._diag(inst), 2)
             return True
         if self._np_flag.get(inst.id) != "LIMITE":
             self._np_flag[inst.id] = "LIMITE"
             await self.alert(inst.id, "LIMITE", f"🔴 {inst.label} : toujours aucun prix après {self.cfg.timing.restarts_per_hour} "
-                                                f"relances en 1 h : je n'insiste plus. Intervention requise.", 2)
+                                                f"relances en 1 h : je n'insiste plus. Intervention requise." + self._diag(inst), 2)
         return False
+
+    @staticmethod
+    def _diag(inst) -> str:
+        try:
+            t = journal_tail(inst.folder)
+        except Exception:
+            return ""
+        return ("\n\n🩺 <b>Journal avant relance</b> (à me transmettre tel quel)\n" + t) if t else ""
 
     async def _unfreeze(self, inst, muet_for: float, now: float) -> None:
         """Terminal vivant mais EA muet depuis `muet_restart_s` : arrêt forcé puis relance (même limite de relances par heure

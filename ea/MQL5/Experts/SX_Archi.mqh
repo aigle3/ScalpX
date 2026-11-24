@@ -1433,7 +1433,17 @@ void TickFallback()
       SymbolSelect(_Symbol, true);
       ChartSetSymbolPeriod(0, _Symbol, _Period);  // même symbole/période : simple rafraîchissement, pas de réinitialisation
       ResetLastError();
-      Log("Aucun prix depuis " + IntegerToString((long)((now - g_lastTickMs) / 1000)) + " s : réabonnement au flux " + _Symbol);
+      // 8.2.1 : diagnostic joint : le terminal reçoit-il des cotations (OnTick seul en panne) ou plus rien du tout (flux) ?
+      MqlTick qt;
+      bool hasQ = SymbolInfoTick(_Symbol, qt);
+      long qAge = hasQ && qt.time > 0 ? (long)(TimeTradeServer() - qt.time) : -1;
+      Log("Aucun prix depuis " + IntegerToString((long)((now - g_lastTickMs) / 1000)) + " s : réabonnement au flux " + _Symbol +
+          " | dernière cotation du terminal : " + (qAge >= 0 ? "il y a " + IntegerToString(qAge) + " s (" + TimeToString(qt.time, TIME_SECONDS) + ")" : "aucune") +
+          " | connecté " + (TerminalInfoInteger(TERMINAL_CONNECTED) ? "oui" : "NON") +
+          " | ping " + IntegerToString((long)(TerminalInfoInteger(TERMINAL_PING_LAST) / 1000)) + " ms" +
+          " | synchronisé " + (SymbolIsSynchronized(_Symbol) ? "oui" : "NON") +
+          " | Market Watch " + (SymbolInfoInteger(_Symbol, SYMBOL_SELECT) ? "oui" : "NON") +
+          " | symboles affichés " + IntegerToString(SymbolsTotal(true)));
    }
    GoalTick();
    if(g_closing) return;
