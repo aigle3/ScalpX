@@ -64,3 +64,16 @@ def test_prix_traites_par_le_minuteur_si_ontick_muet():
     assert pt.index("g_lastQuoteMsc = pq.time_msc") < pt.index("RefreshState();")
     core = _src("SX_Core.mqh")                       # globales déclarées avant SX_Archi (statut)
     assert "ulong    g_onTickMs" in core and "bool     g_timerTicks" in core
+
+
+def test_tp_courtier_sans_fermeture_en_double():
+    t = _src("SX_Trade.mqh")
+    assert "bool IsGridOrder()" in t and "ORDER_REASON_TP" in t and "bool TPExecuting()" in t
+    assert t.count("if(!IsGridOrder()) continue;") == 3                 # comptage, annulation rapide, fermeture complète
+    assert "if(OrderGetInteger(ORDER_MAGIC) != MagicNumber) continue;" not in t
+    assert "if(round < 2 && TPExecuting()) continue;" in t
+    chk = t[t.index("bool CheckTPExit()"):]
+    assert "if(st_tpWrong == 0)" in chk and chk.index("g_tpWaitMs") < chk.index('CloseAllFast("TP atteint")')
+    m = _src("ScalpX_v5.mq5")
+    assert "TRADE_RETCODE_POSITION_CLOSED || rc == TRADE_RETCODE_FROZEN" in m
+    assert "ulong    g_tpWaitMs" in _src("SX_Core.mqh")

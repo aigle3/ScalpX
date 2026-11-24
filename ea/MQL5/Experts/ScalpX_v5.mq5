@@ -454,6 +454,13 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       Dbg("Pose du TP refusée : " + TradeErrText(rc) + " (la surveillance du robot prend le relais)");
    else if(request.action == TRADE_ACTION_DEAL)
    {
+      // [ARCHI] 8.3.1 : fermeture d'une position déjà fermée (10036) ou gelée par l'exécution de son TP (10029) : pas une
+      // erreur, le serveur la ferme ; vérifiée au passage suivant (aucun message « refusé »)
+      if(request.position > 0 && (rc == TRADE_RETCODE_POSITION_CLOSED || rc == TRADE_RETCODE_FROZEN))
+      {
+         Dbg("Fermeture inutile : position déjà fermée ou en cours de fermeture par le courtier (" + IntegerToString((int)rc) + ")");
+         return;
+      }
       Log("Ordre au marché refusé : " + TradeErrText(rc));
       if(IsBlockingRc(rc)) NoteBrokerBlockRc(rc);   // [ARCHI] retenu pour les fermetures (CloseBlockReason)
    }

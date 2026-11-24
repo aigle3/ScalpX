@@ -3,7 +3,7 @@
 //| Noyau : variables globales, registre de paramètres (tous les     |
 //| réglages sont modifiables à chaud), persistance, presets.        |
 //+------------------------------------------------------------------+
-#define SX_VERSION   "8.3.0"
+#define SX_VERSION   "8.3.1"
 #define SX_PREFIX    "SX4_"
 #define SX_MAXQ      40
 
@@ -155,7 +155,8 @@ datetime st_firstTime  = 0;
 double   g_tpPrice     = 0;
 double   g_tpDistPts   = 0;
 double   g_tpSig       = -1;
-ulong    g_nextTpCheckMs = 0;
+ulong    g_nextTpCheckMs = 0;
+ulong    g_tpWaitMs = 0;              // [ARCHI] 8.3.1 : TP touché, exécution laissée au courtier jusqu'à cette échéance
 
 //--- Marché / filtres
 double   mk_fast = 0, mk_slow = 0, mk_atrPts = 0, mk_bid = 0, mk_ask = 0, mk_spread = 0;

@@ -123,6 +123,35 @@ void InitFilling()
 //+------------------------------------------------------------------+
 //| Instantané : une seule passe sur positions + ordres              |
 //+------------------------------------------------------------------+
+// [ARCHI] début 8.3.1 : rapport du 24/11 (TP atteint → ordres refusés 10036 / 10029 / « Invalid request », tous les jours)
+// Ordre DE GRILLE (sélectionné par OrderGetTicket) : nos ordres limite/stop. Exclut l'ordre que le SERVEUR crée pour
+// exécuter un TP / SL / stop-out (type marché, même magic que la position) : il ne s'annule pas et faussait le compte (9 au lieu de 8).
+bool IsGridOrder()
+{
+   if(OrderGetString(ORDER_SYMBOL) != _Symbol) return false;
+   if(OrderGetInteger(ORDER_MAGIC) != MagicNumber) return false;
+   ENUM_ORDER_TYPE ot = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+   if(ot != ORDER_TYPE_BUY_LIMIT && ot != ORDER_TYPE_SELL_LIMIT && ot != ORDER_TYPE_BUY_STOP && ot != ORDER_TYPE_SELL_STOP &&
+      ot != ORDER_TYPE_BUY_STOP_LIMIT && ot != ORDER_TYPE_SELL_STOP_LIMIT) return false;
+   ENUM_ORDER_REASON why = (ENUM_ORDER_REASON)OrderGetInteger(ORDER_REASON);
+   return (why != ORDER_REASON_TP && why != ORDER_REASON_SL && why != ORDER_REASON_SO);
+}
+
+// Position (sélectionnée par PositionGetTicket) dont le TP courtier est touché ou dans la zone de gel : le serveur
+// l'exécute → ne pas envoyer de fermeture au marché (sinon 10029 « gelé » ou 10036 « déjà fermée »).
+bool TPExecuting()
+{
+   double tp = PositionGetDouble(POSITION_TP);
+   if(tp <= 0) return false;
+   bool buy = ((ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+   double px = buy ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   if(px <= 0) return false;
+   if(buy ? px >= tp : px <= tp) return true;
+   double freeze = (double)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL) * _Point;
+   return (freeze > 0 && MathAbs(px - tp) <= freeze);
+}
+// [ARCHI] fin
+
 void RefreshState()
 {
    st_posCount = 0; st_posLots = 0; st_floating = 0; st_posType = -1;
@@ -162,8 +191,7 @@ void RefreshState()
    {
       ulong ot = OrderGetTicket(j);
       if(ot == 0) continue;
-      if(OrderGetString(ORDER_SYMBOL) != _Symbol) continue;
-      if(OrderGetInteger(ORDER_MAGIC) != MagicNumber) continue;
+      if(!IsGridOrder()) continue;                   // [ARCHI] 8.3.1 : ordre serveur d'exécution du TP exclu
       double pr = OrderGetDouble(ORDER_PRICE_OPEN);
       st_pendCount++;
       if(st_lowPend == 0 || pr < st_lowPend)   st_lowPend = pr;
@@ -608,8 +636,7 @@ int CancelPendingFast()
    {
       ulong t = OrderGetTicket(j);
       if(t == 0) continue;
-      if(OrderGetString(ORDER_SYMBOL) != _Symbol) continue;
-      if(OrderGetInteger(ORDER_MAGIC) != MagicNumber) continue;
+      if(!IsGridOrder()) continue;                   // [ARCHI] 8.3.1
       MqlTradeRequest rq; MqlTradeResult rs;
       ZeroMemory(rq); ZeroMemory(rs);
       rq.action = TRADE_ACTION_REMOVE;
@@ -648,8 +675,7 @@ int CloseAllFast(string reason)
       {
          ulong t = OrderGetTicket(j);
          if(t == 0) continue;
-         if(OrderGetString(ORDER_SYMBOL) != _Symbol) continue;
-         if(OrderGetInteger(ORDER_MAGIC) != MagicNumber) continue;
+         if(!IsGridOrder()) continue;                // [ARCHI] 8.3.1 : jamais l'ordre d'exécution du TP créé par le serveur
          MqlTradeRequest rq; MqlTradeResult rs;
          ZeroMemory(rq); ZeroMemory(rs);
          rq.action = TRADE_ACTION_REMOVE;
@@ -667,6 +693,9 @@ int CloseAllFast(string reason)
          if(tk == 0) continue;
          if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
          if(PositionGetInteger(POSITION_MAGIC) != MagicNumber) continue;
+         // [ARCHI] 8.3.1 : TP courtier touché / gelé : le serveur ferme lui-même ; fermeture au marché seulement au dernier tour
+         // (TP toujours pas exécuté après ~3 s), pour ne jamais laisser une position ouverte
+         if(round < 2 && TPExecuting()) continue;
          ENUM_POSITION_TYPE pt = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
          MqlTradeRequest rq; MqlTradeResult rs;
          ZeroMemory(rq); ZeroMemory(rs);
@@ -723,7 +752,7 @@ int CloseAllFast(string reason)
 //+------------------------------------------------------------------+
 void ManageTP()
 {
-   if(st_posCount == 0) { g_tpPrice = 0; g_tpSig = -1; return; }
+   if(st_posCount == 0) { g_tpPrice = 0; g_tpSig = -1; g_tpWaitMs = 0; return; }   // [ARCHI] 8.3.1
 
    double sig = st_posCount * 1000000.0 + st_posLots * 10000.0 + st_avg;
    bool recalc = (sig != g_tpSig);
@@ -769,7 +798,27 @@ bool CheckTPExit()
    bool hit;
    if(st_posType == POSITION_TYPE_BUY) hit = (SymbolInfoDouble(_Symbol, SYMBOL_BID) >= g_tpPrice);
    else                                hit = (SymbolInfoDouble(_Symbol, SYMBOL_ASK) <= g_tpPrice);
-   if(!hit) return false;
+   if(!hit) { g_tpWaitMs = 0; return false; }
+   // [ARCHI] début 8.3.1 : TP courtier posé sur TOUTES les positions → c'est le courtier qui ferme. Le robot supprime seulement
+   // les ordres de grille et attend (3 s max) ; passé ce délai, fermeture au marché (TP non exécuté : jamais de position oubliée).
+   if(st_tpWrong == 0)
+   {
+      ulong now = GetTickCount64();
+      if(g_tpWaitMs == 0)
+      {
+         g_tpWaitMs = now + 3000;
+         Log("TP atteint : fermeture exécutée par le courtier, ordres de grille supprimés");
+      }
+      if(now < g_tpWaitMs)
+      {
+         static ulong lastCancel = 0;
+         if(st_pendCount > 0 && now - lastCancel > 500) { lastCancel = now; CancelPendingFast(); }
+         return true;                                 // aucune entrée tant que la série n'est pas soldée
+      }
+      Log("TP atteint mais position toujours ouverte après 3 s : fermeture par le robot");
+   }
+   g_tpWaitMs = 0;
+   // [ARCHI] fin
    CloseAllFast("TP atteint");
    return true;
 }
