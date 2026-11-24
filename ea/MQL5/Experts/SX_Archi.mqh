@@ -1426,6 +1426,15 @@ void TickFallback()
    RefreshState();
    if(st_posCount + st_pendCount == 0 && !g_goalActive) return;   // rien à gérer
    if(!g_tickFb) { g_tickFb = true; Log("Aucun tick depuis 10 s : TP, objectif et seuil 500 gérés par le timer"); }
+   static ulong lastHeal = 0;                    // 8.2.0 : réabonnement au flux de prix (symbole + graphique rafraîchi), toutes les 60 s
+   if(now - lastHeal > 60000)
+   {
+      lastHeal = now;
+      SymbolSelect(_Symbol, true);
+      ChartSetSymbolPeriod(0, _Symbol, _Period);  // même symbole/période : simple rafraîchissement, pas de réinitialisation
+      ResetLastError();
+      Log("Aucun prix depuis " + IntegerToString((long)((now - g_lastTickMs) / 1000)) + " s : réabonnement au flux " + _Symbol);
+   }
    GoalTick();
    if(g_closing) return;
    Seuil500Tick();
@@ -1481,7 +1490,8 @@ void ArchiTimer()
       CutTick();                         // [ARCHI] 7.0.0 : coupure de l'objectif
       RepriseRetraitTimer();             // [ARCHI] 7.8.5 : reprise après retrait détectée aussi sans tick (marché fermé le week-end)
       TickFallback();                    // [ARCHI] 8.1.1 : plus de tick reçu → TP, objectif et seuil 500 gérés par le timer
-      TrimMarketWatchTick();             // [ARCHI] 7.11.1 : Market Watch réduit, 60 s après le démarrage, par petits lots
+      // [ARCHI] 8.2.0 : Market Watch NON réduit (TrimMarketWatchTick plus appelé). 23/11 23:39 et 24/11 ~12:08 : les prix ont
+      // cessé d'arriver juste après « 1 symbole masqué » (60 s après le démarrage), plus jamais d'OnTick ensuite.
       //--- cohérence avec le panneau / l'ancien code : arrêt manuel <-> PAUSE
       if(g_state == ST_ACTIF && g_stoppedManually) SetState(ST_PAUSE, true, "Arrêt manuel détecté");
       else if(g_state == ST_PAUSE && !g_stoppedManually && g_enabled) SetState(ST_ACTIF, true, "Reprise manuelle détectée");

@@ -16,7 +16,7 @@
 //|   (8.0.0 : aucun affichage sur le graphique, tout par Telegram)  |
 //+------------------------------------------------------------------+
 #property copyright   "ScalpX"
-#property version     "8.01"
+#property version     "8.02"
 #property description "ScalpX v6.1.0 — EMA 10/20 + grille ATR + TP commun + filtres multi-timeframe, pilotage par bot central (fichiers)"
 
 // [SEUIL500] début : TEST UNIQUEMENT (test B-3 de la checklist). Décommenter pour simuler un glissement de 2.0 (devise du compte)

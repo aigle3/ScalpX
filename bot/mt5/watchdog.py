@@ -24,6 +24,47 @@ class Watchdog:
         self._flagged: dict[str, str] = {}               # dernière anomalie notifiée (évite le spam)
         self._muet_since: dict[str, float] = {}
         self._muet_limit: set[str] = set()               # comptes dont la limite de relances a déjà été signalée (cas « muet »)
+        self._np_grace: dict[str, float] = {}            # Bot 4.14.0 : relancé pour « sans prix » : pas de nouveau jugement avant
+        self._np_flag: dict[str, str] = {}               # « RELANCE » (attend le retour des prix) ou « LIMITE » (signalée)
+
+    @staticmethod
+    def _tick_age(st) -> float | None:
+        """Secondes depuis le dernier prix reçu par l'EA (EA ≥ 8.1.1) ; None si inconnu."""
+        age = getattr(st, "tick_age_s", None) if st is not None else None
+        return float(age) if isinstance(age, (int, float)) and not isinstance(age, bool) and age >= 0 else None
+
+    async def _no_price(self, inst, st, others_ok: bool, now: float) -> bool:
+        """Bot 4.14.0 : EA vivant et connecté mais plus aucun prix (24/11 : OnTick plus jamais appelé après une relance,
+        aucun trade possible, positions sans TP). Si d'AUTRES comptes reçoivent des prix (marché ouvert, flux OK), le
+        terminal est relancé (même limite par heure que les autres relances), puis le retour des prix est confirmé.
+        True = terminal relancé à ce passage."""
+        limit = self.cfg.timing.sans_prix_restart_s
+        age = self._tick_age(st)
+        if limit <= 0 or age is None or now < self._np_grace.get(inst.id, 0):
+            return False
+        if age < 60:
+            if self._np_flag.pop(inst.id, None):
+                await self.alert(inst.id, "RETABLI", f"🟢 {inst.label} : les prix arrivent de nouveau, problème résolu "
+                                                     f"(dernier prix il y a {int(age)} s).", 1)
+            return False
+        if age <= limit or not others_ok or not getattr(st, "connecte", False):
+            return False
+        if self.can_restart(inst.id, now):
+            self._restarts[inst.id].append(now)
+            n = len(self._restarts[inst.id])
+            await self.mgr.restart(inst, force=True)
+            self._np_grace[inst.id] = now + limit         # laisse au nouvel EA le temps de recevoir ses premiers prix
+            self._np_flag[inst.id] = "RELANCE"
+            await self.alert(inst.id, "SANS_PRIX", f"📡 {inst.label} : aucun prix reçu depuis {int(age // 60)} min alors que les "
+                                                   f"autres comptes en reçoivent → terminal relancé automatiquement "
+                                                   f"({n}/{self.cfg.timing.restarts_per_hour} cette heure). Je confirme ici dès que "
+                                                   f"les prix reviennent.", 2)
+            return True
+        if self._np_flag.get(inst.id) != "LIMITE":
+            self._np_flag[inst.id] = "LIMITE"
+            await self.alert(inst.id, "LIMITE", f"🔴 {inst.label} : toujours aucun prix après {self.cfg.timing.restarts_per_hour} "
+                                                f"relances en 1 h : je n'insiste plus. Intervention requise.", 2)
+        return False
 
     async def _unfreeze(self, inst, muet_for: float, now: float) -> None:
         """Terminal vivant mais EA muet depuis `muet_restart_s` : arrêt forcé puis relance (même limite de relances par heure
@@ -70,7 +111,9 @@ class Watchdog:
     async def tick(self) -> None:
         """Un passage : processus disparus, dossiers manquants, terminaux muets, anomalies."""
         now = time.time()
-        for inst in self.db.list(states=(DEMARRE,)):
+        insts = self.db.list(states=(DEMARRE,))
+        ages = {i.id: self._tick_age(self.status.read(i.id)) for i in insts}     # flux de prix des comptes (référence)
+        for inst in insts:
             if not self.mgr.folder_ok(inst):
                 if self._flagged.get(inst.id) != "DOSSIER":
                     self._flagged[inst.id] = "DOSSIER"
@@ -101,6 +144,9 @@ class Watchdog:
                 continue
             self._muet_since.pop(inst.id, None)
             self._muet_limit.discard(inst.id)
+            others_ok = any(a is not None and a < 60 for k, a in ages.items() if k != inst.id)
+            if await self._no_price(inst, st, others_ok, now):
+                continue
             if h.code == "DOUBLON" and self._flagged.get(inst.id) != "DOUBLON":
                 self._flagged[inst.id] = "DOUBLON"
                 await self.alert(inst.id, "DOUBLON", f"👯 EA en double sur {inst.label} : {', '.join(h.reasons)}.", 2)

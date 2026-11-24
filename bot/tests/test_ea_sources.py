@@ -42,3 +42,11 @@ def test_filet_supprime_les_ordres_orphelins():
     a = _src("SX_Archi.mqh")
     fb = a[a.index("void TickFallback()"):a.index("void ArchiTimer()")]
     assert "else if(st_pendCount > 0)" in fb and "CancelPendingFast();" in fb
+
+
+def test_market_watch_plus_reduite_et_reabonnement():
+    a = _src("SX_Archi.mqh")
+    timer = a[a.index("void ArchiTimer()"):]
+    assert "TrimMarketWatchTick();" not in timer
+    fb = a[a.index("void TickFallback()"):a.index("void ArchiTimer()")]
+    assert "ChartSetSymbolPeriod(0, _Symbol, _Period);" in fb and "SymbolSelect(_Symbol, true);" in fb

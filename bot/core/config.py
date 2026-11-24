@@ -58,6 +58,8 @@ class Timing(BaseModel):
     deploy_retry_min: int = 15
     restarts_per_hour: int = 3
     muet_restart_s: int = 300              # terminal lancé mais EA muet (aucun heartbeat) depuis ce délai : relance forcée (0 = jamais)
+    sans_prix_restart_s: int = 300         # Bot 4.14.0 : EA vivant mais AUCUN prix reçu depuis ce délai alors que d'autres comptes
+                                           # en reçoivent → relance forcée du terminal, puis confirmation au retour des prix (0 = jamais)
     watchdog_interval_s: int = 15
     events_interval_s: int = 3
     status_interval_s: int = 5

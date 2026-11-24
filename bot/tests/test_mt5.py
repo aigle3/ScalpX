@@ -720,3 +720,47 @@ async def test_file_glissante_place_liberee_des_ea_charge():
         s.free()
         s.free()                                                   # libérer deux fois : sans effet
     assert slots.sem._value == 2
+
+
+class _St:
+    def __init__(self, age, connecte=True):
+        self.tick_age_s, self.connecte = age, connecte
+
+
+@pytest.mark.asyncio
+async def test_watchdog_sans_prix_relance_puis_confirme(stack):
+    cfg, db, procs, status, cmdq, mgr, ea = stack
+    inst = seed(stack)
+    al = Alerts()
+    wd = Watchdog(cfg, db, mgr, status, al)
+    now = time.time()
+    assert not await wd._no_price(inst, _St(600), False, now)          # personne ne reçoit de prix (marché fermé) : rien
+    assert not await wd._no_price(inst, _St(200), True, now)           # sous 5 min : rien
+    assert not await wd._no_price(inst, _St(600, False), True, now)    # déconnecté : autre problème
+    assert not await wd._no_price(inst, _St(None), True, now)          # ancien EA (pas de tick_age_s)
+    assert procs.kills == 0
+    assert await wd._no_price(inst, _St(3243), True, now)              # cas du 24/11 : relance forcée
+    assert procs.kills == 1 and mgr.is_running(inst)
+    assert [k for _, k, _, _ in al.items] == ["SANS_PRIX"]
+    assert not await wd._no_price(inst, _St(3243), True, now + 10)     # délai de grâce après la relance
+    assert not await wd._no_price(inst, _St(3), True, now + 400)       # prix revenus : confirmation
+    assert [k for _, k, _, _ in al.items] == ["SANS_PRIX", "RETABLI"]
+    assert not await wd._no_price(inst, _St(3), True, now + 420)       # confirmée une seule fois
+    assert len(al.items) == 2
+
+
+@pytest.mark.asyncio
+async def test_watchdog_sans_prix_limite_et_desactivable(stack):
+    cfg, db, procs, status, cmdq, mgr, ea = stack
+    inst = seed(stack)
+    al = Alerts()
+    wd = Watchdog(cfg, db, mgr, status, al)
+    now = time.time()
+    for k in range(3):
+        assert await wd._no_price(inst, _St(900), True, now + k * 400)
+    assert not await wd._no_price(inst, _St(900), True, now + 1300)    # 4e en moins d'1 h : refusée, signalée
+    assert not await wd._no_price(inst, _St(900), True, now + 1700)
+    assert procs.kills == 3 and [k for _, k, _, _ in al.items].count("LIMITE") == 1
+    cfg.timing.sans_prix_restart_s = 0
+    wd2 = Watchdog(cfg, db, mgr, status, Alerts())
+    assert not await wd2._no_price(inst, _St(9999), True, now)
