@@ -2010,3 +2010,22 @@ def test_accueil_stable_entre_deux_comptes():
     b.ts, a.ts = int(now), int(now) + 5
     assert render.trading_block(views, now) == t1
     assert any("Entrée au prochain signal (achat)" in l for l in t1) and any("1 compte(s) bloqué(s)" in l for l in t1)
+
+
+async def test_invite_comptes_fichier_a_part(svc):
+    """Bot 4.14.2 : 📄 Ajouter des comptes → invite dans UN message à part (✖ Annuler), le tableau de bord n'est pas
+    affiché dessous ; le récapitulatif remplace l'invite ; ✖ Annuler efface l'invite et n'attend plus rien."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    await dash.ensure()
+    dmid = ctx.db.meta_get("dash_msg_id")
+    await router.on_callback("d:bulk")
+    pmid = router._bulk_prompt
+    assert pmid and router.awaiting_bulk and "un compte par ligne" in sender.msgs[pmid][0]
+    assert "un compte par ligne" not in sender.msgs[int(dmid)][0]       # pas dans le tableau de bord
+    assert ctx.db.meta_get("dash_msg_id") == dmid
+    await router.on_text("123:secret:Demo-Server 1")
+    assert pmid in sender.deleted and not router._bulk_prompt and not router.awaiting_bulk
+    await router.on_callback("d:bulk")
+    p2 = router._bulk_prompt
+    await router.on_callback("d:bkstop")
+    assert p2 in sender.deleted and not router.awaiting_bulk

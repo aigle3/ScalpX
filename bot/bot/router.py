@@ -61,6 +61,7 @@ class Router:
         self.awaiting_broker = ""                           # Bot 4.7.0 : "" | "name" | "url:<serveur>"
         self.awaiting_cmd = False                           # Bot 4.6.0 : 💻 commande attendue (message texte)
         self._shell_msg = 0                                 # Bot 4.8.8 : message de l'invite 💻 (devient confirmation puis résultat)
+        self._bulk_prompt = 0                               # Bot 4.14.2 : message de l'invite 📄 (à part, jamais dans le tableau de bord)
         self._shell_pending: dict[str, str] = {}            # jeton de confirmation → commande
         self._pending_import = self._pending_restore = b""   # Bot 4.2.0 : fichier chiffré en attente de son mot de passe
         self.awaiting_token = ""                            # Bot 3.18.0 : clé de .env attendue (message texte), ex. BACKUP_TOKEN
@@ -253,10 +254,16 @@ class Router:
         elif sub == "sys":
             self.dash.goto("sys")
         elif sub == "bulk":                                     # Bot 3.20.0 : 📄 plusieurs comptes depuis un fichier
+            # Bot 4.14.2 : invite dans UN message à part (comme 💻 commande) : le tableau de bord n'est plus affiché dessous
             self.awaiting_bulk = True
-            self.dash.goto("home")
-            self.dash.flash("📄 Envoie un <b>fichier texte</b> (ou colle le texte), un compte par ligne :\n"
-                            "<code>numéro:mot de passe:serveur</code>\nIl est effacé de la conversation dès réception.", 300)
+            await self._drop_bulk_prompt()
+            self._bulk_prompt = await self.sender.send(
+                self.chat_id, "📄 Envoie un <b>fichier texte</b> (ou colle le texte), un compte par ligne :\n"
+                "<code>numéro:mot de passe:serveur</code>\nIl est effacé de la conversation dès réception.",
+                [[("✖ Annuler", "d:bkstop")]], True) or 0
+        elif sub == "bkstop":                                   # Bot 4.14.2 : invite 📄 annulée
+            self.awaiting_bulk = False
+            await self._drop_bulk_prompt()
         elif sub in ("bkgo", "bkno"):
             return await self._bulk_cb(sub, p)
         elif sub in ("unigo", "unino"):                         # Bot 3.18.3 : dernière confirmation (compte à rebours)
@@ -1416,8 +1423,17 @@ class Router:
 
     # ---- Bot 3.18.0 : ☁️ jeton de sauvegarde, 🖥 gestion du serveur (Linux)
     # ---- Bot 3.20.0 : 📄 création de plusieurs comptes (fichier texte)
+    async def _drop_bulk_prompt(self) -> None:
+        mid, self._bulk_prompt = self._bulk_prompt, 0
+        if mid:
+            try:
+                await self.sender.delete(self.chat_id, mid)
+            except Exception:
+                pass
+
     async def bulk_received(self, text: str) -> None:
         from . import bulk
+        await self._drop_bulk_prompt()                      # Bot 4.14.2 : l'invite laisse la place au récapitulatif
         rows, errors = bulk.parse(text)
         del text
         if self._bulk is not None:
