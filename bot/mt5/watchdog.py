@@ -190,17 +190,24 @@ class Watchdog:
         now = now if now is not None else time.time()
         if not getattr(t, "park_at_500", False):
             return
-        for inst in self.db.list():
+        insts = self.db.list()
+        # Bot 4.15.2 : une seule vérification automatique à la fois (un démarrage de terminal coûte cher en CPU) ;
+        # le bouton « J'ai retiré » (parkchk = 0) les lance toutes sans attendre
+        busy = any(i.id in self._probe and self.mgr.is_running(i) for i in insts)
+        for inst in insts:
             parked = self.parked(inst.id)
             running = self.mgr.is_running(inst)
             if parked and not running:
                 if inst.desired_state != ARRETE:
                     continue                             # maintenance, création… : on ne touche à rien
+                raw = self.db.meta_get("parkchk:" + inst.id, "0") or "0"
                 try:
-                    last = float(self.db.meta_get("parkchk:" + inst.id, "0") or 0)
+                    last = float(raw)
                 except ValueError:
                     last = 0.0
-                if now - last >= t.park_probe_s:
+                asked = raw == "0"
+                if now - last >= t.park_probe_s and (asked or not busy):
+                    busy = True
                     self.db.meta_set("parkchk:" + inst.id, str(int(now)))
                     self._probe[inst.id] = now
                     self._flat_since.pop(inst.id, None)

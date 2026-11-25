@@ -959,3 +959,42 @@ async def test_garage_trop_retire_et_desactivable(stack, monkeypatch):
     run[inst.id] = False
     await wd2.park_tick(t0 + 99999)
     assert not run[inst.id]
+
+
+@pytest.mark.asyncio
+async def test_garage_verifications_une_a_la_fois_sauf_bouton(stack, monkeypatch):
+    """Bot 4.15.2 : vérification toutes les 15 min, un seul terminal garé relancé à la fois ; le bouton les relance tous."""
+    from storage.db import ARRETE
+    cfg, db, procs, status, cmdq, mgr, ea = stack
+    a, b = seed(stack, 1), seed(stack, 2)
+    assert cfg.timing.park_probe_s == 900
+    wd = Watchdog(cfg, db, mgr, status, Alerts())
+    monkeypatch.setattr(wd.status, "read", lambda iid: None)
+    run = {a.id: False, b.id: False}
+    monkeypatch.setattr(mgr, "is_running", lambda i: run.get(i.id, False))
+    starts = []
+
+    def start(i, set_desired=True):
+        starts.append(i.id); run[i.id] = True; db.set_desired(i.id, DEMARRE); return True
+    monkeypatch.setattr(mgr, "start", start)
+    t0 = time.time()
+    for i in (a, b):
+        db.set_desired(i.id, ARRETE)
+        db.meta_set("park:" + i.id, "1")
+        db.meta_set("parkchk:" + i.id, str(int(t0)))
+    await wd.park_tick(t0 + 600)
+    assert not starts                                              # moins de 15 min
+    await wd.park_tick(t0 + 910)
+    assert len(starts) == 1                                        # un seul à la fois
+    await wd.park_tick(t0 + 930)
+    assert len(starts) == 1                                        # l'autre attend la fin de la vérification en cours
+    run[starts[0]] = False
+    db.set_desired(starts[0], ARRETE)
+    await wd.park_tick(t0 + 1000)
+    assert len(starts) == 2
+    for i in (a, b):                                               # bouton « J'ai retiré » : tous tout de suite
+        run[i.id] = False
+        db.set_desired(i.id, ARRETE)
+    wd.check_parked_now()
+    await wd.park_tick(t0 + 1010)
+    assert len(starts) == 4
