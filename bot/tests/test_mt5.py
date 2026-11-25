@@ -963,11 +963,11 @@ async def test_garage_trop_retire_et_desactivable(stack, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_garage_verifications_une_a_la_fois_sauf_bouton(stack, monkeypatch):
-    """Bot 4.15.2 : vérification toutes les 15 min, un seul terminal garé relancé à la fois ; le bouton les relance tous."""
+    """Bot 4.15.2 : vérification toutes les 20 min, un seul terminal garé relancé à la fois ; le bouton les relance tous."""
     from storage.db import ARRETE
     cfg, db, procs, status, cmdq, mgr, ea = stack
     a, b = seed(stack, 1), seed(stack, 2)
-    assert cfg.timing.park_probe_s == 900
+    assert cfg.timing.park_probe_s == 1200
     wd = Watchdog(cfg, db, mgr, status, Alerts())
     monkeypatch.setattr(wd.status, "read", lambda iid: None)
     run = {a.id: False, b.id: False}
@@ -982,19 +982,19 @@ async def test_garage_verifications_une_a_la_fois_sauf_bouton(stack, monkeypatch
         db.set_desired(i.id, ARRETE)
         db.meta_set("park:" + i.id, "1")
         db.meta_set("parkchk:" + i.id, str(int(t0)))
-    await wd.park_tick(t0 + 600)
-    assert not starts                                              # moins de 15 min
-    await wd.park_tick(t0 + 910)
+    await wd.park_tick(t0 + 1000)
+    assert not starts                                              # moins de 20 min
+    await wd.park_tick(t0 + 1210)
     assert len(starts) == 1                                        # un seul à la fois
-    await wd.park_tick(t0 + 930)
+    await wd.park_tick(t0 + 1230)
     assert len(starts) == 1                                        # l'autre attend la fin de la vérification en cours
     run[starts[0]] = False
     db.set_desired(starts[0], ARRETE)
-    await wd.park_tick(t0 + 1000)
+    await wd.park_tick(t0 + 1300)
     assert len(starts) == 2
     for i in (a, b):                                               # bouton « J'ai retiré » : tous tout de suite
         run[i.id] = False
         db.set_desired(i.id, ARRETE)
     wd.check_parked_now()
-    await wd.park_tick(t0 + 1010)
+    await wd.park_tick(t0 + 1310)
     assert len(starts) == 4
