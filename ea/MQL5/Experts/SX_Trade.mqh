@@ -235,6 +235,16 @@ double CalcLot(int n)
    return NormVolume(lot);
 }
 
+// [ARCHI] début 8.4.0 : plafond de grille lié à l'ATR max
+// Filtre ATR actif : le plafond de la grille ne descend jamais sous (multiplicateur ATR de la grille x ATR max),
+// pour que la règle « distance = multiplicateur x ATR » reste vraie sur toute la plage autorisée par le filtre.
+double GridCapPts(double gridMax, double gridAtr, double atrMax, bool atrOn)
+{
+   if(atrOn && atrMax > 0 && gridAtr > 0) return MathMax(gridMax, MathRound(gridAtr * atrMax));
+   return gridMax;
+}
+// [ARCHI] fin
+
 double CalcGridStep(int n)
 {
    double step = (double)PInt(P_GRID);
@@ -245,7 +255,8 @@ double CalcGridStep(int n)
       {
          step = atr * PDbl(P_GRIDATR);
          if(step < PInt(P_GRIDMIN)) step = PInt(P_GRIDMIN);
-         if(step > PInt(P_GRIDMAX)) step = PInt(P_GRIDMAX);
+         double cap = GridCapPts((double)PInt(P_GRIDMAX), PDbl(P_GRIDATR), PDbl(P_ATRMAX), PBool(P_F_ATR));   // [ARCHI] 8.4.0
+         if(step > cap) step = cap;
       }
       // ATR indisponible : repli sur la distance fixe
       long sl = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);

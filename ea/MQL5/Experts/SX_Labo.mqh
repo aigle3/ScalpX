@@ -818,7 +818,7 @@ void LbCloseMarket(LbScen &x, double bid, double ask)
 double LbGridStep(const LbScen &x, int n)
 {
    double gmul = (x.gm > 0) ? x.gm : 1.0;
-   if(x.ga <= 0 && x.gn <= 0 && x.gx <= 0 && x.tb <= 0 && x.hA == INVALID_HANDLE) return CalcGridStep(n) * gmul;
+   if(x.ga <= 0 && x.gn <= 0 && x.gx <= 0 && x.tb <= 0 && x.ax <= 0 && x.mode[0] == LBM_SAME && x.hA == INVALID_HANDLE) return CalcGridStep(n) * gmul;   // [ARCHI] 8.4.0 : ATR max / filtre ATR du scénario
    double step = (double)PInt(P_GRID);
    if(PBool(P_DYNGRID))
    {
@@ -826,7 +826,9 @@ double LbGridStep(const LbScen &x, int n)
       if(atr > 0)
       {
          double mn = (x.gn > 0) ? x.gn : (double)PInt(P_GRIDMIN), mx = (x.gx > 0) ? x.gx : (double)PInt(P_GRIDMAX);
-         step = atr * ((x.ga > 0) ? x.ga : PDbl(P_GRIDATR));
+         double ga = (x.ga > 0) ? x.ga : PDbl(P_GRIDATR);
+         mx = GridCapPts(mx, ga, (x.ax > 0) ? x.ax : PDbl(P_ATRMAX), LbOn(x, 0));   // [ARCHI] 8.4.0 : plafond lié à l'ATR max du scénario
+         step = atr * ga;
          if(step < mn) step = mn;
          if(step > mx) step = mx;
       }
