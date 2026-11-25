@@ -456,6 +456,11 @@ class Optimizer:
                 self.r.sync_base_set()
             except Exception:
                 log.exception("preset ⭐ → .set de BASE")
+            if key in ps.GRID_LINK_KEYS:                      # Bot 4.16.0 : la grille max suit l'ATR max
+                new = ps.linked_gridmax(store.presets.get(work, {}))
+                if new is not None:
+                    self.note(f"grille max → {new} pts (multiplicateur ATR × ATR max)")
+                    await self._apply(insts, "gridmax", new)
         return ok
 
     # ---- Bot 3.3.0 : ♻️ réinitialisation (cycle + preset de base d'avant la 1re optimisation)

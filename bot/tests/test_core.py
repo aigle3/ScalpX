@@ -590,3 +590,15 @@ def test_fichier_reconnu_sans_bouton():
     assert ps.sniff_file(crypt.encrypt(b"x", crypt.new_key("motdepasse-1"))) == "presets"
     assert ps.sniff_file(b"52030694:Mdp!123:RoboForex-Pro\n52030697;autre;RoboForex-Pro\n") == "comptes"
     assert ps.sniff_file(b"bonjour") == "" and ps.sniff_file(b"") == "" and ps.sniff_file(b"\xff\xd8\xff\xe0jpeg") == ""
+
+
+def test_linked_gridmax():
+    from core.presets import linked_gridmax as lg
+    v = {"gridatr": "1.1", "atrmax": "1000", "gridmin": "320", "gridmax": "800", "f_atr": "1"}
+    assert lg(v) == "1100"
+    assert lg({**v, "gridmax": "1100"}) is None                         # déjà à jour
+    assert lg({**v, "atrmax": "950"}) == "1050"                         # 1045 → cran de 10 au-dessus
+    assert lg({**v, "atrmax": "700"}) == "770"                          # suit aussi à la baisse
+    assert lg({**v, "f_atr": "0"}) is None                              # filtre ATR coupé
+    assert lg({**v, "atrmax": "200"}) is None                           # cible sous la grille minimum
+    assert lg({"gridatr": "x", "atrmax": "1000"}) is None

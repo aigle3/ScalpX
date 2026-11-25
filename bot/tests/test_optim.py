@@ -500,3 +500,16 @@ async def test_menu_serie(svc):  # noqa: F811
     await router.on_callback("d:ops:5")
     text, kb = dash.render()
     assert "série de 5 optimisations" in text
+
+
+def test_optimiseur_atr_max_entraine_grille_max(tmp_path, monkeypatch):
+    """Bot 4.16.0 : l'optimiseur change l'ATR max → la grille max de Martin suit (multiplicateur ATR × ATR max)."""
+    from core.presets import PresetStore
+    o, db, sent, calls, sets, aio = _opt_env(tmp_path, monkeypatch, [])
+    store = PresetStore(tmp_path / "presets.json")
+    store.put("Martin", {"gridatr": "1.1", "gridmin": "320", "gridmax": "800", "atrmax": "800", "f_atr": "1"})
+    store.set_active("Martin")
+    o.r.dash.store = store
+    o.r.sync_base_set = lambda: None
+    aio.run(o._apply([], "atrmax", "850"))
+    assert store.presets["Martin"]["atrmax"] == "850" and store.presets["Martin"]["gridmax"] == "940"

@@ -12,6 +12,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from core import params as cat
 from . import render
+from core.presets import GRID_LINK_KEYS, linked_gridmax
 from .actions import Ctx, send_cmd
 from .render import esc
 from .ui import Keyboard, short
@@ -111,8 +112,39 @@ class ParamsUI:
         self.last_error = ""
         return True
 
+    def _raw_link(self, iid: str) -> dict[str, str]:
+        """Bot 4.16.0 : valeurs brutes utiles au lien grille max ↔ ATR max, lues sur le robot (affichage de PARAMS)."""
+        vals = self.cached(iid)
+        out: dict[str, str] = {}
+        b = bool_of(vals.get("f_atr", ""))
+        if b is not None:
+            out["f_atr"] = "1" if b else "0"
+        for k in ("gridatr", "atrmax", "gridmin", "gridmax"):
+            n = num_of(vals.get(k, ""))
+            if n is not None:
+                out[k] = str(n)
+        return out
+
+    async def _follow_grid(self, inst, key: str, msg: str) -> str:
+        """Bot 4.16.0 : après un changement de l'ATR max, du multiplicateur ATR de la grille ou du filtre ATR, la grille max
+        suit (multiplicateur × ATR max) et le message l'indique."""
+        if key not in GRID_LINK_KEYS or msg.startswith("❌"):
+            return msg
+        if inst.id.startswith("preset:"):
+            vals = (self.store.presets.get(inst.name) if self.store else None) or {}
+        else:
+            vals = self._raw_link(inst.id)
+        new = linked_gridmax(vals)
+        if new is None:
+            return msg
+        sub = await self.set_value(inst, find("gridmax"), new)
+        return msg + f"\n↳ Grille max → {esc(new)} pts (multiplicateur ATR × ATR max) : " + sub.split(" ", 1)[0]
+
     async def set_value(self, inst, idx: int, value: str, shown: str = "") -> str:
         """Applique la valeur ; « shown » remplace « libellé = valeur » dans le message (ex. « Créneau 09:30 ajouté »)."""
+        return await self._follow_grid(inst, cat.PARAMS[idx][0], await self._set_value(inst, idx, value, shown))
+
+    async def _set_value(self, inst, idx: int, value: str, shown: str = "") -> str:
         key = cat.PARAMS[idx][0]
         if inst.id.startswith("preset:"):
             return await self._set_preset(inst, idx, value, shown)

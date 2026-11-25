@@ -6,6 +6,7 @@ Le fichier est dans data/ : jamais remplacé par les mises à jour.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from decimal import Decimal, ROUND_HALF_UP
@@ -123,6 +124,34 @@ def differences(preset: dict[str, str], current_raw: dict[str, str]) -> dict[str
 
 
 EXPORT_NAME = "scalpx_preset.cfg"
+
+
+# ---------------------------------------------------------------- Bot 4.16.0 : grille max liée à l'ATR max (EA 8.4.0)
+GRID_LINK_KEYS = frozenset({"gridatr", "atrmax", "f_atr"})
+
+
+def linked_gridmax(values: dict[str, str]) -> str | None:
+    """Filtre ATR actif : « Grille max » = multiplicateur ATR de la grille × ATR max, arrondi au cran de 10 pts supérieur
+    (ex. 1,1 × 1000 → 1100). Renvoie la nouvelle valeur brute, ou None si rien à changer (filtre coupé, valeurs
+    illisibles, déjà à jour, ou cible pas au-dessus de la grille minimum)."""
+    if str(values.get("f_atr", "1")).strip() != "1":
+        return None
+    try:
+        ga, ax = float(values["gridatr"]), float(values["atrmax"])
+        gn = float(values.get("gridmin", "0") or 0)
+    except (KeyError, ValueError, TypeError):
+        return None
+    if ga <= 0 or ax <= 0:
+        return None
+    target = min(5000, max(20, math.ceil(ga * ax / 10.0 - 1e-9) * 10))
+    if target <= gn:
+        return None
+    try:
+        if abs(float(values.get("gridmax", "")) - target) < 1e-9:
+            return None
+    except ValueError:
+        pass
+    return str(target)
 
 
 class PresetStore:

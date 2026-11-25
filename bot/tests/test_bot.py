@@ -2045,3 +2045,31 @@ async def test_retraits_bouton_pendant_la_verification(svc):
     _, kb = dash._render_withdrawals(time.time())
     flat = [b for row in kb for b in row]
     assert ("⏳ Vérification du retrait en cours…", "d:wdr") in flat and not any(c == "d:wdrchk" for _, c in flat)
+
+
+@pytest.mark.asyncio
+async def test_grille_max_suit_atr_max(svc):
+    """Bot 4.16.0 : ATR max (ou multiplicateur ATR de la grille) changé → grille max = multiplicateur × ATR max,
+    dans le preset ET sur les robots ; filtre ATR coupé : grille max inchangée."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    st = ctx_stack(svc)
+    a = seed(st, 81, "Demo-Server 1")
+    ea.start()
+    await asyncio.sleep(0.3)
+    try:
+        from bot import params_ui as pu, presets_ui as pui
+        dash.store.put("Martin", {"gridatr": "1.1", "gridmin": "320", "gridmax": "800", "atrmin": "250", "atrmax": "800",
+                                  "f_atr": "1", "dyngrid": "1"})
+        dash.store.set_active("Martin")
+        tgt = pui.PresetTarget("Martin")
+        msg = await dash.params.set_value(tgt, pu.find("atrmax"), "1000")
+        assert dash.store.presets["Martin"]["atrmax"] == "1000" and dash.store.presets["Martin"]["gridmax"] == "1100"
+        assert "Grille max → 1100" in msg
+        assert await _until(lambda: ea.accounts[a.id]["params"].get("gridmax", "").startswith("1100"))
+        msg = await dash.params.set_value(tgt, pu.find("gridatr"), "1.2")
+        assert dash.store.presets["Martin"]["gridmax"] == "1200"
+        await dash.params.set_value(tgt, pu.find("f_atr"), "0")
+        await dash.params.set_value(tgt, pu.find("atrmax"), "900")
+        assert dash.store.presets["Martin"]["gridmax"] == "1200"          # filtre ATR coupé : pas de lien
+    finally:
+        await ea.stop()

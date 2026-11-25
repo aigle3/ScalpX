@@ -217,6 +217,8 @@ flowchart LR
   📈 Rapports → 🤖 Optimiseur automatique → 📜 Journal.
 - **Garde-fous** : une variante n'est retenue que si elle ne perd jamais le compte (30 et 60 jours) et reste sous 90 % de
   drawdown ; un créneau n'est retiré qu'au-delà de 80 % de drawdown ; les coupures et le mode continu ne sont jamais touchés.
+- **Grille liée à l'ATR** : quand l'ATR max ou le multiplicateur ATR de la grille change (toi ou l'optimiseur), la
+  grille max suit toute seule (multiplicateur × ATR max, ex. 1,1 × 1000 → 1100 pts), dans le preset et sur les comptes.
 - **🔁 Série** : plusieurs optimisations enchaînées pour avancer plus vite ; **♻️ Réinitialiser** : retour au preset de
   base d'avant les optimisations.
 - Il faut d'abord régler le **terminal de test** une fois (📈 Rapports → 🤖 Optimiseur automatique → 🔑 Terminal de test) ; l'heure se change avec 🕐.
