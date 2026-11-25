@@ -1480,6 +1480,55 @@ void TickFallback()
 }
 // [ARCHI] fin
 
+// [ARCHI] début 8.3.4 : résultat du jour faussé par un retrait fait pendant que le terminal était arrêté (garé à 500, Bot 4.15) :
+// l'EA ne voit pas passer le dépôt / retrait (aucun événement), la base du jour n'est pas ajustée et le retrait compte comme une
+// perte (25/11 : « jour -588 € » après une nuit gagnante). Une fois, ~60 s après le démarrage (historique synchronisé), le
+// résultat du jour est recalculé depuis l'historique du courtier : base = solde - gains/pertes des trades du jour. L'écart vient
+// d'un mouvement de fonds manqué : il est appliqué comme un vrai dépôt / retrait (objectif ajusté, retrait enregistré par le bot).
+ulong g_cashResyncAt = 0;                // 0 = à faire ; sinon fait
+
+void DayCashResync()
+{
+   if(g_cashResyncAt != 0 || g_bt || MQLInfoInteger(MQL_TESTER)) return;
+   static ulong first = 0;
+   ulong now = GetTickCount64();
+   if(first == 0) { first = now; return; }
+   if(now - first < 60000 || !TerminalInfoInteger(TERMINAL_CONNECTED)) return;
+   datetime ln = LocalNow();
+   MqlDateTime d;
+   TimeToStruct(ln, d);
+   datetime srvNow = TimeTradeServer();
+   datetime s0 = (datetime)((long)ln - (d.hour * 3600 + d.min * 60 + d.sec) + ((long)srvNow - (long)ln));   // minuit du fuseau, en heure serveur
+   if(!HistorySelect(s0, srvNow + 3600)) return;
+   double pnl = 0, cash = 0;
+   int n = HistoryDealsTotal();
+   for(int i = 0; i < n; i++)
+   {
+      ulong tk = HistoryDealGetTicket(i);
+      if(tk == 0) continue;
+      long ty = HistoryDealGetInteger(tk, DEAL_TYPE);
+      double pr = HistoryDealGetDouble(tk, DEAL_PROFIT);
+      if(ty == DEAL_TYPE_BALANCE || ty == DEAL_TYPE_CREDIT || ty == DEAL_TYPE_BONUS)
+      {
+         if((long)HistoryDealGetInteger(tk, DEAL_TIME) > (long)srvNow - 30) return;   // mouvement tout récent : son événement arrive, on réessaie
+         cash += pr;
+      }
+      else
+         pnl += pr + HistoryDealGetDouble(tk, DEAL_SWAP) + HistoryDealGetDouble(tk, DEAL_COMMISSION) + HistoryDealGetDouble(tk, DEAL_FEE);
+   }
+   g_cashResyncAt = now;
+   double base = AccountInfoDouble(ACCOUNT_BALANCE) - pnl;   // solde de départ du jour + mouvements de fonds du jour
+   double missed = base - g_dayStartBal;
+   if(MathAbs(missed) < 0.01) return;
+   // sécurité : l'écart doit s'expliquer par les mouvements de fonds du jour (même sens, pas plus grand). Sinon (historique
+   // incomplet, autre cause) on ne touche à rien.
+   if(cash == 0 || missed * cash < 0 || MathAbs(missed) > MathAbs(cash) + 0.01) return;
+   Log("Mouvement de fonds non vu (terminal arrêté) : " + Sgn(missed) + " " + Cur() + " → résultat du jour corrigé");
+   AdjustForCashFlow(missed);                             // base du jour, objectif, pics + événement 💸 / 💰 pour le bot
+   DaySave();
+}
+// [ARCHI] fin
+
 // Appelé à chaque OnTimer (250 ms) : planifie lui-même ses tâches
 void ArchiTimer()
 {
@@ -1508,6 +1557,7 @@ void ArchiTimer()
       CutTick();                         // [ARCHI] 7.0.0 : coupure de l'objectif
       RepriseRetraitTimer();             // [ARCHI] 7.8.5 : reprise après retrait détectée aussi sans tick (marché fermé le week-end)
       TickFallback();                    // [ARCHI] 8.1.1 : plus de tick reçu → TP, objectif et seuil 500 gérés par le timer
+      DayCashResync();                   // [ARCHI] 8.3.4 : retrait / dépôt fait terminal arrêté → pas compté comme perte du jour
       // [ARCHI] 8.2.0 : Market Watch NON réduit (TrimMarketWatchTick plus appelé). 23/11 23:39 et 24/11 ~12:08 : les prix ont
       // cessé d'arriver juste après « 1 symbole masqué » (60 s après le démarrage), plus jamais d'OnTick ensuite.
       //--- cohérence avec le panneau / l'ancien code : arrêt manuel <-> PAUSE

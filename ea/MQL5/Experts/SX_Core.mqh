@@ -3,7 +3,7 @@
 //| Noyau : variables globales, registre de paramètres (tous les     |
 //| réglages sont modifiables à chaud), persistance, presets.        |
 //+------------------------------------------------------------------+
-#define SX_VERSION   "8.3.3"
+#define SX_VERSION   "8.3.4"
 #define SX_PREFIX    "SX4_"
 #define SX_MAXQ      40
 

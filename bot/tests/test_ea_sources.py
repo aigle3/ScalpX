@@ -90,3 +90,12 @@ def test_annulation_de_grille_jamais_renvoyee_trop_tot():
     t = _src("SX_Trade.mqh")
     assert "bool CancelPending(ulong t)" in t and "ORDER_STATE_REQUEST_CANCEL" in t
     assert t.count("if(CancelPending(t)) continue;") == 2 and t.count("CancelMark(t);") == 2
+
+
+def test_retrait_terminal_arrete_recale_le_resultat_du_jour():
+    a = _src("SX_Archi.mqh")
+    f = a[a.index("void DayCashResync()"):a.index("void ArchiTimer()")]
+    assert "DEAL_TYPE_BALANCE" in f and "AdjustForCashFlow(missed);" in f
+    assert "missed * cash < 0" in f and "MathAbs(missed) > MathAbs(cash) + 0.01" in f     # garde-fou
+    timer = a[a.index("void ArchiTimer()"):]
+    assert "DayCashResync();" in timer
