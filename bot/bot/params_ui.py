@@ -149,6 +149,11 @@ class ParamsUI:
         if inst.id.startswith("preset:"):
             return await self._set_preset(inst, idx, value, shown)
         members = getattr(inst, "members", None)
+        for m in (members if members is not None else [inst]):   # Bot 4.16.1 : réglé à la main → plus d'alignement auto
+            try:
+                self.ctx.db.meta_set(f"preset_ok:{m.id}", "1")
+            except Exception:
+                pass
         if members is not None:                                  # tous les comptes : même réglage partout
             res = await asyncio.gather(*[send_cmd(self.ctx, m, "SET", [key, value]) for m in members])
             await self.fetch(inst)

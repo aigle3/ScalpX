@@ -2161,18 +2161,49 @@ class Router:
             return "⚠️ .set de BASE non mis à jour"
         return "📦 .set de BASE mis à jour (nouveaux comptes)" if ok else ""
 
-    async def preset_for_new(self, iid: str) -> str:
-        """Nouveau compte : applique le preset ⭐ actif et vérifie. Renvoie la ligne à ajouter au message de création."""
+    NEW_ALIGN_S = 48 * 3600                                            # Bot 4.16.1 : fenêtre d'alignement d'un nouveau compte
+
+    def _align_pending(self, inst) -> bool:
+        """Bot 4.16.1 : compte créé depuis moins de 48 h, jamais encore conforme au preset ⭐ actif ni réglé à la main."""
+        return (time.time() - (inst.created_at or 0) < self.NEW_ALIGN_S
+                and not self.ctx.db.meta_get(f"preset_ok:{inst.id}"))
+
+    async def preset_for_new(self, iid: str, wait_s: float = 180.0, step_s: float = 10.0) -> str:
+        """Nouveau compte : applique le preset ⭐ actif et vérifie. Renvoie la ligne à ajouter au message de création.
+        Bot 4.16.1 : attend que l'EA réponde (il démarre juste) ; en cas d'échec, le contrôle des 5 min réessaie seul."""
         store = self.dash.store
         inst = self.ctx.db.get(iid)
         if not store.active or inst is None:
             return "💾 Aucun preset actif : réglages du .set de BASE."
-        ok, n, bad, err = await pui.apply_to(self.ctx, inst, store.presets[store.active])
+        t_end = time.monotonic() + wait_s
+        while True:
+            ok, n, bad, err = await pui.apply_to(self.ctx, inst, store.presets[store.active])
+            if not err or time.monotonic() + step_s > t_end:
+                break
+            await asyncio.sleep(step_s)
+        retry = " Nouvel essai automatique au prochain contrôle (5 min)."
         if err:
-            return f"⚠️ Preset « {esc(store.active)} » non appliqué : {esc(err)} (💾 Presets → 📤 Appliquer)."
+            return f"⚠️ Preset « {esc(store.active)} » non appliqué : {esc(err)}.{retry}"
         if not ok:
-            return f"⚠️ Preset « {esc(store.active)} » : refusé par l'EA pour {esc(pui._keys_text(bad))}."
+            return f"⚠️ Preset « {esc(store.active)} » : refusé par l'EA pour {esc(pui._keys_text(bad))}.{retry}"
+        self.ctx.db.meta_set(f"preset_ok:{iid}", "1")
         return f"💾 Preset « {esc(store.active)} » appliqué" + (f" ({n} réglage(s) ajusté(s))." if n else " (déjà conforme).")
+
+    async def _align_new(self, store, insts, chk) -> None:
+        """Bot 4.16.1 : nouveaux comptes encore différents du preset ⭐ actif → preset réappliqué automatiquement."""
+        for i in insts:
+            if not self._align_pending(i) or i.label in chk.unreadable:
+                continue
+            if i.label not in chk.diffs:
+                self.ctx.db.meta_set(f"preset_ok:{i.id}", "1")
+                continue
+            ok, n, bad, err = await pui.apply_to(self.ctx, i, store.presets[store.active])
+            if not err and ok:
+                chk.diffs.pop(i.label, None)
+                self.ctx.db.meta_set(f"preset_ok:{i.id}", "1")
+                log.info("nouveau compte %s : preset « %s » réappliqué (%d réglage(s))", i.label, store.active, n)
+            elif bad:
+                chk.diffs[i.label] = bad
 
     async def check_presets(self) -> None:
         """Compare les réglages de chaque robot lancé au preset actif (toutes les 5 min et après une application)."""
@@ -2183,7 +2214,9 @@ class Router:
         t0 = time.monotonic()
         insts = await asyncio.to_thread(self._running)                 # parcours des processus : hors de la boucle du bot
         t1 = time.monotonic()
-        self.dash.preset_check = await pui.check_all(self.ctx, store, insts)
+        chk = await pui.check_all(self.ctx, store, insts)
+        await self._align_new(store, insts, chk)
+        self.dash.preset_check = chk
         t2 = time.monotonic()
         await self.dash.refresh(force=True)
         t3 = time.monotonic()

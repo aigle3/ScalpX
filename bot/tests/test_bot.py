@@ -1108,7 +1108,8 @@ async def test_presets_centraux_creer_appliquer_modifier_controler(svc):
         await router.on_callback(f"p:{c}:s{idx}:1")
         assert await _until(lambda: ea.accounts[a.id]["params"]["fast"] == "13" and ea.accounts[b.id]["params"]["fast"] == "13")
         assert dash.store.presets["base"]["fast"] == "13"
-        # un robot changé à la main : 🟠 sur l'accueil après le contrôle
+        # un robot changé à la main : 🟠 sur l'accueil après le contrôle (compte déjà aligné : pas de réalignement auto)
+        ctx.db.meta_set(f"preset_ok:{b.id}", "1")
         ea.accounts[b.id]["params"]["lot"] = "0.05 lot"
         await router.check_presets()
         assert list(dash.preset_check.diffs) == [b.label]
@@ -1140,6 +1141,30 @@ async def test_nouveau_compte_recoit_le_preset_actif_et_le_set_de_base(svc):
         line = await router.preset_for_new(a.id)
         assert "Preset « Martin » appliqué" in line
         assert ea.accounts[a.id]["params"]["lot"] == "0.03 lot" and ea.accounts[a.id]["params"]["tz"] == "UTC"
+        assert ctx.db.meta_get(f"preset_ok:{a.id}") == "1"
+    finally:
+        await ea.stop()
+
+
+@pytest.mark.asyncio
+async def test_nouveau_compte_realigne_automatiquement_sur_le_preset_actif(svc):
+    """Bot 4.16.1 : nouveau compte resté différent du preset ⭐ actif (EA pas prêt à la création) → réappliqué au contrôle ;
+    une fois aligné, un écart ultérieur est respecté."""
+    ctx, sender, dash, router, notifier, ea, conf = svc
+    a = seed(ctx_stack(svc), 82, "Demo-Server 1")
+    dash.store.put("Martin", {"lot": "0.03"})
+    dash.store.set_active("Martin")
+    assert "non appliqué" in await router.preset_for_new(a.id, wait_s=0)          # EA pas encore lancé
+    assert not ctx.db.meta_get(f"preset_ok:{a.id}")
+    ea.start()
+    await asyncio.sleep(0.3)
+    try:
+        await router.check_presets()                                                   # lot par défaut de l'EA ≠ 0.03
+        assert ea.accounts[a.id]["params"]["lot"] == "0.03 lot"
+        assert a.label not in dash.preset_check.diffs and ctx.db.meta_get(f"preset_ok:{a.id}") == "1"
+        ea.accounts[a.id]["params"]["lot"] = "0.05 lot"                                # ensuite réglé ailleurs : respecté
+        await router.check_presets()
+        assert ea.accounts[a.id]["params"]["lot"] == "0.05 lot" and a.label in dash.preset_check.diffs
     finally:
         await ea.stop()
 
